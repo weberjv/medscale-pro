@@ -15,7 +15,7 @@ import { syncStateToSupabase } from '@/utils/migrateLegacyLocalStorage';
 
 const DEFAULT_CONFIG = {
   appName: 'MedScale Pro',
-  hospitalName: 'Hospital Geral & Maternidade',
+  hospitalName: 'Hospital Glória Dor',
   sectorUnitName: 'Emergência Adulta - HGD',
   cpfLabel: 'CPF',
   crmLabel: 'CRM',
@@ -411,6 +411,9 @@ export default function MedScaleApp() {
   const [payrollStatus, setPayrollStatus] = useState<Record<number, string>>({ 1: 'Fechada', 2: 'Pendente', 3: 'Pago', 5: 'Pago' });
   const [hourlyDemand, setHourlyDemand] = useState<any>(DEFAULT_HOURLY_DEMAND);
   const [occurrences, setOccurrences] = useState<any[]>(initialOccurrences);
+  useEffect(() => {
+    document.title = `${config.appName} • ${config.sectorUnitName || 'Emergência Adulta - HGD'}`;
+  }, [config.appName, config.sectorUnitName]);
 
   // Adicionais incidindo no mês de competência por médico: Record<competenceMonth, Record<doctorId, string[]>>
   const [competenceMonthlyAdditionals, setCompetenceMonthlyAdditionals] = useState<Record<string, Record<number, string[]>>>({
@@ -3324,8 +3327,7 @@ export default function MedScaleApp() {
               </div>
               <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-lg text-sm">Acessar Plataforma</button>
               <div className="pt-3 border-t flex justify-between text-xs">
-                <button type="button" onClick={() => { setLoginEmail('gestor@medscale.com.br'); setLoginPassword('admin123'); }} className="text-blue-600 font-bold hover:underline">Acesso Gestor</button>
-                <button type="button" onClick={() => { setLoginEmail('carlos@medscale.com.br'); setLoginPassword('123'); }} className="text-emerald-700 font-bold hover:underline">Acesso Médico (Carlos)</button>
+          
               </div>
             </form>
           ) : (
