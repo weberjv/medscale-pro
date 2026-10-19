@@ -1,16 +1,15 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import {
-  Users, Calendar, Clock, DollarSign, FileText, Settings, LogOut,
-  Plus, Trash2, CheckCircle, XCircle, AlertCircle, Download, Edit3,
-  KeyRound, Shield, UserCheck, UserX, Search, RefreshCw, Briefcase,
-  Building2, History, Award, ArrowLeftRight
+  Users, Calendar, DollarSign, LogOut,
+  Plus, Trash2, CheckCircle, AlertCircle, Download,
+  Search, History
 } from 'lucide-react';
 
 // --- CONFIGURAÇÃO SUPABASE ---
-function createClient() {
+function getSupabaseClient() {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || '';
   const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || '';
   if (!url || !key) return null;
@@ -27,7 +26,7 @@ const DEFAULT_CONFIG = {
   baseHourlyRate: 180,
   weekendBonusPercent: 20,
   nightBonusPercent: 15,
-  bonusIncidenceRule: 'shift', // 'shift' | 'competence'
+  bonusIncidenceRule: 'shift',
 };
 
 const SPECIALTIES = [
@@ -105,7 +104,7 @@ const initialShifts = [
   {
     id: 'shift-1',
     doctorId: 'doc-1',
-    date: new Date().toISOString().slice(0, 10),
+    date: '2025-05-15',
     period: 'Diurno (07h-19h)',
     hours: 12,
     sector: 'Sala Vermelha / Emergência',
@@ -115,7 +114,7 @@ const initialShifts = [
   {
     id: 'shift-2',
     doctorId: 'doc-2',
-    date: new Date().toISOString().slice(0, 10),
+    date: '2025-05-15',
     period: 'Noturno (19h-07h)',
     hours: 12,
     sector: 'Box de Emergência / Evolução',
@@ -124,15 +123,8 @@ const initialShifts = [
   }
 ];
 
-const DEFAULT_HOURLY_DEMAND = Array.from({ length: 24 }, (_, h) => ({
-  hour: `${String(h).padStart(2, '0')}:00`,
-  requiredDoctors: h >= 7 && h < 19 ? 4 : 3
-}));
-
 export default function MedScaleApp() {
-  const supabase = useMemo(() => createClient(), []);
-  const [syncingSupabase, setSyncingSupabase] = useState(false);
-  const [syncNotification, setSyncNotification] = useState<string | null>(null);
+  const [isLoaded, setIsLoaded] = useState(false);
 
   // --- ESTADOS GERAIS ---
   const [config, setConfig] = useState<any>(DEFAULT_CONFIG);
@@ -142,7 +134,6 @@ export default function MedScaleApp() {
   const [vacations, setVacations] = useState<any[]>([]);
   const [courses, setCourses] = useState<any[]>([]);
   const [occurrences, setOccurrences] = useState<any[]>([]);
-  const [hourlyDemand, setHourlyDemand] = useState<any[]>(DEFAULT_HOURLY_DEMAND);
   const [adminCredentials, setAdminCredentials] = useState({
     username: 'gestor',
     email: 'gestor@medscale.com.br',
@@ -159,7 +150,7 @@ export default function MedScaleApp() {
   // Estado Esqueci Minha Senha
   const [forgotForm, setForgotForm] = useState({
     identifier: '',
-    securityDoc: '', // CPF ou CRM
+    securityDoc: '',
     newPassword: '',
     confirmPassword: ''
   });
@@ -186,10 +177,10 @@ export default function MedScaleApp() {
   const [doctorFilter, setDoctorFilter] = useState<'all' | 'active' | 'inactive' | 'pending'>('all');
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Modal de Edição Completa / Carga Horária do Médico
+  // Modal de Edição Completa / Carga Horária do Médico (sem new Date() no estado inicial)
   const [editingDoctor, setEditingDoctor] = useState<any | null>(null);
   const [newWorkloadEntry, setNewWorkloadEntry] = useState({
-    date: new Date().toISOString().slice(0, 10),
+    date: '',
     type: 'Aumento de Carga Horária',
     description: ''
   });
@@ -209,7 +200,7 @@ export default function MedScaleApp() {
     razaoSocial: '',
     cnpj: '',
     password: '123',
-    startDate: new Date().toISOString().slice(0, 10),
+    startDate: '',
     fixedShiftsDescription: '',
     hourlyRate: 180
   });
@@ -217,13 +208,21 @@ export default function MedScaleApp() {
   // Modal de Novo Plantão
   const [newShiftForm, setNewShiftForm] = useState({
     doctorId: '',
-    date: new Date().toISOString().slice(0, 10),
+    date: '',
     period: 'Diurno (07h-19h)',
     hours: 12,
     sector: 'Emergência Adulta',
     isWeekendOrHoliday: false,
     isNight: false
   });
+
+  // Inicializa as datas padrão somente no navegador (evita erro de prerender na Vercel)
+  useEffect(() => {
+    const today = new Date().toISOString().slice(0, 10);
+    setNewWorkloadEntry((prev) => ({ ...prev, date: prev.date || today }));
+    setNewDocForm((prev) => ({ ...prev, startDate: prev.startDate || today }));
+    setNewShiftForm((prev) => ({ ...prev, date: prev.date || today }));
+  }, []);
 
   // --- TÍTULO DA ABA DO NAVEGADOR ---
   useEffect(() => {
@@ -247,6 +246,7 @@ export default function MedScaleApp() {
           if (parsed.adminCredentials) setAdminCredentials(parsed.adminCredentials);
         }
 
+        const supabase = getSupabaseClient();
         if (supabase) {
           const { data } = await supabase
             .from('medscale_state')
@@ -267,10 +267,12 @@ export default function MedScaleApp() {
         }
       } catch (e) {
         console.error('Erro ao carregar estado inicial:', e);
+      } finally {
+        setIsLoaded(true);
       }
     };
     loadData();
-  }, [supabase]);
+  }, []);
 
   const persistState = async (customDoctors?: any[], customShifts?: any[]) => {
     const payload = {
@@ -286,19 +288,19 @@ export default function MedScaleApp() {
     };
     try {
       localStorage.setItem('medscale_hgd_state_v2', JSON.stringify(payload));
+      const supabase = getSupabaseClient();
       if (supabase) {
-        setSyncingSupabase(true);
         await supabase.from('medscale_state').upsert({ id: 'hgd_main', payload });
-        setSyncingSupabase(false);
       }
     } catch (e) {
-      setSyncingSupabase(false);
+      console.error('Erro ao salvar estado:', e);
     }
   };
 
   useEffect(() => {
+    if (!isLoaded) return;
     persistState();
-  }, [config, doctors, shifts, swaps, vacations, courses, occurrences, adminCredentials]);
+  }, [isLoaded, config, doctors, shifts, swaps, vacations, courses, occurrences, adminCredentials]);
 
   // --- FUNÇÕES DE LOGIN / CADASTRO / RECUPERAÇÃO DE SENHA ---
   const handleLogin = (e: React.FormEvent) => {
@@ -312,7 +314,6 @@ export default function MedScaleApp() {
       return;
     }
 
-    // Verifica login do Gestor (aceita username "gestor" ou o e-mail do gestor)
     if (
       (identifier === adminCredentials.username.toLowerCase() ||
         identifier === adminCredentials.email.toLowerCase()) &&
@@ -323,7 +324,6 @@ export default function MedScaleApp() {
       return;
     }
 
-    // Verifica login de Médico (por username ou e-mail)
     const foundDoc = doctors.find(
       (d) =>
         (d.username && d.username.toLowerCase() === identifier) ||
@@ -384,6 +384,7 @@ export default function MedScaleApp() {
       return;
     }
 
+    const today = new Date().toISOString().slice(0, 10);
     const newRequest = {
       id: `doc-${Date.now()}`,
       name: regForm.name.trim(),
@@ -403,11 +404,11 @@ export default function MedScaleApp() {
       endDate: '',
       fixedShiftsDescription: '',
       hourlyRate: config.baseHourlyRate || 180,
-      requestedAt: new Date().toISOString().slice(0, 10),
+      requestedAt: today,
       workloadHistory: [
         {
           id: `wh-${Date.now()}`,
-          date: new Date().toISOString().slice(0, 10),
+          date: today,
           type: 'Solicitação de Cadastro',
           description: 'Solicitação enviada pelo médico na plataforma.'
         }
@@ -551,9 +552,10 @@ export default function MedScaleApp() {
 
   const handleAddWorkloadRecord = () => {
     if (!editingDoctor || !newWorkloadEntry.description.trim()) return;
+    const today = new Date().toISOString().slice(0, 10);
     const entry = {
       id: `wh-${Date.now()}`,
-      date: newWorkloadEntry.date,
+      date: newWorkloadEntry.date || today,
       type: newWorkloadEntry.type,
       description: newWorkloadEntry.description.trim()
     };
@@ -566,7 +568,7 @@ export default function MedScaleApp() {
     setDoctors(updatedList);
     persistState(updatedList);
     setNewWorkloadEntry({
-      date: new Date().toISOString().slice(0, 10),
+      date: today,
       type: 'Aumento de Carga Horária',
       description: ''
     });
@@ -596,17 +598,19 @@ export default function MedScaleApp() {
   const handleCreateDoctorByManager = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newDocForm.name || !newDocForm.username) return;
+    const today = new Date().toISOString().slice(0, 10);
     const cleanUser = newDocForm.username.trim().toLowerCase().replace(/\s+/g, '.');
     const created = {
       id: `doc-${Date.now()}`,
       ...newDocForm,
       username: cleanUser,
+      startDate: newDocForm.startDate || today,
       status: 'active',
       endDate: '',
       workloadHistory: [
         {
           id: `wh-${Date.now()}`,
-          date: newDocForm.startDate || new Date().toISOString().slice(0, 10),
+          date: newDocForm.startDate || today,
           type: 'Admissão / Início',
           description: `Cadastrado pelo Gestor. Plantões fixos iniciais: ${newDocForm.fixedShiftsDescription || 'A definir'}`
         }
@@ -619,13 +623,14 @@ export default function MedScaleApp() {
     setNewDocForm({
       name: '', username: '', cpf: '', birthDate: '', email: '', phone: '',
       crm: '', rqe: '', specialty: 'Clínica Médica', razaoSocial: '', cnpj: '',
-      password: '123', startDate: new Date().toISOString().slice(0, 10),
+      password: '123', startDate: today,
       fixedShiftsDescription: '', hourlyRate: 180
     });
   };
 
   // --- EXPORTAR PLANILHA COMPLETA (CSV PARA EXCEL) ---
   const handleExportDoctorsCSV = () => {
+    const today = new Date().toISOString().slice(0, 10);
     const headers = [
       'Nome Completo',
       'Username (Login)',
@@ -680,7 +685,7 @@ export default function MedScaleApp() {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `corpo_clinico_emergencia_hgd_${new Date().toISOString().slice(0, 10)}.csv`);
+    link.setAttribute('download', `corpo_clinico_emergencia_hgd_${today}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -700,7 +705,6 @@ export default function MedScaleApp() {
             </h1>
           </div>
 
-          {/* Abas Entrar / Solicitar Cadastro */}
           <div className="grid grid-cols-2 bg-slate-100 p-1 rounded-xl mb-6 text-sm font-semibold">
             <button
               type="button"
@@ -868,7 +872,6 @@ export default function MedScaleApp() {
                 </div>
               </div>
 
-              {/* CAMPOS NOVOS: RAZÃO SOCIAL E CNPJ */}
               <div className="p-3 bg-slate-50 rounded-lg border border-slate-200 space-y-2">
                 <p className="text-xs font-extrabold text-slate-700 uppercase">Dados Pessoa Jurídica (PJ)</p>
                 <div>
@@ -1050,7 +1053,6 @@ export default function MedScaleApp() {
   // --- PAINEL PRINCIPAL (GESTOR E MÉDICO) ---
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 flex flex-col">
-      {/* BARRA SUPERIOR */}
       <header className="bg-slate-900 text-white px-6 py-4 flex flex-wrap items-center justify-between gap-4 shadow-md">
         <div className="flex items-center gap-3">
           <div className="bg-blue-600 p-2 rounded-lg font-extrabold text-lg">HGD</div>
@@ -1088,7 +1090,6 @@ export default function MedScaleApp() {
         </div>
       </header>
 
-      {/* MENU DE NAVEGAÇÃO */}
       <nav className="bg-white border-b border-slate-200 px-6 py-2 flex flex-wrap gap-2">
         {currentUser.role === 'admin' && (
           <button
@@ -1130,14 +1131,9 @@ export default function MedScaleApp() {
         )}
       </nav>
 
-      {/* CONTEÚDO PRINCIPAL */}
       <main className="flex-1 p-6 max-w-7xl w-full mx-auto space-y-6">
-        {/* ==========================================
-            ABA 1: CORPO CLÍNICO & APROVAÇÃO (GESTOR)
-           ========================================== */}
         {activeTab === 'doctors' && currentUser.role === 'admin' && (
           <div className="space-y-6">
-            {/* SEÇÃO EM DESTAQUE: SOLICITAÇÕES DE CADASTRO PENDENTES */}
             {pendingDoctors.length > 0 && (
               <div className="bg-amber-50 border-2 border-amber-300 rounded-xl p-5 shadow-sm">
                 <div className="flex items-center justify-between mb-4">
@@ -1204,7 +1200,6 @@ export default function MedScaleApp() {
               </div>
             )}
 
-            {/* CABEÇALHO DO CORPO CLÍNICO + BOTÃO DE PLANILHA */}
             <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200 space-y-4">
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div>
@@ -1233,7 +1228,6 @@ export default function MedScaleApp() {
                 </div>
               </div>
 
-              {/* FILTROS E BUSCA */}
               <div className="flex flex-wrap items-center justify-between gap-4 pt-2 border-t border-slate-100">
                 <div className="flex flex-wrap gap-1.5">
                   <button
@@ -1282,7 +1276,6 @@ export default function MedScaleApp() {
                 </div>
               </div>
 
-              {/* TABELA DO CORPO CLÍNICO */}
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse text-xs">
                   <thead>
@@ -1311,7 +1304,6 @@ export default function MedScaleApp() {
                           )}
                         </td>
 
-                        {/* STATUS ATIVO / INATIVO / PENDENTE */}
                         <td className="py-3 px-3">
                           {doc.status === 'pending' ? (
                             <button
@@ -1336,7 +1328,6 @@ export default function MedScaleApp() {
                           )}
                         </td>
 
-                        {/* ESPECIALIDADE EDITÁVEL DIRETO NA TABELA */}
                         <td className="py-3 px-3">
                           <select
                             value={doc.specialty || 'Clínica Médica'}
@@ -1355,13 +1346,11 @@ export default function MedScaleApp() {
                           </select>
                         </td>
 
-                        {/* RAZÃO SOCIAL E CNPJ */}
                         <td className="py-3 px-3">
                           <div className="font-semibold text-slate-800">{doc.razaoSocial || '-'}</div>
                           <div className="text-slate-500">{doc.cnpj || '-'}</div>
                         </td>
 
-                        {/* DATA DE INÍCIO EDITÁVEL */}
                         <td className="py-3 px-3">
                           <input
                             type="date"
@@ -1377,7 +1366,6 @@ export default function MedScaleApp() {
                           />
                         </td>
 
-                        {/* DATA DE SAÍDA EDITÁVEL */}
                         <td className="py-3 px-3">
                           <input
                             type="date"
@@ -1396,7 +1384,6 @@ export default function MedScaleApp() {
                           />
                         </td>
 
-                        {/* BOTÕES DE AÇÃO */}
                         <td className="py-3 px-3 text-right">
                           <div className="flex items-center justify-end gap-1.5">
                             <button
@@ -1425,9 +1412,6 @@ export default function MedScaleApp() {
           </div>
         )}
 
-        {/* ==========================================
-            ABA 2: ESCALA DE PLANTÕES
-           ========================================== */}
         {activeTab === 'schedule' && (
           <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200 space-y-6">
             <h2 className="text-xl font-extrabold text-slate-900">Escala de Plantões • {config.sectorUnitName}</h2>
@@ -1541,9 +1525,6 @@ export default function MedScaleApp() {
           </div>
         )}
 
-        {/* ==========================================
-            ABA 3: FINANCEIRO / FOLHA PJ
-           ========================================== */}
         {activeTab === 'payroll' && currentUser.role === 'admin' && (
           <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200 space-y-4">
             <h2 className="text-xl font-extrabold text-slate-900">Relatório Financeiro & Dados PJ para Faturamento</h2>
@@ -1584,9 +1565,6 @@ export default function MedScaleApp() {
         )}
       </main>
 
-      {/* =========================================================================
-          MODAL: FICHA COMPLETA DO MÉDICO E HISTÓRICO DE ALTERAÇÕES DE CARGA HORÁRIA
-         ========================================================================= */}
       {editingDoctor && (
         <div className="fixed inset-0 bg-slate-950/70 flex items-center justify-center p-4 z-50 overflow-y-auto">
           <div className="bg-white rounded-2xl max-w-3xl w-full p-6 shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto">
@@ -1674,7 +1652,6 @@ export default function MedScaleApp() {
                 </div>
               </div>
 
-              {/* RAZÃO SOCIAL E CNPJ */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200">
                 <div>
                   <label className="font-bold text-slate-700 block mb-1">Razão Social (PJ)</label>
@@ -1696,7 +1673,6 @@ export default function MedScaleApp() {
                 </div>
               </div>
 
-              {/* DATAS DE INÍCIO, SAÍDA E PLANTÕES FIXOS */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 bg-blue-50/60 p-3 rounded-xl border border-blue-200">
                 <div>
                   <label className="font-bold text-blue-950 block mb-1">Data de Início na Unidade</label>
@@ -1728,7 +1704,6 @@ export default function MedScaleApp() {
                 </div>
               </div>
 
-              {/* LINHA DO TEMPO / HISTÓRICO DE ALTERAÇÕES DE CARGA HORÁRIA */}
               <div className="border border-slate-200 rounded-xl p-4 space-y-3">
                 <h4 className="font-extrabold text-slate-900 text-sm flex items-center gap-1.5">
                   <History className="w-4 h-4 text-blue-600" />
@@ -1830,9 +1805,6 @@ export default function MedScaleApp() {
         </div>
       )}
 
-      {/* =========================================================================
-          MODAL: CADASTRAR NOVO MÉDICO DIRETO PELO GESTOR
-         ========================================================================= */}
       {showNewDoctorModal && (
         <div className="fixed inset-0 bg-slate-950/70 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
