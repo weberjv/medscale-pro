@@ -3,9 +3,9 @@
 import React, { useState, useEffect } from 'react';
 import { createClient as createSupabaseClient } from '@supabase/supabase-js';
 import {
-  Users, Calendar, DollarSign, LogOut,
-  Plus, Trash2, CheckCircle, AlertCircle, Download,
-  Search, History
+  Users, Calendar, Clock, DollarSign, FileText, Settings, LogOut,
+  Plus, Trash2, CheckCircle, XCircle, AlertCircle, Download,
+  Search, History, RefreshCw, Award, Briefcase, Activity, User
 } from 'lucide-react';
 
 // --- CONFIGURAÇÃO SUPABASE ---
@@ -26,7 +26,7 @@ const DEFAULT_CONFIG = {
   baseHourlyRate: 180,
   weekendBonusPercent: 20,
   nightBonusPercent: 15,
-  bonusIncidenceRule: 'shift',
+  bonusIncidenceRule: 'shift', // 'shift' (Por Plantão) | 'competence' (Por Mês de Competência)
 };
 
 const SPECIALTIES = [
@@ -40,6 +40,18 @@ const SPECIALTIES = [
   'Anestesiologia',
   'Outra'
 ];
+
+const HOURS_24H = [
+  7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
+  19, 20, 21, 22, 23, 0, 1, 2, 3, 4, 5, 6
+];
+
+const DEFAULT_HOURLY_DEMAND: Record<number, number> = {
+  7: 4, 8: 4, 9: 4, 10: 4, 11: 4, 12: 4,
+  13: 4, 14: 4, 15: 4, 16: 4, 17: 4, 18: 4,
+  19: 3, 20: 3, 21: 3, 22: 3, 23: 3, 0: 3,
+  1: 3, 2: 3, 3: 3, 4: 3, 5: 3, 6: 3
+};
 
 const initialDoctors = [
   {
@@ -61,6 +73,8 @@ const initialDoctors = [
     endDate: '',
     fixedShiftsDescription: 'Segundas Diurno (12h) e Quintas Noturno (12h)',
     hourlyRate: 180,
+    manualAdjustment: 0,
+    adjustmentNote: '',
     workloadHistory: [
       {
         id: 'wh-1',
@@ -89,6 +103,8 @@ const initialDoctors = [
     endDate: '',
     fixedShiftsDescription: 'Terças e Quartas Diurno (12h)',
     hourlyRate: 180,
+    manualAdjustment: 0,
+    adjustmentNote: '',
     workloadHistory: [
       {
         id: 'wh-2',
@@ -106,6 +122,8 @@ const initialShifts = [
     doctorId: 'doc-1',
     date: '2025-05-15',
     period: 'Diurno (07h-19h)',
+    startHour: 7,
+    endHour: 19,
     hours: 12,
     sector: 'Sala Vermelha / Emergência',
     isWeekendOrHoliday: false,
@@ -116,12 +134,84 @@ const initialShifts = [
     doctorId: 'doc-2',
     date: '2025-05-15',
     period: 'Noturno (19h-07h)',
+    startHour: 19,
+    endHour: 7,
     hours: 12,
     sector: 'Box de Emergência / Evolução',
     isWeekendOrHoliday: false,
     isNight: true
   }
 ];
+
+const initialSwaps = [
+  {
+    id: 'swap-1',
+    shiftId: 'shift-1',
+    fromDoctorId: 'doc-1',
+    toDoctorId: 'doc-2',
+    date: '2025-05-15',
+    period: 'Diurno (07h-19h)',
+    type: 'Troca de Plantão',
+    reason: 'Congresso Médico',
+    status: 'Pendente' // 'Pendente' | 'Aprovada' | 'Recusada'
+  }
+];
+
+const initialVacations = [
+  {
+    id: 'vac-1',
+    doctorId: 'doc-1',
+    monthCompetence: '2025-07',
+    startDate: '2025-07-01',
+    endDate: '2025-07-15',
+    type: 'Férias Programadas',
+    status: 'Aprovado',
+    notes: '15 dias de recesso programado'
+  }
+];
+
+const initialCourses = [
+  {
+    id: 'course-1',
+    doctorId: 'doc-1',
+    courseName: 'ACLS (Suporte Avançado de Vida em Cardiologia)',
+    institution: 'AHA / SBC',
+    completionDate: '2024-05-10',
+    expiryDate: '2026-05-10',
+    status: 'Válido'
+  },
+  {
+    id: 'course-2',
+    doctorId: 'doc-2',
+    courseName: 'ATLS (Suporte Avançado de Vida no Trauma)',
+    institution: 'ACS / CBC',
+    completionDate: '2024-02-15',
+    expiryDate: '2028-02-15',
+    status: 'Válido'
+  }
+];
+
+const initialOccurrences = [
+  {
+    id: 'occ-1',
+    doctorId: 'doc-1',
+    date: '2025-05-10',
+    type: 'Elogio / Destaque Assistencial',
+    severity: 'Positiva',
+    description: 'Excelente condução de parada cardiorrespiratória na Sala Vermelha.'
+  }
+];
+
+function isDoctorWorkingAtHour(shift: any, h: number): boolean {
+  const p = shift.period || '';
+  if (p.includes('24h')) return true;
+  if (p.includes('07h-19h')) return h >= 7 && h < 19;
+  if (p.includes('19h-07h')) return h >= 19 || h < 7;
+  if (p.includes('07h-13h')) return h >= 7 && h < 13;
+  if (p.includes('13h-19h')) return h >= 13 && h < 19;
+  if (p.includes('19h-01h')) return h >= 19 || h < 1;
+  return h >= 7 && h < 19;
+}
 
 export default function MedScaleApp() {
   const [isLoaded, setIsLoaded] = useState(false);
@@ -130,10 +220,17 @@ export default function MedScaleApp() {
   const [config, setConfig] = useState<any>(DEFAULT_CONFIG);
   const [doctors, setDoctors] = useState<any[]>(initialDoctors);
   const [shifts, setShifts] = useState<any[]>(initialShifts);
-  const [swaps, setSwaps] = useState<any[]>([]);
-  const [vacations, setVacations] = useState<any[]>([]);
-  const [courses, setCourses] = useState<any[]>([]);
-  const [occurrences, setOccurrences] = useState<any[]>([]);
+  const [swaps, setSwaps] = useState<any[]>(initialSwaps);
+  const [vacations, setVacations] = useState<any[]>(initialVacations);
+  const [courses, setCourses] = useState<any[]>(initialCourses);
+  const [occurrences, setOccurrences] = useState<any[]>(initialOccurrences);
+  const [hourlyDemand, setHourlyDemand] = useState<Record<number, number>>(DEFAULT_HOURLY_DEMAND);
+  const [payrollStatus, setPayrollStatus] = useState<Record<string, string>>({
+    '2025-05': 'Aberta'
+  });
+  const [selectedMonth, setSelectedMonth] = useState('2025-05');
+  const [selectedMapDate, setSelectedMapDate] = useState('2025-05-15');
+
   const [adminCredentials, setAdminCredentials] = useState({
     username: 'gestor',
     email: 'gestor@medscale.com.br',
@@ -177,7 +274,7 @@ export default function MedScaleApp() {
   const [doctorFilter, setDoctorFilter] = useState<'all' | 'active' | 'inactive' | 'pending'>('all');
   const [searchTerm, setSearchTerm] = useState('');
 
-  // Modal de Edição Completa / Carga Horária do Médico (sem new Date() no estado inicial)
+  // Modal de Edição Completa / Carga Horária do Médico
   const [editingDoctor, setEditingDoctor] = useState<any | null>(null);
   const [newWorkloadEntry, setNewWorkloadEntry] = useState({
     date: '',
@@ -205,23 +302,72 @@ export default function MedScaleApp() {
     hourlyRate: 180
   });
 
-  // Modal de Novo Plantão
+  // Formulários dos Módulos
   const [newShiftForm, setNewShiftForm] = useState({
     doctorId: '',
     date: '',
     period: 'Diurno (07h-19h)',
     hours: 12,
-    sector: 'Emergência Adulta',
+    sector: 'Sala Vermelha / Emergência',
     isWeekendOrHoliday: false,
     isNight: false
   });
 
-  // Inicializa as datas padrão somente no navegador (evita erro de prerender na Vercel)
+  const [newSwapForm, setNewSwapForm] = useState({
+    shiftId: '',
+    fromDoctorId: '',
+    toDoctorId: '',
+    date: '',
+    period: 'Diurno (07h-19h)',
+    type: 'Troca de Plantão',
+    reason: ''
+  });
+
+  const [newVacationForm, setNewVacationForm] = useState({
+    doctorId: '',
+    monthCompetence: '2025-07',
+    startDate: '',
+    endDate: '',
+    type: 'Férias Programadas',
+    status: 'Aprovado',
+    notes: ''
+  });
+
+  const [newCourseForm, setNewCourseForm] = useState({
+    doctorId: '',
+    courseName: 'ACLS',
+    institution: '',
+    completionDate: '',
+    expiryDate: '',
+    status: 'Válido'
+  });
+
+  const [newOccurrenceForm, setNewOccurrenceForm] = useState({
+    doctorId: '',
+    date: '',
+    type: 'Atraso no Plantão',
+    severity: 'Média',
+    description: ''
+  });
+
+  // Inicializa datas no cliente para evitar erro de prerender na Vercel
   useEffect(() => {
     const today = new Date().toISOString().slice(0, 10);
+    const currentMonth = today.slice(0, 7);
+    setSelectedMonth(currentMonth);
+    setSelectedMapDate(today);
     setNewWorkloadEntry((prev) => ({ ...prev, date: prev.date || today }));
     setNewDocForm((prev) => ({ ...prev, startDate: prev.startDate || today }));
     setNewShiftForm((prev) => ({ ...prev, date: prev.date || today }));
+    setNewSwapForm((prev) => ({ ...prev, date: prev.date || today }));
+    setNewVacationForm((prev) => ({
+      ...prev,
+      monthCompetence: currentMonth,
+      startDate: prev.startDate || today,
+      endDate: prev.endDate || today
+    }));
+    setNewCourseForm((prev) => ({ ...prev, completionDate: prev.completionDate || today }));
+    setNewOccurrenceForm((prev) => ({ ...prev, date: prev.date || today }));
   }, []);
 
   // --- TÍTULO DA ABA DO NAVEGADOR ---
@@ -243,6 +389,8 @@ export default function MedScaleApp() {
           if (parsed.vacations) setVacations(parsed.vacations);
           if (parsed.courses) setCourses(parsed.courses);
           if (parsed.occurrences) setOccurrences(parsed.occurrences);
+          if (parsed.hourlyDemand) setHourlyDemand(parsed.hourlyDemand);
+          if (parsed.payrollStatus) setPayrollStatus(parsed.payrollStatus);
           if (parsed.adminCredentials) setAdminCredentials(parsed.adminCredentials);
         }
 
@@ -262,6 +410,8 @@ export default function MedScaleApp() {
             if (p.vacations) setVacations(p.vacations);
             if (p.courses) setCourses(p.courses);
             if (p.occurrences) setOccurrences(p.occurrences);
+            if (p.hourlyDemand) setHourlyDemand(p.hourlyDemand);
+            if (p.payrollStatus) setPayrollStatus(p.payrollStatus);
             if (p.adminCredentials) setAdminCredentials(p.adminCredentials);
           }
         }
@@ -283,6 +433,8 @@ export default function MedScaleApp() {
       vacations,
       courses,
       occurrences,
+      hourlyDemand,
+      payrollStatus,
       adminCredentials,
       updatedAt: new Date().toISOString()
     };
@@ -300,7 +452,7 @@ export default function MedScaleApp() {
   useEffect(() => {
     if (!isLoaded) return;
     persistState();
-  }, [isLoaded, config, doctors, shifts, swaps, vacations, courses, occurrences, adminCredentials]);
+  }, [isLoaded, config, doctors, shifts, swaps, vacations, courses, occurrences, hourlyDemand, payrollStatus, adminCredentials]);
 
   // --- FUNÇÕES DE LOGIN / CADASTRO / RECUPERAÇÃO DE SENHA ---
   const handleLogin = (e: React.FormEvent) => {
@@ -404,6 +556,8 @@ export default function MedScaleApp() {
       endDate: '',
       fixedShiftsDescription: '',
       hourlyRate: config.baseHourlyRate || 180,
+      manualAdjustment: 0,
+      adjustmentNote: '',
       requestedAt: today,
       workloadHistory: [
         {
@@ -607,6 +761,8 @@ export default function MedScaleApp() {
       startDate: newDocForm.startDate || today,
       status: 'active',
       endDate: '',
+      manualAdjustment: 0,
+      adjustmentNote: '',
       workloadHistory: [
         {
           id: `wh-${Date.now()}`,
@@ -628,7 +784,7 @@ export default function MedScaleApp() {
     });
   };
 
-  // --- EXPORTAR PLANILHA COMPLETA (CSV PARA EXCEL) ---
+  // --- EXPORTAR PLANILHA COMPLETA DO CORPO CLÍNICO (CSV PARA EXCEL) ---
   const handleExportDoctorsCSV = () => {
     const today = new Date().toISOString().slice(0, 10);
     const headers = [
@@ -689,6 +845,50 @@ export default function MedScaleApp() {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  // --- CÁLCULO DE FOLHA DE PAGAMENTO COM REGRA DE ADICIONAIS ---
+  const calculateDoctorPayroll = (doc: any) => {
+    const docShifts = shifts.filter((s) => {
+      if (s.doctorId !== doc.id) return false;
+      if (config.bonusIncidenceRule === 'competence') {
+        return (s.date || '').startsWith(selectedMonth);
+      }
+      return true;
+    });
+
+    const rate = Number(doc.hourlyRate) || Number(config.baseHourlyRate) || 180;
+    const nightPct = (Number(config.nightBonusPercent) || 15) / 100;
+    const wkndPct = (Number(config.weekendBonusPercent) || 20) / 100;
+
+    let baseHours = 0;
+    let nightHours = 0;
+    let weekendHours = 0;
+
+    docShifts.forEach((s) => {
+      const h = Number(s.hours) || 12;
+      baseHours += h;
+      if (s.isNight || (s.period && s.period.includes('Noturno'))) nightHours += h;
+      if (s.isWeekendOrHoliday) weekendHours += h;
+    });
+
+    const baseValue = baseHours * rate;
+    const nightBonus = nightHours * rate * nightPct;
+    const weekendBonus = weekendHours * rate * wkndPct;
+    const manualAdj = Number(doc.manualAdjustment) || 0;
+    const total = baseValue + nightBonus + weekendBonus + manualAdj;
+
+    return {
+      shiftsCount: docShifts.length,
+      baseHours,
+      nightHours,
+      weekendHours,
+      baseValue,
+      nightBonus,
+      weekendBonus,
+      manualAdj,
+      total
+    };
   };
 
   // --- TELA DE LOGIN / SOLICITAR CADASTRO / ESQUECI MINHA SENHA ---
@@ -1035,6 +1235,7 @@ export default function MedScaleApp() {
   const pendingDoctors = doctors.filter((d) => d.status === 'pending');
   const activeDoctors = doctors.filter((d) => d.status === 'active');
   const inactiveDoctors = doctors.filter((d) => d.status === 'inactive');
+  const pendingSwaps = swaps.filter((s) => s.status === 'Pendente');
 
   const filteredDoctors = doctors.filter((d) => {
     const matchesStatus = doctorFilter === 'all' ? true : d.status === doctorFilter;
@@ -1053,6 +1254,7 @@ export default function MedScaleApp() {
   // --- PAINEL PRINCIPAL (GESTOR E MÉDICO) ---
   return (
     <div className="min-h-screen bg-slate-100 text-slate-900 flex flex-col">
+      {/* CABEÇALHO SUPERIOR */}
       <header className="bg-slate-900 text-white px-6 py-4 flex flex-wrap items-center justify-between gap-4 shadow-md">
         <div className="flex items-center gap-3">
           <div className="bg-blue-600 p-2 rounded-lg font-extrabold text-lg">HGD</div>
@@ -1076,7 +1278,7 @@ export default function MedScaleApp() {
               className="bg-amber-500 hover:bg-amber-600 text-slate-950 font-extrabold text-xs px-3 py-2 rounded-lg flex items-center gap-1.5 animate-pulse"
             >
               <AlertCircle className="w-4 h-4" />
-              {pendingDoctors.length} Solicitação(ões) Pendente(s)
+              {pendingDoctors.length} Cadastro(s) Pendente(s)
             </button>
           )}
 
@@ -1090,18 +1292,31 @@ export default function MedScaleApp() {
         </div>
       </header>
 
-      <nav className="bg-white border-b border-slate-200 px-6 py-2 flex flex-wrap gap-2">
+      {/* MENU COMPLETO COM TODAS AS ABAS */}
+      <nav className="bg-white border-b border-slate-200 px-6 py-2.5 flex flex-wrap gap-1.5 shadow-sm">
+        {currentUser.role === 'admin' && (
+          <button
+            onClick={() => setActiveTab('dashboard')}
+            className={`px-3.5 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition ${
+              activeTab === 'dashboard' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <Activity className="w-4 h-4" />
+            Mapa Assistencial 24h
+          </button>
+        )}
+
         {currentUser.role === 'admin' && (
           <button
             onClick={() => setActiveTab('doctors')}
-            className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition ${
+            className={`px-3.5 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition ${
               activeTab === 'doctors' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
             <Users className="w-4 h-4" />
             Corpo Clínico & Cadastros
             {pendingDoctors.length > 0 && (
-              <span className="bg-amber-400 text-slate-950 text-xs font-extrabold px-2 py-0.5 rounded-full">
+              <span className="bg-amber-400 text-slate-950 text-[11px] font-extrabold px-1.5 py-0.5 rounded-full">
                 {pendingDoctors.length}
               </span>
             )}
@@ -1110,7 +1325,7 @@ export default function MedScaleApp() {
 
         <button
           onClick={() => setActiveTab('schedule')}
-          className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition ${
+          className={`px-3.5 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition ${
             activeTab === 'schedule' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'
           }`}
         >
@@ -1118,20 +1333,193 @@ export default function MedScaleApp() {
           Escala de Plantões
         </button>
 
+        <button
+          onClick={() => setActiveTab('swaps')}
+          className={`px-3.5 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition ${
+            activeTab === 'swaps' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <RefreshCw className="w-4 h-4" />
+          Trocas & Passagens
+          {currentUser.role === 'admin' && pendingSwaps.length > 0 && (
+            <span className="bg-amber-400 text-slate-950 text-[11px] font-extrabold px-1.5 py-0.5 rounded-full">
+              {pendingSwaps.length}
+            </span>
+          )}
+        </button>
+
+        <button
+          onClick={() => setActiveTab('vacations')}
+          className={`px-3.5 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition ${
+            activeTab === 'vacations' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <Briefcase className="w-4 h-4" />
+          Férias & Licenças
+        </button>
+
+        <button
+          onClick={() => setActiveTab('payroll')}
+          className={`px-3.5 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition ${
+            activeTab === 'payroll' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <DollarSign className="w-4 h-4" />
+          {currentUser.role === 'admin' ? 'Financeiro / Folha PJ' : 'Minha Produção PJ'}
+        </button>
+
+        <button
+          onClick={() => setActiveTab('courses')}
+          className={`px-3.5 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition ${
+            activeTab === 'courses' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <Award className="w-4 h-4" />
+          Certificados & Cursos
+        </button>
+
         {currentUser.role === 'admin' && (
           <button
-            onClick={() => setActiveTab('payroll')}
-            className={`px-4 py-2 rounded-lg text-sm font-bold flex items-center gap-2 transition ${
-              activeTab === 'payroll' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'
+            onClick={() => setActiveTab('occurrences')}
+            className={`px-3.5 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition ${
+              activeTab === 'occurrences' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'
             }`}
           >
-            <DollarSign className="w-4 h-4" />
-            Financeiro / PJ
+            <FileText className="w-4 h-4" />
+            Ocorrências
+          </button>
+        )}
+
+        {currentUser.role === 'admin' && (
+          <button
+            onClick={() => setActiveTab('settings')}
+            className={`px-3.5 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition ${
+              activeTab === 'settings' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <Settings className="w-4 h-4" />
+            Configurações
+          </button>
+        )}
+
+        {currentUser.role === 'doctor' && (
+          <button
+            onClick={() => setActiveTab('profile')}
+            className={`px-3.5 py-2 rounded-lg text-xs font-bold flex items-center gap-1.5 transition ${
+              activeTab === 'profile' ? 'bg-blue-600 text-white' : 'text-slate-600 hover:bg-slate-100'
+            }`}
+          >
+            <User className="w-4 h-4" />
+            Meu Perfil & PJ
           </button>
         )}
       </nav>
 
+      {/* CONTEÚDO PRINCIPAL */}
       <main className="flex-1 p-6 max-w-7xl w-full mx-auto space-y-6">
+        {/* =======================================================
+            ABA 1: MAPA ASSISTENCIAL 24H (07H ÀS 06H) E DASHBOARD
+           ======================================================= */}
+        {activeTab === 'dashboard' && currentUser.role === 'admin' && (
+          <div className="space-y-6">
+            {/* CARDS DE RESUMO */}
+            <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                <p className="text-xs text-slate-500 font-bold uppercase">Médicos Ativos</p>
+                <p className="text-2xl font-extrabold text-emerald-600 mt-1">{activeDoctors.length}</p>
+                <p className="text-[11px] text-slate-400">No corpo clínico da unidade</p>
+              </div>
+              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                <p className="text-xs text-slate-500 font-bold uppercase">Cadastros Pendentes</p>
+                <p className="text-2xl font-extrabold text-amber-600 mt-1">{pendingDoctors.length}</p>
+                <p className="text-[11px] text-slate-400">Aguardando aprovação</p>
+              </div>
+              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                <p className="text-xs text-slate-500 font-bold uppercase">Trocas Pendentes</p>
+                <p className="text-2xl font-extrabold text-blue-600 mt-1">{pendingSwaps.length}</p>
+                <p className="text-[11px] text-slate-400">Para homologação da gestão</p>
+              </div>
+              <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm">
+                <p className="text-xs text-slate-500 font-bold uppercase">Férias Programadas</p>
+                <p className="text-2xl font-extrabold text-purple-600 mt-1">{vacations.length}</p>
+                <p className="text-[11px] text-slate-400">Registros ativos</p>
+              </div>
+            </div>
+
+            {/* MAPA ASSISTENCIAL 24H (HEATMAP 07H ÀS 06H) */}
+            <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200 space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-xl font-extrabold text-slate-900">
+                    Mapa Assistencial 24h (Dimensionamento 07h às 06h)
+                  </h2>
+                  <p className="text-xs text-slate-500">
+                    Compare a quantidade de médicos escalados em cada faixa horária com a meta assistencial da Emergência Adulta - HGD.
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <label className="text-xs font-bold text-slate-700">Data de Análise:</label>
+                  <input
+                    type="date"
+                    value={selectedMapDate}
+                    onChange={(e) => setSelectedMapDate(e.target.value)}
+                    className="border border-slate-300 rounded-lg px-3 py-1.5 text-xs font-bold bg-white"
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 gap-2.5 pt-2">
+                {HOURS_24H.map((h) => {
+                  const shiftsOnDate = shifts.filter((s) => s.date === selectedMapDate);
+                  const presentDocs = shiftsOnDate.filter((s) => isDoctorWorkingAtHour(s, h));
+                  const count = presentDocs.length;
+                  const target = hourlyDemand[h] ?? 3;
+                  const diff = count - target;
+
+                  const cardColor =
+                    diff < 0
+                      ? 'bg-red-50 border-red-300 text-red-900'
+                      : diff === 0
+                      ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
+                      : 'bg-blue-50 border-blue-300 text-blue-900';
+
+                  return (
+                    <div key={h} className={`p-3 rounded-xl border ${cardColor} flex flex-col justify-between`}>
+                      <div className="flex items-center justify-between">
+                        <span className="font-extrabold text-sm">{String(h).padStart(2, '0')}:00</span>
+                        <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-white/80">
+                          {diff < 0 ? `Déficit (${diff})` : diff === 0 ? 'Adequado' : `+${diff} Acima`}
+                        </span>
+                      </div>
+                      <div className="my-2">
+                        <div className="text-lg font-extrabold">
+                          {count} <span className="text-xs font-normal">/ meta {target}</span>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between text-[11px] pt-1 border-t border-black/10">
+                        <span>Ajustar Meta:</span>
+                        <input
+                          type="number"
+                          min={0}
+                          max={20}
+                          value={target}
+                          onChange={(e) =>
+                            setHourlyDemand({ ...hourlyDemand, [h]: Number(e.target.value) })
+                          }
+                          className="w-12 text-center border rounded bg-white font-bold py-0.5"
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* =======================================================
+            ABA 2: CORPO CLÍNICO & APROVAÇÃO DE CADASTROS
+           ======================================================= */}
         {activeTab === 'doctors' && currentUser.role === 'admin' && (
           <div className="space-y-6">
             {pendingDoctors.length > 0 && (
@@ -1412,12 +1800,22 @@ export default function MedScaleApp() {
           </div>
         )}
 
+        {/* =======================================================
+            ABA 3: ESCALA DE PLANTÕES
+           ======================================================= */}
         {activeTab === 'schedule' && (
           <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200 space-y-6">
-            <h2 className="text-xl font-extrabold text-slate-900">Escala de Plantões • {config.sectorUnitName}</h2>
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-extrabold text-slate-900">Escala de Plantões • {config.sectorUnitName}</h2>
+                <p className="text-xs text-slate-500">
+                  Visualize e gerencie os plantões diurnos, noturnos, Cinderela e 24h da unidade.
+                </p>
+              </div>
+            </div>
 
             {currentUser.role === 'admin' && (
-              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
                 <div className="md:col-span-2">
                   <label className="block text-xs font-bold text-slate-700 mb-1">Médico Plantonista (Ativos)</label>
                   <select
@@ -1443,31 +1841,49 @@ export default function MedScaleApp() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Período</label>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">Período / Turno</label>
                   <select
                     value={newShiftForm.period}
                     onChange={(e) =>
                       setNewShiftForm({
                         ...newShiftForm,
                         period: e.target.value,
-                        isNight: e.target.value.includes('Noturno')
+                        isNight: e.target.value.includes('Noturno') || e.target.value.includes('19h')
                       })
                     }
                     className="w-full border border-slate-300 rounded-lg px-3 py-2 text-xs bg-white"
                   >
-                    <option value="Diurno (07h-19h)">Diurno (07h-19h)</option>
-                    <option value="Noturno (19h-07h)">Noturno (19h-07h)</option>
+                    <option value="Diurno (07h-19h)">Diurno (07h-19h) - 12h</option>
+                    <option value="Noturno (19h-07h)">Noturno (19h-07h) - 12h</option>
+                    <option value="Manhã (07h-13h)">Manhã (07h-13h) - 6h</option>
+                    <option value="Tarde (13h-19h)">Tarde (13h-19h) - 6h</option>
+                    <option value="Cinderela (19h-01h)">Cinderela (19h-01h) - 6h</option>
                     <option value="Plantão 24h">Plantão 24h</option>
                   </select>
+                </div>
+                <div>
+                  <label className="flex items-center gap-1.5 text-xs font-bold text-slate-700 cursor-pointer pb-2">
+                    <input
+                      type="checkbox"
+                      checked={newShiftForm.isWeekendOrHoliday}
+                      onChange={(e) => setNewShiftForm({ ...newShiftForm, isWeekendOrHoliday: e.target.checked })}
+                    />
+                    Fim de Semana / Feriado
+                  </label>
                 </div>
                 <button
                   type="button"
                   onClick={() => {
                     if (!newShiftForm.doctorId) return;
+                    const hrs = newShiftForm.period.includes('24h')
+                      ? 24
+                      : newShiftForm.period.includes('6h')
+                      ? 6
+                      : 12;
                     const created = {
                       id: `shift-${Date.now()}`,
                       ...newShiftForm,
-                      hours: newShiftForm.period.includes('24h') ? 24 : 12
+                      hours: hrs
                     };
                     const updated = [...shifts, created];
                     setShifts(updated);
@@ -1488,31 +1904,199 @@ export default function MedScaleApp() {
                     <th className="py-3 px-3">Período</th>
                     <th className="py-3 px-3">Plantonista</th>
                     <th className="py-3 px-3">Especialidade</th>
+                    <th className="py-3 px-3">Setor / Alocação</th>
+                    <th className="py-3 px-3">Adicionais</th>
                     <th className="py-3 px-3">Carga</th>
                     {currentUser.role === 'admin' && <th className="py-3 px-3 text-right">Ação</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
-                  {shifts.map((s) => {
-                    const doc = doctors.find((d) => d.id === s.doctorId);
+                  {shifts
+                    .filter((s) => (currentUser.role === 'doctor' ? s.doctorId === currentUser.id : true))
+                    .map((s) => {
+                      const doc = doctors.find((d) => d.id === s.doctorId);
+                      return (
+                        <tr key={s.id} className="hover:bg-slate-50">
+                          <td className="py-3 px-3 font-bold">{s.date}</td>
+                          <td className="py-3 px-3">{s.period}</td>
+                          <td className="py-3 px-3 font-semibold text-slate-900">{doc ? doc.name : 'Médico Removido'}</td>
+                          <td className="py-3 px-3 text-slate-600">{doc?.specialty || '-'}</td>
+                          <td className="py-3 px-3">{s.sector || 'Emergência Adulta'}</td>
+                          <td className="py-3 px-3 space-x-1">
+                            {s.isNight && (
+                              <span className="bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded font-bold">Noturno</span>
+                            )}
+                            {s.isWeekendOrHoliday && (
+                              <span className="bg-amber-100 text-amber-800 px-2 py-0.5 rounded font-bold">FDS/Feriado</span>
+                            )}
+                            {!s.isNight && !s.isWeekendOrHoliday && <span className="text-slate-400">Normal</span>}
+                          </td>
+                          <td className="py-3 px-3 font-bold">{s.hours}h</td>
+                          {currentUser.role === 'admin' && (
+                            <td className="py-3 px-3 text-right">
+                              <button
+                                onClick={() => {
+                                  const updated = shifts.filter((item) => item.id !== s.id);
+                                  setShifts(updated);
+                                  persistState(undefined, updated);
+                                }}
+                                className="text-red-600 hover:underline font-bold"
+                              >
+                                Remover
+                              </button>
+                            </td>
+                          )}
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* =======================================================
+            ABA 4: TROCAS & PASSAGENS DE PLANTÃO
+           ======================================================= */}
+        {activeTab === 'swaps' && (
+          <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200 space-y-6">
+            <div>
+              <h2 className="text-xl font-extrabold text-slate-900">Trocas & Passagens de Plantão</h2>
+              <p className="text-xs text-slate-500">
+                Solicite trocas/passagens de plantão e acompanhe a homologação da coordenação médica.
+              </p>
+            </div>
+
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 grid grid-cols-1 md:grid-cols-6 gap-3 items-end text-xs">
+              <div>
+                <label className="font-bold block mb-1">Médico Solicitante</label>
+                <select
+                  value={currentUser.role === 'doctor' ? currentUser.id : newSwapForm.fromDoctorId}
+                  disabled={currentUser.role === 'doctor'}
+                  onChange={(e) => setNewSwapForm({ ...newSwapForm, fromDoctorId: e.target.value })}
+                  className="w-full border rounded-lg px-2.5 py-2 bg-white"
+                >
+                  <option value="">Selecione...</option>
+                  {activeDoctors.map((d) => (
+                    <option key={d.id} value={d.id}>{d.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="font-bold block mb-1">Médico Substituto</label>
+                <select
+                  value={newSwapForm.toDoctorId}
+                  onChange={(e) => setNewSwapForm({ ...newSwapForm, toDoctorId: e.target.value })}
+                  className="w-full border rounded-lg px-2.5 py-2 bg-white"
+                >
+                  <option value="">Selecione...</option>
+                  {activeDoctors.map((d) => (
+                    <option key={d.id} value={d.id}>{d.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="font-bold block mb-1">Data do Plantão</label>
+                <input
+                  type="date"
+                  value={newSwapForm.date}
+                  onChange={(e) => setNewSwapForm({ ...newSwapForm, date: e.target.value })}
+                  className="w-full border rounded-lg px-2.5 py-2 bg-white"
+                />
+              </div>
+              <div>
+                <label className="font-bold block mb-1">Período</label>
+                <select
+                  value={newSwapForm.period}
+                  onChange={(e) => setNewSwapForm({ ...newSwapForm, period: e.target.value })}
+                  className="w-full border rounded-lg px-2.5 py-2 bg-white"
+                >
+                  <option value="Diurno (07h-19h)">Diurno (07h-19h)</option>
+                  <option value="Noturno (19h-07h)">Noturno (19h-07h)</option>
+                  <option value="Plantão 24h">Plantão 24h</option>
+                </select>
+              </div>
+              <div>
+                <label className="font-bold block mb-1">Motivo / Justificativa</label>
+                <input
+                  type="text"
+                  placeholder="Ex: Congresso / Particular"
+                  value={newSwapForm.reason}
+                  onChange={(e) => setNewSwapForm({ ...newSwapForm, reason: e.target.value })}
+                  className="w-full border rounded-lg px-2.5 py-2 bg-white"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const fromId = currentUser.role === 'doctor' ? currentUser.id : newSwapForm.fromDoctorId;
+                  if (!fromId || !newSwapForm.toDoctorId) return;
+                  const created = {
+                    id: `swap-${Date.now()}`,
+                    ...newSwapForm,
+                    fromDoctorId: fromId,
+                    status: currentUser.role === 'admin' ? 'Aprovada' : 'Pendente'
+                  };
+                  setSwaps([created, ...swaps]);
+                }}
+                className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg"
+              >
+                + Solicitar Troca
+              </button>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-slate-50 border-b uppercase text-slate-600">
+                    <th className="py-3 px-3">Data / Turno</th>
+                    <th className="py-3 px-3">Solicitante (Sai)</th>
+                    <th className="py-3 px-3">Substituto (Entra)</th>
+                    <th className="py-3 px-3">Motivo</th>
+                    <th className="py-3 px-3">Status</th>
+                    {currentUser.role === 'admin' && <th className="py-3 px-3 text-right">Decisão do Gestor</th>}
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {swaps.map((sw) => {
+                    const fromDoc = doctors.find((d) => d.id === sw.fromDoctorId);
+                    const toDoc = doctors.find((d) => d.id === sw.toDoctorId);
                     return (
-                      <tr key={s.id}>
-                        <td className="py-3 px-3 font-bold">{s.date}</td>
-                        <td className="py-3 px-3">{s.period}</td>
-                        <td className="py-3 px-3 font-semibold text-slate-900">{doc ? doc.name : 'Médico Removido'}</td>
-                        <td className="py-3 px-3 text-slate-600">{doc?.specialty || '-'}</td>
-                        <td className="py-3 px-3">{s.hours}h</td>
+                      <tr key={sw.id}>
+                        <td className="py-3 px-3 font-bold">{sw.date} • {sw.period}</td>
+                        <td className="py-3 px-3">{fromDoc?.name || '-'}</td>
+                        <td className="py-3 px-3 font-semibold text-blue-700">{toDoc?.name || '-'}</td>
+                        <td className="py-3 px-3">{sw.reason || '-'}</td>
+                        <td className="py-3 px-3">
+                          <span
+                            className={`px-2.5 py-1 rounded-full font-bold ${
+                              sw.status === 'Aprovada'
+                                ? 'bg-emerald-100 text-emerald-800'
+                                : sw.status === 'Recusada'
+                                ? 'bg-red-100 text-red-800'
+                                : 'bg-amber-100 text-amber-800'
+                            }`}
+                          >
+                            {sw.status}
+                          </span>
+                        </td>
                         {currentUser.role === 'admin' && (
-                          <td className="py-3 px-3 text-right">
+                          <td className="py-3 px-3 text-right space-x-2">
                             <button
-                              onClick={() => {
-                                const updated = shifts.filter((item) => item.id !== s.id);
-                                setShifts(updated);
-                                persistState(undefined, updated);
-                              }}
-                              className="text-red-600 hover:underline font-bold"
+                              onClick={() =>
+                                setSwaps(swaps.map((i) => (i.id === sw.id ? { ...i, status: 'Aprovada' } : i)))
+                              }
+                              className="text-emerald-600 font-bold hover:underline"
                             >
-                              Remover
+                              Aprovar
+                            </button>
+                            <button
+                              onClick={() =>
+                                setSwaps(swaps.map((i) => (i.id === sw.id ? { ...i, status: 'Recusada' } : i)))
+                              }
+                              className="text-red-600 font-bold hover:underline"
+                            >
+                              Recusar
                             </button>
                           </td>
                         )}
@@ -1525,36 +2109,127 @@ export default function MedScaleApp() {
           </div>
         )}
 
-        {activeTab === 'payroll' && currentUser.role === 'admin' && (
-          <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200 space-y-4">
-            <h2 className="text-xl font-extrabold text-slate-900">Relatório Financeiro & Dados PJ para Faturamento</h2>
+        {/* =======================================================
+            ABA 5: CONTROLE MENSAL DE FÉRIAS & LICENÇAS
+           ======================================================= */}
+        {activeTab === 'vacations' && (
+          <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200 space-y-6">
+            <div>
+              <h2 className="text-xl font-extrabold text-slate-900">Controle Mensal de Férias & Licenças</h2>
+              <p className="text-xs text-slate-500">
+                Planejamento mensal de férias, licenças médicas e afastamentos programados da equipe.
+              </p>
+            </div>
+
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 grid grid-cols-1 md:grid-cols-6 gap-3 items-end text-xs">
+              <div>
+                <label className="font-bold block mb-1">Médico</label>
+                <select
+                  value={currentUser.role === 'doctor' ? currentUser.id : newVacationForm.doctorId}
+                  disabled={currentUser.role === 'doctor'}
+                  onChange={(e) => setNewVacationForm({ ...newVacationForm, doctorId: e.target.value })}
+                  className="w-full border rounded-lg px-2.5 py-2 bg-white"
+                >
+                  <option value="">Selecione...</option>
+                  {activeDoctors.map((d) => (
+                    <option key={d.id} value={d.id}>{d.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="font-bold block mb-1">Mês de Competência</label>
+                <input
+                  type="month"
+                  value={newVacationForm.monthCompetence}
+                  onChange={(e) => setNewVacationForm({ ...newVacationForm, monthCompetence: e.target.value })}
+                  className="w-full border rounded-lg px-2.5 py-2 bg-white"
+                />
+              </div>
+              <div>
+                <label className="font-bold block mb-1">Início</label>
+                <input
+                  type="date"
+                  value={newVacationForm.startDate}
+                  onChange={(e) => setNewVacationForm({ ...newVacationForm, startDate: e.target.value })}
+                  className="w-full border rounded-lg px-2.5 py-2 bg-white"
+                />
+              </div>
+              <div>
+                <label className="font-bold block mb-1">Término</label>
+                <input
+                  type="date"
+                  value={newVacationForm.endDate}
+                  onChange={(e) => setNewVacationForm({ ...newVacationForm, endDate: e.target.value })}
+                  className="w-full border rounded-lg px-2.5 py-2 bg-white"
+                />
+              </div>
+              <div>
+                <label className="font-bold block mb-1">Observações</label>
+                <input
+                  type="text"
+                  placeholder="Ex: 1ª quinzena"
+                  value={newVacationForm.notes}
+                  onChange={(e) => setNewVacationForm({ ...newVacationForm, notes: e.target.value })}
+                  className="w-full border rounded-lg px-2.5 py-2 bg-white"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const docId = currentUser.role === 'doctor' ? currentUser.id : newVacationForm.doctorId;
+                  if (!docId) return;
+                  setVacations([
+                    ...vacations,
+                    {
+                      id: `vac-${Date.now()}`,
+                      ...newVacationForm,
+                      doctorId: docId,
+                      status: currentUser.role === 'admin' ? 'Aprovado' : 'Solicitado'
+                    }
+                  ]);
+                }}
+                className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg"
+              >
+                + Registrar Férias
+              </button>
+            </div>
+
             <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse text-xs">
                 <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200 uppercase text-slate-600">
+                  <tr className="bg-slate-50 border-b uppercase text-slate-600">
+                    <th className="py-3 px-3">Mês Competência</th>
                     <th className="py-3 px-3">Médico</th>
-                    <th className="py-3 px-3">Razão Social</th>
-                    <th className="py-3 px-3">CNPJ</th>
-                    <th className="py-3 px-3">Total Horas Escaladas</th>
-                    <th className="py-3 px-3">Valor Hora</th>
-                    <th className="py-3 px-3">Total Estimado</th>
+                    <th className="py-3 px-3">Período</th>
+                    <th className="py-3 px-3">Observações</th>
+                    <th className="py-3 px-3">Status</th>
+                    {currentUser.role === 'admin' && <th className="py-3 px-3 text-right">Ações</th>}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-200">
-                  {activeDoctors.map((doc) => {
-                    const docShifts = shifts.filter((s) => s.doctorId === doc.id);
-                    const totalHours = docShifts.reduce((acc, s) => acc + (Number(s.hours) || 0), 0);
-                    const rate = Number(doc.hourlyRate) || config.baseHourlyRate || 180;
+                <tbody className="divide-y">
+                  {vacations.map((v) => {
+                    const doc = doctors.find((d) => d.id === v.doctorId);
                     return (
-                      <tr key={doc.id}>
-                        <td className="py-3 px-3 font-bold">{doc.name}</td>
-                        <td className="py-3 px-3">{doc.razaoSocial || '-'}</td>
-                        <td className="py-3 px-3">{doc.cnpj || '-'}</td>
-                        <td className="py-3 px-3">{totalHours}h</td>
-                        <td className="py-3 px-3">R$ {rate.toFixed(2)}</td>
-                        <td className="py-3 px-3 font-extrabold text-emerald-700">
-                          R$ {(totalHours * rate).toFixed(2)}
+                      <tr key={v.id}>
+                        <td className="py-3 px-3 font-extrabold text-blue-700">{v.monthCompetence}</td>
+                        <td className="py-3 px-3 font-bold">{doc?.name || '-'}</td>
+                        <td className="py-3 px-3">{v.startDate} até {v.endDate}</td>
+                        <td className="py-3 px-3">{v.notes || '-'}</td>
+                        <td className="py-3 px-3">
+                          <span className="bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-full font-bold">
+                            {v.status}
+                          </span>
                         </td>
+                        {currentUser.role === 'admin' && (
+                          <td className="py-3 px-3 text-right">
+                            <button
+                              onClick={() => setVacations(vacations.filter((i) => i.id !== v.id))}
+                              className="text-red-600 font-bold hover:underline"
+                            >
+                              Excluir
+                            </button>
+                          </td>
+                        )}
                       </tr>
                     );
                   })}
@@ -1563,8 +2238,414 @@ export default function MedScaleApp() {
             </div>
           </div>
         )}
+
+        {/* =======================================================
+            ABA 6: FINANCEIRO / FOLHA PJ (COM REGRA DE ADICIONAIS)
+           ======================================================= */}
+        {activeTab === 'payroll' && (
+          <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200 space-y-6">
+            <div className="flex flex-wrap items-center justify-between gap-4">
+              <div>
+                <h2 className="text-xl font-extrabold text-slate-900">
+                  Folha de Pagamento & Produção PJ • {config.sectorUnitName}
+                </h2>
+                <p className="text-xs text-slate-500">
+                  Apuração de horas, adicionais noturnos/fins de semana, ajustes manuais e dados bancários/PJ.
+                </p>
+              </div>
+
+              {currentUser.role === 'admin' && (
+                <div className="flex flex-wrap items-center gap-3 bg-slate-50 p-3 rounded-xl border border-slate-200 text-xs">
+                  <div>
+                    <label className="font-bold text-slate-700 block mb-1">Mês de Competência</label>
+                    <input
+                      type="month"
+                      value={selectedMonth}
+                      onChange={(e) => setSelectedMonth(e.target.value)}
+                      className="border rounded-lg px-2.5 py-1.5 bg-white font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="font-bold text-slate-700 block mb-1">Incidência de Adicionais</label>
+                    <select
+                      value={config.bonusIncidenceRule || 'shift'}
+                      onChange={(e) => setConfig({ ...config, bonusIncidenceRule: e.target.value })}
+                      className="border rounded-lg px-2.5 py-1.5 bg-white font-bold text-blue-700"
+                    >
+                      <option value="shift">Por Plantão Realizado (Geral)</option>
+                      <option value="competence">Por Mês de Competência ({selectedMonth})</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="font-bold text-slate-700 block mb-1">Status da Folha</label>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setPayrollStatus({
+                          ...payrollStatus,
+                          [selectedMonth]:
+                            payrollStatus[selectedMonth] === 'Fechada / Auditada' ? 'Aberta' : 'Fechada / Auditada'
+                        })
+                      }
+                      className={`px-3 py-1.5 rounded-lg font-extrabold ${
+                        payrollStatus[selectedMonth] === 'Fechada / Auditada'
+                          ? 'bg-emerald-600 text-white'
+                          : 'bg-amber-100 text-amber-900'
+                      }`}
+                    >
+                      {payrollStatus[selectedMonth] || 'Aberta'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-slate-50 border-b border-slate-200 uppercase text-slate-600">
+                    <th className="py-3 px-3">Médico</th>
+                    <th className="py-3 px-3">Razão Social / CNPJ</th>
+                    <th className="py-3 px-3">Horas Totais</th>
+                    <th className="py-3 px-3">Base (R$)</th>
+                    <th className="py-3 px-3">Adic. Noturno / FDS</th>
+                    <th className="py-3 px-3">Ajuste Manual (R$)</th>
+                    <th className="py-3 px-3">Total Líquido PJ</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {activeDoctors
+                    .filter((d) => (currentUser.role === 'doctor' ? d.id === currentUser.id : true))
+                    .map((doc) => {
+                      const calc = calculateDoctorPayroll(doc);
+                      return (
+                        <tr key={doc.id} className="hover:bg-slate-50">
+                          <td className="py-3 px-3 font-bold text-slate-900">{doc.name}</td>
+                          <td className="py-3 px-3">
+                            <div className="font-semibold">{doc.razaoSocial || '-'}</div>
+                            <div className="text-slate-500">{doc.cnpj || '-'}</div>
+                          </td>
+                          <td className="py-3 px-3 font-bold">{calc.baseHours}h ({calc.shiftsCount} plantões)</td>
+                          <td className="py-3 px-3">R$ {calc.baseValue.toFixed(2)}</td>
+                          <td className="py-3 px-3 text-blue-700 font-semibold">
+                            + R$ {(calc.nightBonus + calc.weekendBonus).toFixed(2)}
+                          </td>
+                          <td className="py-3 px-3">
+                            {currentUser.role === 'admin' ? (
+                              <input
+                                type="number"
+                                value={doc.manualAdjustment || 0}
+                                onChange={(e) => {
+                                  const updated = doctors.map((d) =>
+                                    d.id === doc.id ? { ...d, manualAdjustment: Number(e.target.value) } : d
+                                  );
+                                  setDoctors(updated);
+                                }}
+                                className="w-24 border rounded px-2 py-1 bg-white font-bold"
+                              />
+                            ) : (
+                              `R$ ${calc.manualAdj.toFixed(2)}`
+                            )}
+                          </td>
+                          <td className="py-3 px-3 font-extrabold text-emerald-700 text-sm">
+                            R$ {calc.total.toFixed(2)}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* =======================================================
+            ABA 7: CERTIFICADOS & CURSOS OBRIGATÓRIOS
+           ======================================================= */}
+        {activeTab === 'courses' && (
+          <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200 space-y-6">
+            <div>
+              <h2 className="text-xl font-extrabold text-slate-900">Certificados & Capacitações (ACLS, ATLS, PALS)</h2>
+              <p className="text-xs text-slate-500">
+                Controle de conformidade e validade das certificações obrigatórias dos médicos emergencistas.
+              </p>
+            </div>
+
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 grid grid-cols-1 md:grid-cols-5 gap-3 items-end text-xs">
+              <div>
+                <label className="font-bold block mb-1">Médico</label>
+                <select
+                  value={currentUser.role === 'doctor' ? currentUser.id : newCourseForm.doctorId}
+                  disabled={currentUser.role === 'doctor'}
+                  onChange={(e) => setNewCourseForm({ ...newCourseForm, doctorId: e.target.value })}
+                  className="w-full border rounded-lg px-2.5 py-2 bg-white"
+                >
+                  <option value="">Selecione...</option>
+                  {activeDoctors.map((d) => (
+                    <option key={d.id} value={d.id}>{d.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="font-bold block mb-1">Certificação / Curso</label>
+                <input
+                  type="text"
+                  placeholder="Ex: ACLS / ATLS / POCUS"
+                  value={newCourseForm.courseName}
+                  onChange={(e) => setNewCourseForm({ ...newCourseForm, courseName: e.target.value })}
+                  className="w-full border rounded-lg px-2.5 py-2 bg-white"
+                />
+              </div>
+              <div>
+                <label className="font-bold block mb-1">Instituição</label>
+                <input
+                  type="text"
+                  placeholder="Ex: AHA / SOMERJ"
+                  value={newCourseForm.institution}
+                  onChange={(e) => setNewCourseForm({ ...newCourseForm, institution: e.target.value })}
+                  className="w-full border rounded-lg px-2.5 py-2 bg-white"
+                />
+              </div>
+              <div>
+                <label className="font-bold block mb-1">Validade</label>
+                <input
+                  type="date"
+                  value={newCourseForm.expiryDate}
+                  onChange={(e) => setNewCourseForm({ ...newCourseForm, expiryDate: e.target.value })}
+                  className="w-full border rounded-lg px-2.5 py-2 bg-white"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  const docId = currentUser.role === 'doctor' ? currentUser.id : newCourseForm.doctorId;
+                  if (!docId || !newCourseForm.courseName) return;
+                  setCourses([...courses, { id: `course-${Date.now()}`, ...newCourseForm, doctorId: docId }]);
+                }}
+                className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg"
+              >
+                + Adicionar Certificado
+              </button>
+            </div>
+
+            <div className="overflow-x-auto">
+              <table className="w-full text-left border-collapse text-xs">
+                <thead>
+                  <tr className="bg-slate-50 border-b uppercase text-slate-600">
+                    <th className="py-3 px-3">Médico</th>
+                    <th className="py-3 px-3">Curso / Certificação</th>
+                    <th className="py-3 px-3">Instituição</th>
+                    <th className="py-3 px-3">Vencimento</th>
+                    <th className="py-3 px-3">Status</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {courses
+                    .filter((c) => (currentUser.role === 'doctor' ? c.doctorId === currentUser.id : true))
+                    .map((c) => {
+                      const doc = doctors.find((d) => d.id === c.doctorId);
+                      return (
+                        <tr key={c.id}>
+                          <td className="py-3 px-3 font-bold">{doc?.name || '-'}</td>
+                          <td className="py-3 px-3 font-semibold text-blue-800">{c.courseName}</td>
+                          <td className="py-3 px-3">{c.institution || '-'}</td>
+                          <td className="py-3 px-3">{c.expiryDate || '-'}</td>
+                          <td className="py-3 px-3">
+                            <span className="bg-emerald-100 text-emerald-800 px-2.5 py-1 rounded-full font-bold">
+                              {c.status}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* =======================================================
+            ABA 8: OCORRÊNCIAS ADMINISTRATIVAS & ASSISTENCIAIS
+           ======================================================= */}
+        {activeTab === 'occurrences' && currentUser.role === 'admin' && (
+          <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200 space-y-6">
+            <div>
+              <h2 className="text-xl font-extrabold text-slate-900">Livro de Ocorrências & Governança</h2>
+              <p className="text-xs text-slate-500">
+                Registre atrasos, faltas, elogios e ocorrências de plantão na Emergência Adulta - HGD.
+              </p>
+            </div>
+
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 grid grid-cols-1 md:grid-cols-5 gap-3 items-end text-xs">
+              <div>
+                <label className="font-bold block mb-1">Médico</label>
+                <select
+                  value={newOccurrenceForm.doctorId}
+                  onChange={(e) => setNewOccurrenceForm({ ...newOccurrenceForm, doctorId: e.target.value })}
+                  className="w-full border rounded-lg px-2.5 py-2 bg-white"
+                >
+                  <option value="">Selecione...</option>
+                  {doctors.map((d) => (
+                    <option key={d.id} value={d.id}>{d.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="font-bold block mb-1">Data</label>
+                <input
+                  type="date"
+                  value={newOccurrenceForm.date}
+                  onChange={(e) => setNewOccurrenceForm({ ...newOccurrenceForm, date: e.target.value })}
+                  className="w-full border rounded-lg px-2.5 py-2 bg-white"
+                />
+              </div>
+              <div>
+                <label className="font-bold block mb-1">Tipo</label>
+                <select
+                  value={newOccurrenceForm.type}
+                  onChange={(e) => setNewOccurrenceForm({ ...newOccurrenceForm, type: e.target.value })}
+                  className="w-full border rounded-lg px-2.5 py-2 bg-white"
+                >
+                  <option value="Atraso no Plantão">Atraso no Plantão</option>
+                  <option value="Falta / Ausência">Falta / Ausência</option>
+                  <option value="Elogio / Destaque Assistencial">Elogio / Destaque Assistencial</option>
+                  <option value="Intercorrência Administrativa">Intercorrência Administrativa</option>
+                </select>
+              </div>
+              <div>
+                <label className="font-bold block mb-1">Descrição</label>
+                <input
+                  type="text"
+                  placeholder="Detalhes da ocorrência"
+                  value={newOccurrenceForm.description}
+                  onChange={(e) => setNewOccurrenceForm({ ...newOccurrenceForm, description: e.target.value })}
+                  className="w-full border rounded-lg px-2.5 py-2 bg-white"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!newOccurrenceForm.doctorId || !newOccurrenceForm.description) return;
+                  setOccurrences([{ id: `occ-${Date.now()}`, ...newOccurrenceForm }, ...occurrences]);
+                }}
+                className="bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-lg"
+              >
+                + Registrar
+              </button>
+            </div>
+
+            <div className="space-y-2">
+              {occurrences.map((occ) => {
+                const doc = doctors.find((d) => d.id === occ.doctorId);
+                return (
+                  <div key={occ.id} className="p-3.5 border rounded-xl flex items-center justify-between text-xs bg-slate-50">
+                    <div>
+                      <span className="font-extrabold text-slate-900 mr-2">{occ.date}</span>
+                      <span className="font-bold text-blue-700 mr-2">{doc?.name || '-'}</span>
+                      <span className="bg-white border px-2 py-0.5 rounded font-bold mr-2">{occ.type}</span>
+                      <span className="text-slate-700">{occ.description}</span>
+                    </div>
+                    <button
+                      onClick={() => setOccurrences(occurrences.filter((i) => i.id !== occ.id))}
+                      className="text-red-600 font-bold hover:underline"
+                    >
+                      Remover
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* =======================================================
+            ABA 9: CONFIGURAÇÕES GERAIS DA UNIDADE (GESTOR)
+           ======================================================= */}
+        {activeTab === 'settings' && currentUser.role === 'admin' && (
+          <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200 max-w-2xl space-y-4 text-xs">
+            <h2 className="text-xl font-extrabold text-slate-900">Configurações da Unidade & Parâmetros</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="font-bold block mb-1">Nome do Sistema</label>
+                <input
+                  type="text"
+                  value={config.appName}
+                  onChange={(e) => setConfig({ ...config, appName: e.target.value })}
+                  className="w-full border rounded-lg px-3 py-2"
+                />
+              </div>
+              <div>
+                <label className="font-bold block mb-1">Unidade / Setor</label>
+                <input
+                  type="text"
+                  value={config.sectorUnitName}
+                  onChange={(e) => setConfig({ ...config, sectorUnitName: e.target.value })}
+                  className="w-full border rounded-lg px-3 py-2"
+                />
+              </div>
+              <div>
+                <label className="font-bold block mb-1">Valor Hora Base (R$)</label>
+                <input
+                  type="number"
+                  value={config.baseHourlyRate}
+                  onChange={(e) => setConfig({ ...config, baseHourlyRate: Number(e.target.value) })}
+                  className="w-full border rounded-lg px-3 py-2"
+                />
+              </div>
+              <div>
+                <label className="font-bold block mb-1">Adicional Noturno (%)</label>
+                <input
+                  type="number"
+                  value={config.nightBonusPercent}
+                  onChange={(e) => setConfig({ ...config, nightBonusPercent: Number(e.target.value) })}
+                  className="w-full border rounded-lg px-3 py-2"
+                />
+              </div>
+              <div>
+                <label className="font-bold block mb-1">Adicional Fim de Semana / Feriado (%)</label>
+                <input
+                  type="number"
+                  value={config.weekendBonusPercent}
+                  onChange={(e) => setConfig({ ...config, weekendBonusPercent: Number(e.target.value) })}
+                  className="w-full border rounded-lg px-3 py-2"
+                />
+              </div>
+              <div>
+                <label className="font-bold block mb-1">Senha do Gestor (`gestor`)</label>
+                <input
+                  type="text"
+                  value={adminCredentials.password}
+                  onChange={(e) => setAdminCredentials({ ...adminCredentials, password: e.target.value })}
+                  className="w-full border rounded-lg px-3 py-2"
+                />
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* =======================================================
+            ABA 10: PERFIL DO MÉDICO (QUANDO LOGADO COMO MÉDICO)
+           ======================================================= */}
+        {activeTab === 'profile' && currentUser.role === 'doctor' && (
+          <div className="bg-white rounded-xl p-6 shadow-sm border border-slate-200 max-w-2xl space-y-4 text-xs">
+            <h2 className="text-xl font-extrabold text-slate-900">Meus Dados Cadastrais & PJ</h2>
+            <div className="grid grid-cols-2 gap-3 bg-slate-50 p-4 rounded-xl border">
+              <div><strong>Nome:</strong> {currentUser.name}</div>
+              <div><strong>Username:</strong> {currentUser.username}</div>
+              <div><strong>CRM:</strong> {currentUser.crm}</div>
+              <div><strong>Especialidade:</strong> {currentUser.specialty}</div>
+              <div><strong>Razão Social:</strong> {currentUser.razaoSocial || '-'}</div>
+              <div><strong>CNPJ:</strong> {currentUser.cnpj || '-'}</div>
+              <div><strong>Início na Unidade:</strong> {currentUser.startDate || '-'}</div>
+              <div><strong>Plantões Fixos:</strong> {currentUser.fixedShiftsDescription || '-'}</div>
+            </div>
+          </div>
+        )}
       </main>
 
+      {/* =========================================================================
+          MODAL: FICHA COMPLETA DO MÉDICO E HISTÓRICO DE ALTERAÇÕES DE CARGA HORÁRIA
+         ========================================================================= */}
       {editingDoctor && (
         <div className="fixed inset-0 bg-slate-950/70 flex items-center justify-center p-4 z-50 overflow-y-auto">
           <div className="bg-white rounded-2xl max-w-3xl w-full p-6 shadow-2xl space-y-5 max-h-[90vh] overflow-y-auto">
@@ -1805,6 +2886,9 @@ export default function MedScaleApp() {
         </div>
       )}
 
+      {/* =========================================================================
+          MODAL: CADASTRAR NOVO MÉDICO DIRETO PELO GESTOR
+         ========================================================================= */}
       {showNewDoctorModal && (
         <div className="fixed inset-0 bg-slate-950/70 flex items-center justify-center p-4 z-50">
           <div className="bg-white rounded-2xl max-w-xl w-full p-6 shadow-2xl space-y-4 max-h-[90vh] overflow-y-auto">
