@@ -3319,11 +3319,11 @@ export default function MedScaleApp() {
             <form onSubmit={handleLogin} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1">E-mail</label>
-                <input type="email" required value={loginEmail} onChange={e => setLoginEmail(e.target.value)} placeholder="gestor@medscale.com.br" className="w-full border rounded-lg px-3 py-2 text-sm" />
+                <input type="email" required value={loginEmail} onChange={e => setLoginEmail(e.target.value)} placeholder="Insira seu email" className="w-full border rounded-lg px-3 py-2 text-sm" />
               </div>
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1">Senha</label>
-                <input type="password" required value={loginPassword} onChange={e => setLoginPassword(e.target.value)} placeholder="admin123" className="w-full border rounded-lg px-3 py-2 text-sm" />
+                <input type="password" required value={loginPassword} onChange={e => setLoginPassword(e.target.value)} placeholder="Insira sua senha" className="w-full border rounded-lg px-3 py-2 text-sm" />
               </div>
               <button type="submit" className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-lg text-sm">Acessar Plataforma</button>
               <div className="pt-3 border-t flex justify-between text-xs">
