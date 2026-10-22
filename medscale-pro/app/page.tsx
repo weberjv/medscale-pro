@@ -746,9 +746,12 @@ if (!clientIdRef.current && typeof window !== 'undefined') {
             config={config}
             setConfig={setConfig}
             isAdmin={isAdmin}
+            isMasterAdmin={isMasterAdmin}
             currentUser={currentUser}
             doctors={doctors}
+            setDoctors={setDoctors}
             activeDoctors={activeDoctors}
+            adminDoctors={adminDoctors}
             pendingDoctors={pendingDoctors}
             shifts={shifts}
             setShifts={setShifts}
@@ -759,17 +762,33 @@ if (!clientIdRef.current && typeof window !== 'undefined') {
             swaps={swaps}
             setSwaps={setSwaps}
             vacations={vacations}
+            setVacations={setVacations}
             courses={courses}
+            setCourses={setCourses}
             occurrences={occurrences}
+            setOccurrences={setOccurrences}
             announcements={announcements}
             setAnnouncements={setAnnouncements}
+            auditTrail={auditTrail}
             hourlyDemand={hourlyDemand}
             setHourlyDemand={setHourlyDemand}
+            competenceMonth={competenceMonth}
+            setCompetenceMonth={setCompetenceMonth}
+            competenceWindow={competenceWindow}
+            payrollReport={payrollReport}
+            payrollClosed={payrollClosed}
+            setPayrollClosed={setPayrollClosed}
             dynamicCategories={dynamicCategories}
             getDoctorById={getDoctorById}
             getCategoryRulesList={getCategoryRulesList}
+            handleToggleAdditionalOnExistingShift={handleToggleAdditionalOnExistingShift}
+            handleToggleMonthlyAdditionalOnDoctor={handleToggleMonthlyAdditionalOnDoctor}
             handleCloudSync={handleCloudSync}
             recordAction={recordAction}
+            onOpenDoctorEditModal={(doc: any) => {
+              setEditingDoctor(doc || null);
+              setIsDoctorModalOpen(true);
+            }}
           />
         )}
 
