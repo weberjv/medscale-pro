@@ -9,7 +9,8 @@ export const ALL_FUNCTIONS = [
   'Médico Rotina/Sênior',
   'Plantonista',
   'Plantão de Especialidade',
-  'Chefia/Liderança'
+  'Chefia/Liderança',
+  'Coordenação / Supervisão (Sem Escala)'
 ];
 
 export const MONTHS_LIST = [
@@ -26,6 +27,7 @@ export const DEFAULT_CONFIG = {
   appName: 'MedScale Pro',
   hospitalName: 'Hospital Geral & Maternidade',
   sectorUnitName: 'Emergência Adulta - HGD',
+  masterAdminPassword: 'admin123',
   cpfLabel: 'CPF',
   crmLabel: 'CRM',
   rqeLabel: 'RQE',
@@ -36,9 +38,8 @@ export const DEFAULT_CONFIG = {
   roleLabel: 'Função Base',
   specialtyLabel: 'Especialidade',
   blockedVacationMonths: ['2026-12', '2027-01'],
-  // Gestão à Vista (Módulo 8 do Gestor interfaceado com o Médico)
   gestaoAVista: {
-    npsScore: 88, // > 80 Verde, >= 60 Verde-amarelado, < 60 Vermelho
+    npsScore: 88,
     motivationalQuote: '“Cuidar de vidas com excelência, agilidade e empatia é a nossa maior missão diária na Emergência Adulta - HGD.”',
     customIndicators: [
       { id: 'ind_1', label: 'Taxa de Ocupação Sala Vermelha', value: '74%', target: 'Meta < 85%' },
@@ -47,24 +48,22 @@ export const DEFAULT_CONFIG = {
     ],
     recommendations: 'Manter rigor na pontualidade da passagem de plantão às 07h e 19h, registrar intercorrências em prontuário e checar o carro de parada no início do turno.'
   },
-  // Catálogo Gerencial de Cursos (Item 7)
   courseCatalog: [
     { id: 'cat_acls', name: 'ACLS (Suporte Avançado de Vida em Cardiologia)', mandatory: true, validityMonths: 24 },
     { id: 'cat_atls', name: 'ATLS (Suporte Avançado de Vida no Trauma)', mandatory: true, validityMonths: 48 },
     { id: 'cat_pals', name: 'PALS (Suporte Avançado de Vida em Pediatria)', mandatory: false, validityMonths: 24 },
     { id: 'cat_pocus', name: 'POCUS / Ultrassonografia Point-of-Care na Emergência', mandatory: false, validityMonths: 36 },
   ],
-  // Status de fechamento e envio da folha PJ ao financeiro por competência (Item 4)
   payrollCompetenceStatus: {
     '2026-10': { sentToFinance: false, sentAt: '' },
     '2026-09': { sentToFinance: true, sentAt: '2026-09-26' }
   } as Record<string, { sentToFinance: boolean; sentAt: string }>,
-  // Categorias Assistenciais com Caixas de Remuneração e Chave de Ausência de Restrição (Itens 4 e 5)
   functionRates: {
     'Médico Rotina/Sênior': {
       mensalFixo: 18000,
       extra12h: 1800,
       unrestrictedSwaps: false,
+      requiresSchedule: true,
       rules: [
         { id: 'rot_fixo', label: 'Fixo 12h Semanal / Mensal', billingMode: 'fixo_mensal', value: 18000 },
         { id: 'rot_extra_util', label: 'Extra Avulso 12h (Dia Útil)', billingMode: 'por_12h', value: 1800 },
@@ -74,7 +73,8 @@ export const DEFAULT_CONFIG = {
     'Plantonista': {
       mensalFixo: 14000,
       extra12h: 1350,
-      unrestrictedSwaps: true, // Exemplo com ausência de restrição de troca/passagem ativa
+      unrestrictedSwaps: true,
+      requiresSchedule: true,
       rules: [
         { id: 'plt_fixo', label: 'Fixo 12h Semanal / Mensal', billingMode: 'fixo_mensal', value: 14000 },
         { id: 'plt_extra_util', label: 'Extra Avulso 12h (Dia Útil)', billingMode: 'por_12h', value: 1350 },
@@ -85,6 +85,7 @@ export const DEFAULT_CONFIG = {
       mensalFixo: 16500,
       extra12h: 1650,
       unrestrictedSwaps: false,
+      requiresSchedule: true,
       rules: [
         { id: 'esp_fixo', label: 'Fixo 12h Semanal / Mensal', billingMode: 'fixo_mensal', value: 16500 },
         { id: 'esp_extra_util', label: 'Extra Avulso 12h (Dia Útil)', billingMode: 'por_12h', value: 1650 },
@@ -95,13 +96,23 @@ export const DEFAULT_CONFIG = {
       mensalFixo: 22000,
       extra12h: 2200,
       unrestrictedSwaps: false,
+      requiresSchedule: true,
       rules: [
         { id: 'chf_fixo', label: 'Fixo 12h Semanal / Mensal', billingMode: 'fixo_mensal', value: 22000 },
         { id: 'chf_extra_util', label: 'Extra Avulso 12h', billingMode: 'por_12h', value: 2200 },
       ]
     },
+    'Coordenação / Supervisão (Sem Escala)': {
+      mensalFixo: 12000,
+      extra12h: 0,
+      unrestrictedSwaps: false,
+      requiresSchedule: false,
+      rules: [
+        { id: 'coord_fixo', label: 'Coordenação Médica Mensal (Sem Escala)', billingMode: 'fixo_mensal', value: 12000 },
+        { id: 'sup_fixo', label: 'Supervisão Clínica Mensal (Sem Escala)', billingMode: 'fixo_mensal', value: 8500 },
+      ]
+    }
   } as Record<string, any>,
-  // Funções de Coordenação / Administrativas (Item 3 - Não participam da escala)
   adminFunctionRates: {
     'Coordenador Médico (Adm)': { mensalFixo: 12000, description: 'Coordenação geral de escala e equipe (Sem plantão)' },
     'Médico Supervisor (Adm)': { mensalFixo: 8500, description: 'Supervisão assistencial e auditoria clínica (Sem plantão)' },
@@ -113,12 +124,14 @@ export const DEFAULT_CONFIG = {
     3: { label: 'Nível 3 (Sênior / Titulado)', bonus12h: 350, mensalBonus: 2500 },
     4: { label: 'Nível 4 (Referência / Preceptor)', bonus12h: 600, mensalBonus: 4500 },
   } as Record<number, { label: string; bonus12h: number; mensalBonus: number }>,
-  // Adicionais de Plantão com suporte a Valor Unitário (R$) ou Percentual (%) (Item 4)
+  // Adicionais com 'incidence': 'shift' (no Plantão) ou 'monthly' (no Mês de Competência)
   shiftAdditionals: [
-    { id: 'fds', name: 'Adicional Fim de Semana', calcMode: 'fixed', value12h: 250, percentValue: 0 },
-    { id: 'chefia_plantao', name: 'Adicional Chefia de Plantão', calcMode: 'fixed', value12h: 400, percentValue: 0 },
-    { id: 'feriado', name: 'Adicional Feriado / Data Especial', calcMode: 'percent', value12h: 500, percentValue: 30 },
-    { id: 'noturno', name: 'Adicional Noturno Especial', calcMode: 'fixed', value12h: 180, percentValue: 0 },
+    { id: 'fds', name: 'Adicional Fim de Semana', incidence: 'shift', calcMode: 'fixed', value12h: 250, percentValue: 0 },
+    { id: 'chefia_plantao', name: 'Adicional Chefia de Plantão', incidence: 'shift', calcMode: 'fixed', value12h: 400, percentValue: 0 },
+    { id: 'feriado', name: 'Adicional Feriado / Data Especial', incidence: 'shift', calcMode: 'percent', value12h: 500, percentValue: 30 },
+    { id: 'noturno', name: 'Adicional Noturno Especial', incidence: 'shift', calcMode: 'fixed', value12h: 180, percentValue: 0 },
+    { id: 'preceptoria_mes', name: 'Adicional Preceptoria (Mensal)', incidence: 'monthly', calcMode: 'fixed', value12h: 1500, percentValue: 0 },
+    { id: 'bonus_meta_mes', name: 'Bonificação de Meta / Qualidade (Mensal)', incidence: 'monthly', calcMode: 'percent', value12h: 1000, percentValue: 10 },
   ],
   registeredSpecialties: [
     { name: 'Clínica Médica', extra12h: 0 },
@@ -179,10 +192,12 @@ export const initialDoctors = [
     remunerationLevel: 3,
     contractType: 'Fixo Mensal',
     participatesInSchedule: true,
+    hasManagerAccess: false,
     allowedFunctions: ['Médico Rotina/Sênior', 'Plantonista', 'Chefia/Liderança'],
     defaultShiftAdditionals: ['chefia_plantao'],
-    fixedMonthlyAdditional: 1500,
-    fixedMonthlyAdditionalLabel: 'Adicional Preceptoria Clínica',
+    monthlyAdditionals: ['preceptoria_mes'],
+    fixedMonthlyAdditional: 0,
+    fixedMonthlyAdditionalLabel: '',
     fixedMonthlyAdditionalMode: 'fixed',
     accumulatedRoles: [
       { id: 'ar_1', roleName: 'Médico Rotina/Sênior', categoryType: 'assistencial', level: 3, contractModality: 'Fixo Mensal' },
@@ -219,8 +234,10 @@ export const initialDoctors = [
     remunerationLevel: 2,
     contractType: 'Coringa / Extra',
     participatesInSchedule: true,
+    hasManagerAccess: false,
     allowedFunctions: ['Plantonista', 'Plantão de Especialidade', 'Médico Rotina/Sênior'],
     defaultShiftAdditionals: [],
+    monthlyAdditionals: [],
     fixedMonthlyAdditional: 0,
     fixedMonthlyAdditionalLabel: '',
     fixedMonthlyAdditionalMode: 'fixed',
@@ -256,8 +273,10 @@ export const initialDoctors = [
     remunerationLevel: 4,
     contractType: 'Fixo Mensal',
     participatesInSchedule: true,
+    hasManagerAccess: true,
     allowedFunctions: ['Chefia/Liderança', 'Médico Rotina/Sênior', 'Plantão de Especialidade', 'Plantonista'],
     defaultShiftAdditionals: ['chefia_plantao'],
+    monthlyAdditionals: [],
     fixedMonthlyAdditional: 0,
     fixedMonthlyAdditionalLabel: '',
     fixedMonthlyAdditionalMode: 'fixed',
@@ -289,12 +308,14 @@ export const initialDoctors = [
     razaoSocial: 'Vasconcelos Gestão & Auditoria Médica LTDA',
     cnpj: '77.888.999/0001-55',
     specialty: 'Clínica Médica',
-    role: 'Coordenador Médico (Adm)',
+    role: 'Coordenação / Supervisão (Sem Escala)',
     remunerationLevel: 4,
     contractType: 'Fixo Mensal',
     participatesInSchedule: false,
+    hasManagerAccess: true,
     allowedFunctions: [],
     defaultShiftAdditionals: [],
+    monthlyAdditionals: [],
     fixedMonthlyAdditional: 0,
     fixedMonthlyAdditionalLabel: '',
     fixedMonthlyAdditionalMode: 'fixed',
@@ -330,8 +351,10 @@ export const initialDoctors = [
     remunerationLevel: 2,
     contractType: 'Coringa / Extra',
     participatesInSchedule: true,
+    hasManagerAccess: false,
     allowedFunctions: ['Plantão de Especialidade', 'Plantonista'],
     defaultShiftAdditionals: [],
+    monthlyAdditionals: [],
     fixedMonthlyAdditional: 0,
     fixedMonthlyAdditionalLabel: '',
     fixedMonthlyAdditionalMode: 'fixed',
@@ -360,7 +383,6 @@ export const initialShifts = [
   { id: 107, date: '2026-11-15', startTime: '07:00', endTime: '19:00', doctorId: 1, type: 'Plantão Domingo Clínica', category: 'Plantonista', billingType: 'Fixo', ruleId: 'plt_fixo', customRate12h: '', additionals: ['fds'] }
 ];
 
-// Mural de Vagas Extras / Plantões em Aberto
 export const initialOpenShifts = [
   {
     id: 701,
@@ -376,13 +398,11 @@ export const initialOpenShifts = [
   }
 ];
 
-// Banco de Disponibilidade ("Posso Cobrir")
 export const initialDoctorAvailability = [
   { id: 801, doctorId: 2, date: '2026-10-24', period: 'Noturno (19h-07h)', notes: 'Disponível para cobrir Sala Vermelha ou Box.' },
   { id: 802, doctorId: 1, date: '2026-10-25', period: 'Diurno (07h-19h)', notes: 'Disponível para plantão extra de rotina.' }
 ];
 
-// Livro de Ocorrências Duplo (Do Plantonista ou Do Plantão - Item 8)
 export const initialOccurrences = [
   { id: 901, targetType: 'Plantonista', doctorId: 1, shiftDate: '2026-09-29', date: '2026-09-29', type: 'Intercorrência Administrativa', severity: 'Atenção', title: 'Passagem de plantão em cima da hora', description: 'Solicitou passagem de plantão de rotina com menos de 48h de antecedência por compromisso externo.' },
   { id: 902, targetType: 'Plantonista', doctorId: 2, shiftDate: '2026-10-05', date: '2026-10-05', type: 'Elogio / Mérito Assistencial', severity: 'Positivo', title: 'Cobertura emergencial e elogio da família', description: 'Assumiu plantão coringa de última hora e recebeu elogio formal na Ouvidoria do hospital.' },
@@ -390,7 +410,6 @@ export const initialOccurrences = [
   { id: 904, targetType: 'Plantonista', doctorId: 2, shiftDate: '2026-10-14', date: '2026-10-14', type: 'Atraso / Pontualidade', severity: 'Atenção', title: 'Atraso de 25 minutos na rendição noturna', description: 'Justificou trânsito intenso devido a chuva forte; comunicou a chefia de plantão previamente.' }
 ];
 
-// Mural de Comunicados e Protocolos com Confirmação de Ciência ("Ciente")
 export const initialAnnouncements = [
   {
     id: 601,
@@ -443,8 +462,6 @@ export const initialCourses = [
   { id: 2, doctorId: 2, courseName: 'PALS (Suporte Avançado de Vida em Pediatria)', issueDate: '2024-09-10', expirationDate: '2026-09-10', mandatory: false, fileName: 'PALS_Ana.pdf', status: 'Vencido' },
   { id: 3, doctorId: 3, courseName: 'ATLS (Suporte Avançado de Vida no Trauma)', issueDate: '2024-01-15', expirationDate: '2028-01-15', mandatory: true, fileName: 'ATLS_Roberto.pdf', status: 'Válido' }
 ];
-
-// --- FUNÇÕES UTILITÁRIAS DE CÁLCULO DE TEMPO, SEMANA, COMPETÊNCIA E CONFLITOS ---
 
 export function calculateDurationHours(start: string, end: string) {
   if (!start || !end) return 12;
@@ -575,9 +592,6 @@ export function checkScheduleConflictOrOverload(
   return null;
 }
 
-// --- EXPORTAÇÕES DE PDF E PLANILHAS (XLS/CSV) ---
-
-// Item 1A: PDF do Heatmap Diário 24h
 export function exportDailyHeatmapPDF(config: any, heatmapDate: string, shifts: any[], hourlyDemand: any, getDoctorById: (id: any) => any) {
   const nextDateStr = getNextDateStr(heatmapDate);
   const dayShifts = shifts
@@ -685,7 +699,6 @@ export function exportDailyHeatmapPDF(config: any, heatmapDate: string, shifts: 
   printWindow.document.close();
 }
 
-// Item 1B: PDF do Mapa de Calor Semanal (Segunda a Domingo)
 export function exportWeeklyHeatmapPDF(config: any, baseDateStr: string, shifts: any[], hourlyDemand: any) {
   const { weekStart, weekEnd, daysList } = getWeekRangeMondayToSunday(baseDateStr);
   const printWindow = window.open('', '_blank', 'width=1280,height=850');
@@ -749,7 +762,6 @@ export function exportWeeklyHeatmapPDF(config: any, baseDateStr: string, shifts:
         </div>
         <div style="text-align: right; font-size: 10px; color: #64748b;">
           <div>Emitido em: ${new Date().toLocaleDateString('pt-BR')}</div>
-          <div>Legenda: <span style="color:#991b1b;font-weight:bold;">Vermelho = Déficit</span> | <span style="color:#166534;font-weight:bold;">Verde = Meta</span> | <span style="color:#1e40af;font-weight:bold;">Azul = Acima</span></div>
         </div>
       </div>
       <table style="width: 100%; border-collapse: collapse;">
@@ -773,7 +785,6 @@ export function exportWeeklyHeatmapPDF(config: any, baseDateStr: string, shifts:
   printWindow.document.close();
 }
 
-// Item 2: PDF da Escala Semanal (Segunda a Domingo com Detalhamento Diário)
 export function exportWeeklySchedulePDF(config: any, baseDateStr: string, categoryFilter: string, shifts: any[], getDoctorById: (id: any) => any) {
   const { weekStart, weekEnd, daysList } = getWeekRangeMondayToSunday(baseDateStr);
   const printWindow = window.open('', '_blank', 'width=1200,height=800');
@@ -850,7 +861,6 @@ export function exportWeeklySchedulePDF(config: any, baseDateStr: string, catego
   printWindow.document.close();
 }
 
-// Exportação em PDF da Agenda Individual do Médico
 export function exportDoctorIndividualSchedulePDF(config: any, doctor: any, shifts: any[]) {
   const myShifts = shifts
     .filter(s => Number(s.doctorId) === Number(doctor?.id))
@@ -899,13 +909,12 @@ export function exportDoctorIndividualSchedulePDF(config: any, doctor: any, shif
   printWindow.document.close();
 }
 
-// Item 3: Exportar Planilha Completa do Corpo Clínico (XLS/CSV)
 export function exportClinicalStaffCSV(config: any, doctors: any[], occurrences: any[]) {
   const headers = [
-    'Unidade', 'Nome do Medico', 'Username', 'Status', 'CRM', 'RQE', 'CPF',
-    'Especialidade', 'Participa da Escala Assistencial', 'Funcoes Acumuladas (Coord/Assistencial)',
-    'Nivel Senioridade', 'Modalidade Contrato', 'Razao Social (PJ)', 'CNPJ', 'E-mail', 'Telefone',
-    'Data de Inicio na Unidade', 'Data de Saida', 'Historico de Carga Horaria', 'Resumo de Ocorrencias do Medico'
+    'Unidade', 'Nome do Medico', 'Username', 'Status', 'Perfil Gestor Liberado', 'CRM', 'RQE', 'CPF',
+    'Especialidade', 'Participa da Escala Assistencial', 'Funcoes Acumuladas',
+    'Nivel Senioridade', 'Modalidade Contrato', 'Razao Social (PJ)', 'CNPJ', 'Email', 'Telefone',
+    'Data de Inicio na Unidade', 'Data de Saida', 'Historico de Carga Horaria', 'Resumo de Ocorrencias'
   ];
 
   const lines = [
@@ -927,11 +936,12 @@ export function exportClinicalStaffCSV(config: any, doctors: any[], occurrences:
         `"${d.name || ''}"`,
         `"${d.username || ''}"`,
         `"${d.status || ''}"`,
+        `"${d.hasManagerAccess ? 'Sim' : 'Nao'}"`,
         `"${d.crm || ''}"`,
         `"${d.rqe || ''}"`,
         `"${d.cpf || ''}"`,
         `"${d.specialty || ''}"`,
-        `"${d.participatesInSchedule === false ? 'Nao (Exclusivo Coordenacao)' : 'Sim (Participa da Escala)'}"`,
+        `"${d.participatesInSchedule === false ? 'Nao' : 'Sim'}"`,
         `"${rolesStr || d.role}"`,
         d.remunerationLevel || 1,
         `"${d.contractType || ''}"`,
@@ -941,8 +951,8 @@ export function exportClinicalStaffCSV(config: any, doctors: any[], occurrences:
         `"${d.phone || ''}"`,
         `"${d.joinDate || ''}"`,
         `"${d.exitDate || 'Em atividade'}"`,
-        `"${whStr || 'Sem alteracoes registradas'}"`,
-        `"${docOccs || 'Nenhuma ocorrencia registrada'}"`
+        `"${whStr || 'Sem alteracoes'}"`,
+        `"${docOccs || 'Nenhuma ocorrencia'}"`
       ].join(';');
     })
   ];
@@ -951,132 +961,61 @@ export function exportClinicalStaffCSV(config: any, doctors: any[], occurrences:
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `Corpo_Clinico_Completo_HGD_${new Date().toISOString().slice(0, 10)}.csv`;
+  a.download = `Corpo_Clinico_HGD_${new Date().toISOString().slice(0, 10)}.csv`;
   a.click();
 }
 
-// Item 4A: Exportar Folha de Pagamento PJ com Conferência de Competências e Dados Cadastrais Obrigatórios
 export function exportDetailedPayrollCSV(config: any, competenceWindow: { startStr: string; endStr: string }, payrollReport: any[]) {
   const headers = [
-    'Unidade',
-    'Competencia (26 a 25)',
-    'Nome do Medico',
-    'CRM',
-    'Razao Social',
-    'CNPJ',
-    'Email do Cadastro',
-    'Funcoes Acumuladas',
-    'Total Horas na Competencia',
-    'Qtd Plantoes Fixos',
-    'Valor Plantoes Fixos / Coord (R$)',
-    'Qtd Plantoes Avulsos / Extras',
-    'Valor Plantoes Avulsos / Extras (R$)',
-    'Adicionais Unitarios e Percentuais (R$)',
-    'Ajustes Manuais (R$)',
-    'Descontos de Passagens (R$)',
-    'Valor Liquido Final (R$)',
-    'Conferencia Detalhada das Competencias (Plantoes Fixos, Avulsos, Adicionais e Divergencias Sinalizadas)'
+    'Unidade', 'Competencia (26 a 25)', 'Nome do Medico', 'CRM', 'Razao Social', 'CNPJ', 'Email',
+    'Total Horas', 'Valor Fixo/Coord Sem Escala (R$)', 'Valor Plantoes Extras (R$)', 'Adicionais nos Plantoes (R$)',
+    'Adicionais no Mes (R$)', 'Ajustes Manuais (R$)', 'Descontos Passagens (R$)', 'Liquido Final (R$)'
   ];
-
   const compLabel = `${competenceWindow.startStr} a ${competenceWindow.endStr}`;
   const csvLines = [
     headers.join(';'),
-    ...payrollReport.map(r => {
-      const rolesStr = (r.accRoles || []).map((ar: any) => ar.roleName).join(' + ');
-      const conferenceSummary = [
-        `Fixos: ${r.fixedShiftsCount} plantoes (${r.fixedHoursWorked}h) = R$ ${r.baseFixedMonthly.toFixed(2)}`,
-        `Avulsos: ${r.extraShiftsCount} plantoes (${r.extraHoursWorked}h) = R$ ${r.extraShiftsAmount.toFixed(2)}`,
-        `Adicionais: R$ ${r.totalAdditionalsAmount.toFixed(2)}`,
-        r.doctorConferenceNote ? `Sinalizacao do Medico: ${r.doctorConferenceNote}` : 'Sem divergencias apontadas'
-      ].join(' | ');
-
-      return [
-        `"${config.sectorUnitName || 'Emergência Adulta - HGD'}"`,
-        `"${compLabel}"`,
-        `"${r.name || ''}"`,
-        `"${r.crm || ''}"`,
-        `"${r.razaoSocial || ''}"`,
-        `"${r.cnpj || ''}"`,
-        `"${r.email || ''}"`,
-        `"${rolesStr || r.role}"`,
-        r.totalHoursWorked,
-        r.fixedShiftsCount,
-        r.baseFixedMonthly.toFixed(2).replace('.', ','),
-        r.extraShiftsCount,
-        r.extraShiftsAmount.toFixed(2).replace('.', ','),
-        r.totalAdditionalsAmount.toFixed(2).replace('.', ','),
-        (r.manualAdjustmentsTotal || 0).toFixed(2).replace('.', ','),
-        r.totalDiscounts.toFixed(2).replace('.', ','),
-        r.netTotal.toFixed(2).replace('.', ','),
-        `"${conferenceSummary}"`
-      ].join(';');
-    })
+    ...payrollReport.map(r => [
+      `"${config.sectorUnitName || 'Emergência Adulta - HGD'}"`,
+      `"${compLabel}"`,
+      `"${r.name || ''}"`,
+      `"${r.crm || ''}"`,
+      `"${r.razaoSocial || ''}"`,
+      `"${r.cnpj || ''}"`,
+      `"${r.email || ''}"`,
+      r.totalHoursWorked,
+      Number(r.baseFixedMonthly || 0).toFixed(2),
+      Number(r.extraShiftsAmount || 0).toFixed(2),
+      Number(r.totalShiftAdditionalsOnly ?? r.totalAdditionalsAmount ?? 0).toFixed(2),
+      Number(r.totalMonthlyAdditionalsOnly ?? 0).toFixed(2),
+      Number(r.manualAdjustmentsTotal || 0).toFixed(2),
+      Number(r.totalDiscounts || 0).toFixed(2),
+      Number(r.netTotal || 0).toFixed(2)
+    ].join(';'))
   ];
 
   const blob = new Blob(['\uFEFF' + csvLines.join('\n')], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `Folha_Pagamento_PJ_${competenceWindow.startStr}_a_${competenceWindow.endStr}.csv`;
+  a.download = `Folha_PJ_${competenceWindow.startStr}_a_${competenceWindow.endStr}.csv`;
   a.click();
 }
 
-// Item 4B: Auditoria de Carga Horária (Duplo Check XLS/CSV)
 export function exportWorkloadAuditCSV(config: any, competenceWindow: { startStr: string; endStr: string }, payrollReport: any[]) {
   const headers = [
-    'Unidade / Setor',
-    'Competencia (26 a 25)',
-    'Nome do Medico',
-    'CRM',
-    'Razao Social',
-    'CNPJ',
-    'Email do Cadastro',
-    'Funcao Base',
-    'Modalidade Contrato',
-    'Total Horas na Competencia',
-    'Media Carga Horaria Semanal (h/sem)',
-    'Horas Fixas na Competencia',
-    'Qtd Plantoes Fixos',
-    'Horas Extras Avulsas na Competencia',
-    'Qtd Plantoes Extras Avulsos',
-    'Valor Fixo (R$)',
-    'Valor Plantoes Extras Avulsos (R$)',
-    'Adicionais Unitarios/Percentuais e Ajustes (R$)',
-    'Descontos Passagens (R$)',
-    'Liquido Final Folha (R$)',
-    'Observacao Analitica Detalhada (Duplo Check de Cada Plantao Fixo, Extra Avulso, Regra e Valor)'
+    'Unidade / Setor', 'Competencia (26 a 25)', 'Nome do Medico', 'CRM', 'Razao Social', 'CNPJ', 'Email',
+    'Total Horas', 'Media Semanal (h/sem)', 'Horas Fixas', 'Qtd Fixos', 'Horas Extras', 'Qtd Extras',
+    'Valor Fixo / Sem Escala (R$)', 'Valor Extras (R$)', 'Adicionais Plantao (R$)', 'Adicionais Mes (R$)', 'Liquido (R$)', 'Observacao'
   ];
-
   const compLabel = `${competenceWindow.startStr} a ${competenceWindow.endStr}`;
-
   const csvLines = [
     headers.join(';'),
     ...payrollReport.map(r => {
-      const fixedListStr = r.dailyBreakdown
-        .filter((d: any) => !d.isExtraShift)
-        .map((d: any) => `${d.date.slice(8, 10)}/${d.date.slice(5, 7)} (${d.startTime}-${d.endTime}: ${d.hours}h Fixo ${d.category})`)
-        .join(' | ');
-
-      const extraListStr = r.dailyBreakdown
-        .filter((d: any) => d.isExtraShift)
-        .map((d: any) => `${d.date.slice(8, 10)}/${d.date.slice(5, 7)} (${d.startTime}-${d.endTime}: ${d.hours}h Extra ${d.category} [${d.ruleLabel}] = R$ ${d.shiftBaseVal.toFixed(2)})`)
-        .join(' | ');
-
-      const addsStr = (r.additionalsList || [])
-        .map((a: any) => `${a.name} (${a.date}): R$ ${Number(a.amount).toFixed(2)}`)
-        .join(' | ');
-
-      const manualAdjsStr = (r.docManualAdjs || [])
-        .map((a: any) => `${a.description}: R$ ${Number(a.amount).toFixed(2)}`)
-        .join(' | ');
-
-      const observationField = [
-        `CARGA FIXA (${r.fixedHoursWorked}h em ${r.fixedShiftsCount} plantoes; ~${r.weeklyAvgFixedHours}h/sem): ${fixedListStr || 'Nenhum plantao fixo'}`,
-        `EXTRAS AVULSOS (${r.extraHoursWorked}h em ${r.extraShiftsCount} plantoes; ~${r.weeklyAvgExtraHours}h/sem): ${extraListStr || 'Nenhum plantao extra'}`,
-        addsStr ? `ADICIONAIS: ${addsStr}` : '',
-        manualAdjsStr ? `AJUSTES MANUAIS: ${manualAdjsStr}` : ''
-      ].filter(Boolean).join(' /// ');
-
+      const shiftAddVal = Number(r.totalShiftAdditionalsOnly ?? r.totalAdditionalsAmount ?? 0);
+      const monthAddVal = Number(r.totalMonthlyAdditionalsOnly ?? 0);
+      const fixedStr = r.dailyBreakdown.filter((d: any) => !d.isExtraShift).map((d: any) => `${d.date}: ${d.hours}h Fixo`).join(' | ');
+      const extraStr = r.dailyBreakdown.filter((d: any) => d.isExtraShift).map((d: any) => `${d.date}: ${d.hours}h Extra (R$ ${d.shiftBaseVal.toFixed(2)})`).join(' | ');
+      const obs = `FIXO: ${fixedStr} /// EXTRAS: ${extraStr} /// ADICIONAIS PLANTAO: R$ ${shiftAddVal.toFixed(2)} /// ADICIONAIS MES: R$ ${monthAddVal.toFixed(2)}`;
       return [
         `"${config.sectorUnitName || 'Emergência Adulta - HGD'}"`,
         `"${compLabel}"`,
@@ -1085,20 +1024,18 @@ export function exportWorkloadAuditCSV(config: any, competenceWindow: { startStr
         `"${r.razaoSocial || ''}"`,
         `"${r.cnpj || ''}"`,
         `"${r.email || ''}"`,
-        `"${r.role || ''}"`,
-        `"${r.contractType || ''}"`,
         r.totalHoursWorked,
         `"${r.weeklyAvgTotalHours}h/sem"`,
         r.fixedHoursWorked,
         r.fixedShiftsCount,
         r.extraHoursWorked,
         r.extraShiftsCount,
-        r.baseFixedMonthly.toFixed(2).replace('.', ','),
-        r.extraShiftsAmount.toFixed(2).replace('.', ','),
-        (r.totalAdditionalsAmount + (r.manualAdjustmentsTotal || 0)).toFixed(2).replace('.', ','),
-        r.totalDiscounts.toFixed(2).replace('.', ','),
-        r.netTotal.toFixed(2).replace('.', ','),
-        `"${observationField}"`
+        Number(r.baseFixedMonthly || 0).toFixed(2).replace('.', ','),
+        Number(r.extraShiftsAmount || 0).toFixed(2).replace('.', ','),
+        shiftAddVal.toFixed(2).replace('.', ','),
+        monthAddVal.toFixed(2).replace('.', ','),
+        Number(r.netTotal || 0).toFixed(2).replace('.', ','),
+        `"${obs}"`
       ].join(';');
     })
   ];
@@ -1107,6 +1044,6 @@ export function exportWorkloadAuditCSV(config: any, competenceWindow: { startStr
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `Auditoria_Carga_Horaria_DuploCheck_${competenceWindow.startStr}_a_${competenceWindow.endStr}.csv`;
+  a.download = `Auditoria_Carga_Horaria_${competenceWindow.startStr}_a_${competenceWindow.endStr}.csv`;
   a.click();
 }

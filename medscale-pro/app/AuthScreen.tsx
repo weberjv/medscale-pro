@@ -57,19 +57,29 @@ export default function AuthScreen({
     e.preventDefault();
     setAuthMessage(null);
     const cleanInput = loginUser.trim().toLowerCase();
+    const masterPass = config?.masterAdminPassword || 'admin123';
 
-    // Acesso do Gestor (aceita username "gestor" ou o e-mail administrativo)
-    if ((cleanInput === 'gestor' || cleanInput === 'gestor@medscale.com.br') && loginPassword === 'admin123') {
+    // 1. Acesso do Login Mestre (Gestor Principal)
+    if (cleanInput === 'gestor' || cleanInput === 'gestor@medscale.com.br') {
+      if (loginPassword !== masterPass) {
+        setAuthMessage({
+          type: 'error',
+          text: 'Senha do Login Mestre (Gestor) incorreta.'
+        });
+        return;
+      }
       onLoginSuccess({
         role: 'admin',
+        isMasterAdmin: true,
+        canManage: true,
         username: 'gestor',
-        name: 'Gestor Hospitalar',
+        name: 'Gestor Mestre',
         email: 'gestor@medscale.com.br'
       });
       return;
     }
 
-    // Busca médico por Username ou E-mail
+    // 2. Busca médico por Username ou E-mail
     const foundDoc = doctors.find(
       d =>
         (d.username && d.username.toLowerCase() === cleanInput) ||
@@ -95,7 +105,7 @@ export default function AuthScreen({
     if (foundDoc.status === 'Pendente') {
       setAuthMessage({
         type: 'warning',
-        text: `Olá, ${foundDoc.name}! Seu cadastro e documentos já foram recebidos e aguardam a aprovação do Gestor da unidade.`
+        text: `Olá, ${foundDoc.name}! Seu cadastro já foi enviado e aguarda a aprovação do Gestor da unidade.`
       });
       return;
     }
@@ -116,8 +126,13 @@ export default function AuthScreen({
       return;
     }
 
+    // Se o Login Mestre liberou acesso de Gestor para este médico, ele entra com canManage = true (mas isMasterAdmin = false)
+    const hasManagerRole = Boolean(foundDoc.hasManagerAccess);
+
     onLoginSuccess({
-      role: 'doctor',
+      role: hasManagerRole ? 'admin' : 'doctor',
+      isMasterAdmin: false,
+      canManage: hasManagerRole,
       id: foundDoc.id,
       username: foundDoc.username || foundDoc.email,
       name: foundDoc.name,
@@ -258,8 +273,10 @@ export default function AuthScreen({
       remunerationLevel: 1,
       contractType: 'Coringa / Extra',
       participatesInSchedule: true,
+      hasManagerAccess: false,
       allowedFunctions: ['Plantonista'],
       defaultShiftAdditionals: [],
+      monthlyAdditionals: [],
       fixedMonthlyAdditional: 0,
       fixedMonthlyAdditionalLabel: '',
       fixedMonthlyAdditionalMode: 'fixed',
@@ -321,7 +338,6 @@ export default function AuthScreen({
   return (
     <div className="min-h-screen bg-slate-900 flex flex-col justify-center items-center p-4 text-slate-800">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 sm:p-8 space-y-6">
-        {/* Cabeçalho Limpo — Sem subtítulo Hospital Geral & Maternidade */}
         <div className="text-center space-y-1.5">
           <span className="px-3.5 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-extrabold uppercase tracking-wide inline-block">
             {config?.sectorUnitName || 'Emergência Adulta - HGD'}
@@ -331,7 +347,6 @@ export default function AuthScreen({
           </h1>
         </div>
 
-        {/* Seletor de Abas */}
         <div className="flex bg-slate-100 p-1 rounded-xl text-xs font-bold">
           <button
             type="button"
@@ -359,7 +374,6 @@ export default function AuthScreen({
           </button>
         </div>
 
-        {/* Mensagens de Alerta / Confirmação */}
         {authMessage && (
           <div
             className={`p-3.5 rounded-xl text-xs font-semibold flex items-start gap-2.5 border ${
@@ -379,7 +393,6 @@ export default function AuthScreen({
           </div>
         )}
 
-        {/* ABA 1: LOGIN LIMPO POR USERNAME */}
         {authTab === 'login' && (
           <form onSubmit={handleLogin} className="space-y-4" autoComplete="off">
             <div>
@@ -442,7 +455,6 @@ export default function AuthScreen({
           </form>
         )}
 
-        {/* ABA 2: RECUPERAÇÃO DE SENHA ("ESQUECI MINHA SENHA") */}
         {authTab === 'forgot' && (
           <form onSubmit={handleForgotPasswordSubmit} className="space-y-4 text-xs">
             <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-blue-900">
@@ -517,7 +529,6 @@ export default function AuthScreen({
           </form>
         )}
 
-        {/* ABA 3: AUTO-CADASTRO MÉDICO COMPLETO */}
         {authTab === 'register' && (
           <form onSubmit={handleRegisterSubmit} className="space-y-3 text-xs max-h-[70vh] overflow-y-auto pr-1">
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
@@ -684,7 +695,6 @@ export default function AuthScreen({
                 />
               </div>
 
-              {/* Upload de Documentos Comprobatórios */}
               <div className="sm:col-span-2 pt-2">
                 <label className="block font-bold text-slate-700 mb-1">
                   Anexar Documentos (Carteira CRM, RQE, Cartão CNPJ)

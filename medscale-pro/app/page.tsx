@@ -1,17 +1,20 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
-  Users, Calendar as CalendarIcon, Repeat, DollarSign,
-  Umbrella, BookOpen, LogOut, Sliders, Activity, BarChart2,
-  Flame, Menu, X, AlertTriangle, Bell
+  Calendar, Users, DollarSign, RefreshCw, Umbrella, GraduationCap,
+  Sliders, ShieldAlert, LayoutDashboard, LogOut, Menu, X, Flame,
+  Megaphone, ClipboardList, History, UserCheck, Shield, Wifi, WifiOff
 } from 'lucide-react';
 import { createClient } from '@/supabase/client';
-import { syncStateToSupabase } from '@/utils/migrateLegacyLocalStorage';
+import {
+  syncStateToSupabase,
+  fetchStateFromSupabase,
+  CLOUD_STATE_ROW_ID
+} from '@/utils/migrateLegacyLocalStorage';
 
 import {
   DEFAULT_CONFIG,
-  ALL_FUNCTIONS,
   DEFAULT_HOURLY_DEMAND,
   initialDoctors,
   initialShifts,
@@ -24,366 +27,337 @@ import {
   initialCourses,
   calculateDurationHours,
   getWeekdayName,
-  getCompetenceWindow,
-  exportWorkloadAuditCSV
+  getCompetenceWindow
 } from './medscaleData';
 
 import AuthScreen from './AuthScreen';
-import ScheduleAndMapViews from './ScheduleAndMapViews';
+import ScheduleAndMapViewsOrig from './ScheduleAndMapViews';
 import StaffAndFinanceViews from './StaffAndFinanceViews';
 import GovernanceAndModals from './GovernanceAndModals';
 
-export default function MedScaleApp() {
-  const supabase = useMemo(() => createClient(), []);
-  const [syncingSupabase, setSyncingSupabase] = useState(false);
-  const [syncNotification, setSyncNotification] = useState<string | null>(null);
+const ScheduleAndMapViews = ScheduleAndMapViewsOrig as any;
 
-  // --- ESTADOS GLOBAIS PERSISTIDOS ---
+export default function MedScaleProApp() {
+  const [isHydrated, setIsHydrated] = useState(false);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [managerViewMode, setManagerViewMode] = useState<'admin' | 'doctor'>('admin');
+  const [currentView, setCurrentView] = useState<string>('dashboard');
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+
   const [config, setConfig] = useState<any>(DEFAULT_CONFIG);
+  const [hourlyDemand, setHourlyDemand] = useState<any>(DEFAULT_HOURLY_DEMAND);
   const [doctors, setDoctors] = useState<any[]>(initialDoctors);
   const [shifts, setShifts] = useState<any[]>(initialShifts);
   const [openShifts, setOpenShifts] = useState<any[]>(initialOpenShifts);
   const [doctorAvailability, setDoctorAvailability] = useState<any[]>(initialDoctorAvailability);
+  const [occurrences, setOccurrences] = useState<any[]>(initialOccurrences);
+  const [announcements, setAnnouncements] = useState<any[]>(initialAnnouncements);
   const [swaps, setSwaps] = useState<any[]>(initialSwaps);
   const [vacations, setVacations] = useState<any[]>(initialVacations);
   const [courses, setCourses] = useState<any[]>(initialCourses);
-  const [payrollStatus, setPayrollStatus] = useState<Record<number, string>>({
-    1: 'Fechada',
-    2: 'Pendente',
-    3: 'Pago',
-    5: 'Pago'
-  });
-  const [hourlyDemand, setHourlyDemand] = useState<any>(DEFAULT_HOURLY_DEMAND);
-  const [occurrences, setOccurrences] = useState<any[]>(initialOccurrences);
-  const [announcements, setAnnouncements] = useState<any[]>(initialAnnouncements);
-  const [doctorConferenceData, setDoctorConferenceData] = useState<
-    Record<string, { checked: boolean; checkedAt?: string; errorNote?: string }>
-  >({});
-  const [auditLogs, setAuditLogs] = useState<
-    { id: number; timestamp: string; user: string; description: string; previousState?: any }[]
-  >([]);
+  const [auditTrail, setAuditTrail] = useState<any[]>([]);
 
-  // Carregamento inicial do LocalStorage
+  const [competenceMonth, setCompetenceMonth] = useState<string>('2026-10');
+  const [payrollClosed, setPayrollClosed] = useState<boolean>(false);
+  const [manualPayrollAdjustments, setManualPayrollAdjustments] = useState<Record<number, { description: string; amount: number }[]>>({});
+  const [shiftCustomOverrides, setShiftCustomOverrides] = useState<Record<number, { customRate12h?: number; customFixedTotal?: number }>>({});
+  const [doctorConferenceData, setDoctorConferenceData] = useState<Record<string, { checked: boolean; checkedAt?: string; errorNote?: string }>>({});
+
+  const [isDoctorModalOpen, setIsDoctorModalOpen] = useState(false);
+  const [editingDoctor, setEditingDoctor] = useState<any | null>(null);
+  const [syncStatusMsg, setSyncStatusMsg] = useState<string>('');
+  const [realtimeStatus, setRealtimeStatus] = useState<'connecting' | 'online' | 'offline'>('connecting');
+
+  // Referências para controle de Sincronização em Tempo Real sem loop infinito
+  const clientIdRef = useRef<string>(`client_${Math.random().toString(36).slice(2, 10)}_${Date.now()}`);
+  const isCloudReadyRef = useRef<boolean>(false);
+  const lastStateSignatureRef = useRef<string>('');
+
+  const applyRemotePayload = (remote: any) => {
+    if (!remote || typeof remote !== 'object') return;
+
+    const cleanSnapshot = {
+      config: remote.config ? { ...DEFAULT_CONFIG, ...remote.config } : DEFAULT_CONFIG,
+      hourlyDemand: remote.hourlyDemand || DEFAULT_HOURLY_DEMAND,
+      doctors: Array.isArray(remote.doctors) ? remote.doctors : initialDoctors,
+      shifts: Array.isArray(remote.shifts) ? remote.shifts : initialShifts,
+      openShifts: Array.isArray(remote.openShifts) ? remote.openShifts : initialOpenShifts,
+      doctorAvailability: Array.isArray(remote.doctorAvailability) ? remote.doctorAvailability : initialDoctorAvailability,
+      occurrences: Array.isArray(remote.occurrences) ? remote.occurrences : initialOccurrences,
+      announcements: Array.isArray(remote.announcements) ? remote.announcements : initialAnnouncements,
+      swaps: Array.isArray(remote.swaps) ? remote.swaps : initialSwaps,
+      vacations: Array.isArray(remote.vacations) ? remote.vacations : initialVacations,
+      courses: Array.isArray(remote.courses) ? remote.courses : initialCourses,
+      auditTrail: Array.isArray(remote.auditTrail) ? remote.auditTrail : [],
+      manualPayrollAdjustments: remote.manualPayrollAdjustments || {},
+      shiftCustomOverrides: remote.shiftCustomOverrides || {},
+      doctorConferenceData: remote.doctorConferenceData || {}
+    };
+
+    lastStateSignatureRef.current = JSON.stringify(cleanSnapshot);
+
+    setConfig(cleanSnapshot.config);
+    setHourlyDemand(cleanSnapshot.hourlyDemand);
+    setDoctors(cleanSnapshot.doctors);
+    setShifts(cleanSnapshot.shifts);
+    setOpenShifts(cleanSnapshot.openShifts);
+    setDoctorAvailability(cleanSnapshot.doctorAvailability);
+    setOccurrences(cleanSnapshot.occurrences);
+    setAnnouncements(cleanSnapshot.announcements);
+    setSwaps(cleanSnapshot.swaps);
+    setVacations(cleanSnapshot.vacations);
+    setCourses(cleanSnapshot.courses);
+    setAuditTrail(cleanSnapshot.auditTrail);
+    setManualPayrollAdjustments(cleanSnapshot.manualPayrollAdjustments);
+    setShiftCustomOverrides(cleanSnapshot.shiftCustomOverrides);
+    setDoctorConferenceData(cleanSnapshot.doctorConferenceData);
+  };
+
+  // 1. Carrega LocalStorage e conecta ao Supabase Realtime ao iniciar
   useEffect(() => {
+    let localParsed: any = null;
     try {
-      const load = (k: string, fb: any) => {
-        const s = localStorage.getItem(`medscale_v10_${k}`);
-        return s ? JSON.parse(s) : fb;
-      };
-      setConfig((prev: any) => ({
-        ...DEFAULT_CONFIG,
-        ...prev,
-        ...load('config', DEFAULT_CONFIG),
-        sectorUnitName: 'Emergência Adulta - HGD'
-      }));
-      setDoctors(load('doctors', initialDoctors));
-      setShifts(load('shifts', initialShifts));
-      setOpenShifts(load('openShifts', initialOpenShifts));
-      setDoctorAvailability(load('doctorAvailability', initialDoctorAvailability));
-      setSwaps(load('swaps', initialSwaps));
-      setVacations(load('vacations', initialVacations));
-      setCourses(load('courses', initialCourses));
-      setPayrollStatus(load('payrollStatus', { 1: 'Fechada', 2: 'Pendente', 3: 'Pago', 5: 'Pago' }));
-      setHourlyDemand(load('hourlyDemand', DEFAULT_HOURLY_DEMAND));
-      setOccurrences(load('occurrences', initialOccurrences));
-      setAnnouncements(load('announcements', initialAnnouncements));
-      setDoctorConferenceData(load('doctorConferenceData', {}));
-    } catch {
-      // Ignora falha de leitura local
+      const saved = localStorage.getItem('medscale_pro_state_v2');
+      if (saved) {
+        localParsed = JSON.parse(saved);
+        applyRemotePayload(localParsed);
+      }
+    } catch (e) {
+      console.error('Erro ao ler LocalStorage:', e);
     }
+
+    setIsHydrated(true);
+
+    const supabase = createClient();
+    let channel: any = null;
+
+    const initCloudAndRealtime = async () => {
+      try {
+        const cloudPayload = await fetchStateFromSupabase(supabase);
+        if (cloudPayload && Array.isArray(cloudPayload.doctors) && cloudPayload.doctors.length > 0) {
+          applyRemotePayload(cloudPayload);
+        } else {
+          // Se a nuvem estiver vazia na primeira vez, sobe os dados atuais para inicializar a nuvem
+          const initialToUpload = localParsed || {
+            config: DEFAULT_CONFIG,
+            hourlyDemand: DEFAULT_HOURLY_DEMAND,
+            doctors: initialDoctors,
+            shifts: initialShifts,
+            openShifts: initialOpenShifts,
+            doctorAvailability: initialDoctorAvailability,
+            occurrences: initialOccurrences,
+            announcements: initialAnnouncements,
+            swaps: initialSwaps,
+            vacations: initialVacations,
+            courses: initialCourses,
+            auditTrail: [],
+            manualPayrollAdjustments: {},
+            shiftCustomOverrides: {},
+            doctorConferenceData: {}
+          };
+          await syncStateToSupabase(supabase, {
+            ...initialToUpload,
+            updatedByClientId: clientIdRef.current
+          });
+        }
+        isCloudReadyRef.current = true;
+        setRealtimeStatus('online');
+      } catch (err) {
+        console.warn('Modo local ativo (verifique tabela medscale_app_state no Supabase):', err);
+        isCloudReadyRef.current = true;
+        setRealtimeStatus('offline');
+      }
+
+      // Subscreve ao canal Realtime para receber atualizações ao vivo de outros aparelhos
+      channel = supabase
+        .channel('medscale_live_sync')
+        .on(
+          'postgres_changes',
+          {
+            event: '*',
+            schema: 'public',
+            table: 'medscale_app_state',
+            filter: `id=eq.${CLOUD_STATE_ROW_ID}`
+          },
+          (eventPayload: any) => {
+            const incoming = eventPayload?.new?.payload;
+            if (!incoming) return;
+            if (incoming.updatedByClientId === clientIdRef.current) return;
+            applyRemotePayload(incoming);
+            setRealtimeStatus('online');
+          }
+        )
+        .subscribe((status: string) => {
+          if (status === 'SUBSCRIBED') {
+            setRealtimeStatus('online');
+          }
+        });
+    };
+
+    initCloudAndRealtime();
+
+    return () => {
+      if (channel) {
+        supabase.removeChannel(channel);
+      }
+    };
   }, []);
 
-  // Salvamento automático no LocalStorage
-  useEffect(() => { localStorage.setItem('medscale_v10_config', JSON.stringify(config)); }, [config]);
-  useEffect(() => { localStorage.setItem('medscale_v10_doctors', JSON.stringify(doctors)); }, [doctors]);
-  useEffect(() => { localStorage.setItem('medscale_v10_shifts', JSON.stringify(shifts)); }, [shifts]);
-  useEffect(() => { localStorage.setItem('medscale_v10_openShifts', JSON.stringify(openShifts)); }, [openShifts]);
-  useEffect(() => { localStorage.setItem('medscale_v10_doctorAvailability', JSON.stringify(doctorAvailability)); }, [doctorAvailability]);
-  useEffect(() => { localStorage.setItem('medscale_v10_swaps', JSON.stringify(swaps)); }, [swaps]);
-  useEffect(() => { localStorage.setItem('medscale_v10_vacations', JSON.stringify(vacations)); }, [vacations]);
-  useEffect(() => { localStorage.setItem('medscale_v10_courses', JSON.stringify(courses)); }, [courses]);
-  useEffect(() => { localStorage.setItem('medscale_v10_payrollStatus', JSON.stringify(payrollStatus)); }, [payrollStatus]);
-  useEffect(() => { localStorage.setItem('medscale_v10_hourlyDemand', JSON.stringify(hourlyDemand)); }, [hourlyDemand]);
-  useEffect(() => { localStorage.setItem('medscale_v10_occurrences', JSON.stringify(occurrences)); }, [occurrences]);
-  useEffect(() => { localStorage.setItem('medscale_v10_announcements', JSON.stringify(announcements)); }, [announcements]);
-  useEffect(() => { localStorage.setItem('medscale_v10_doctorConferenceData', JSON.stringify(doctorConferenceData)); }, [doctorConferenceData]);
+  // 2. Guarda automaticamente no LocalStorage e envia para a Nuvem em Tempo Real a cada alteração
+  useEffect(() => {
+    if (!isHydrated) return;
 
-  // --- SESSÃO E NAVEGAÇÃO ---
-  const [currentUser, setCurrentUser] = useState<any>(null);
-  const [currentView, setCurrentView] = useState('dashboard');
-  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-
-  // --- ESTADOS FINANCEIROS ---
-  const [competenceMonth, setCompetenceMonth] = useState('2026-10');
-  const [payrollClosed, setPayrollClosed] = useState(false);
-  const [manualPayrollAdjustments, setManualPayrollAdjustments] = useState<
-    Record<number, { description: string; amount: number }[]>
-  >({});
-  const [shiftCustomOverrides, setShiftCustomOverrides] = useState<
-    Record<number, { customRate12h?: number; customFixedTotal?: number }>
-  >({});
-
-  // --- ESTADOS DOS MODAIS ---
-  const [showShiftModal, setShowShiftModal] = useState(false);
-  const [editingShiftId, setEditingShiftId] = useState<number | null>(null);
-  const [newShift, setNewShift] = useState<any>({
-    date: '2026-10-18',
-    startTime: '07:00',
-    endTime: '19:00',
-    category: 'Médico Rotina/Sênior',
-    doctorId: '',
-    type: 'Plantão Diurno 12h',
-    billingType: 'Coringa/Extra',
-    ruleId: '',
-    customRate12h: '',
-    additionals: []
-  });
-
-  const [showSwapModal, setShowSwapModal] = useState(false);
-  const [selectedShiftForSwap, setSelectedShiftForSwap] = useState<any>(null);
-  const [swapForm, setSwapForm] = useState<any>({
-    proposedDoctorId: '',
-    movementType: 'Passagem',
-    isPartial: false,
-    swapStartTime: '07:00',
-    swapEndTime: '13:00',
-    reason: ''
-  });
-  const [showHandoffWarningPopup, setShowHandoffWarningPopup] = useState(false);
-  const [handoffWarningAcknowledged, setHandoffWarningAcknowledged] = useState(false);
-
-  const [showDoctorEditModal, setShowDoctorEditModal] = useState(false);
-  const [doctorForm, setDoctorForm] = useState<any>({
-    id: null,
-    username: '',
-    name: '',
-    cpf: '',
-    birthDate: '1990-01-01',
-    email: '',
-    password: '123',
-    phone: '',
-    crm: '',
-    rqe: '',
-    specialty: 'Clínica Médica',
-    razaoSocial: '',
-    cnpj: '',
-    joinDate: '2026-01-01',
-    exitDate: '',
-    role: 'Plantonista',
-    remunerationLevel: 1,
-    contractType: 'Coringa / Extra',
-    participatesInSchedule: true,
-    allowedFunctions: ['Plantonista'],
-    defaultShiftAdditionals: [],
-    fixedMonthlyAdditional: 0,
-    fixedMonthlyAdditionalLabel: '',
-    accumulatedRoles: [],
-    workloadHistory: [],
-    status: 'Ativo'
-  });
-
-  const [showCourseModal, setShowCourseModal] = useState(false);
-  const [courseForm, setCourseForm] = useState<any>({
-    id: null,
-    doctorId: 1,
-    courseName: 'ACLS (Suporte Avançado de Vida em Cardiologia)',
-    issueDate: '2026-05-20',
-    expirationDate: '2028-05-20',
-    fileName: 'Certificado.pdf'
-  });
-
-  const [showVacationModal, setShowVacationModal] = useState(false);
-  const [vacationForm, setVacationForm] = useState<any>({
-    doctorId: 1,
-    requestType: 'Férias',
-    leaveSubtype: 'Férias Regulamentares',
-    startDate: '2026-11-10',
-    endDate: '2026-11-20',
-    justification: ''
-  });
-
-  const [showOccurrenceModal, setShowOccurrenceModal] = useState(false);
-  const [newOccurrence, setNewOccurrence] = useState<any>({
-    targetType: 'Plantonista',
-    doctorId: 1,
-    date: '2026-10-18',
-    type: 'Intercorrência Administrativa',
-    severity: 'Atenção',
-    title: '',
-    description: ''
-  });
-
-  // --- AUDITORIA EM TEMPO REAL COM BOTÃO DESFAZER (UNDO) ---
-  const recordAction = (description: string) => {
-    const snapshot = {
-      doctors: JSON.parse(JSON.stringify(doctors)),
-      shifts: JSON.parse(JSON.stringify(shifts)),
-      swaps: JSON.parse(JSON.stringify(swaps)),
-      vacations: JSON.parse(JSON.stringify(vacations)),
-      courses: JSON.parse(JSON.stringify(courses)),
-      occurrences: JSON.parse(JSON.stringify(occurrences)),
-      config: JSON.parse(JSON.stringify(config))
+    const currentSnapshot = {
+      config,
+      hourlyDemand,
+      doctors,
+      shifts,
+      openShifts,
+      doctorAvailability,
+      occurrences,
+      announcements,
+      swaps,
+      vacations,
+      courses,
+      auditTrail,
+      manualPayrollAdjustments,
+      shiftCustomOverrides,
+      doctorConferenceData
     };
-    const nowStr = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    setAuditLogs(prev => [
-      {
-        id: Date.now(),
-        timestamp: nowStr,
-        user: currentUser?.name || 'Sistema',
-        description,
-        previousState: snapshot
-      },
-      ...prev.slice(0, 29)
-    ]);
-  };
 
-  const handleUndoAuditLog = (logId: number) => {
-    const targetLog = auditLogs.find(l => l.id === logId);
-    if (!targetLog || !targetLog.previousState) return;
-    const st = targetLog.previousState;
-    setDoctors(st.doctors);
-    setShifts(st.shifts);
-    setSwaps(st.swaps);
-    setVacations(st.vacations);
-    setCourses(st.courses);
-    setOccurrences(st.occurrences);
-    setConfig(st.config);
-    setAuditLogs(prev => prev.filter(l => l.id !== logId));
-  };
-
-  const handleSyncWithSupabase = async () => {
-    setSyncingSupabase(true);
-    setSyncNotification(null);
     try {
-      const res = await syncStateToSupabase(supabase, {
-        config,
-        doctors,
-        shifts,
-        swaps,
-        vacations,
-        courses,
-        hourlyDemand
-      });
-      setSyncNotification(res.message);
-    } catch (err: any) {
-      setSyncNotification(`Aviso ao sincronizar: ${err?.message || 'Dados salvos localmente.'}`);
-    } finally {
-      setSyncingSupabase(false);
+      localStorage.setItem('medscale_pro_state_v2', JSON.stringify(currentSnapshot));
+    } catch (e) {
+      console.error('Erro ao guardar LocalStorage:', e);
     }
+
+    if (!isCloudReadyRef.current) return;
+
+    const newSignature = JSON.stringify(currentSnapshot);
+    if (newSignature === lastStateSignatureRef.current) return;
+
+    lastStateSignatureRef.current = newSignature;
+
+    const timer = setTimeout(async () => {
+      try {
+        const supabase = createClient();
+        await syncStateToSupabase(supabase, {
+          ...currentSnapshot,
+          updatedByClientId: clientIdRef.current
+        });
+        setRealtimeStatus('online');
+      } catch (err) {
+        console.warn('Falha ao enviar atualização automática para a nuvem:', err);
+        setRealtimeStatus('offline');
+      }
+    }, 350);
+
+    return () => clearTimeout(timer);
+  }, [
+    isHydrated,
+    config,
+    hourlyDemand,
+    doctors,
+    shifts,
+    openShifts,
+    doctorAvailability,
+    occurrences,
+    announcements,
+    swaps,
+    vacations,
+    courses,
+    auditTrail,
+    manualPayrollAdjustments,
+    shiftCustomOverrides,
+    doctorConferenceData
+  ]);
+
+  // Verifica permissões reais em tempo real
+  const isMasterAdmin = Boolean(currentUser?.isMasterAdmin);
+  const loggedDoctorObj = useMemo(
+    () => doctors.find(d => Number(d.id) === Number(currentUser?.id)),
+    [doctors, currentUser]
+  );
+  const canUserManage = isMasterAdmin || Boolean(loggedDoctorObj?.hasManagerAccess) || Boolean(currentUser?.canManage);
+  const isAdmin = isMasterAdmin ? true : canUserManage && managerViewMode === 'admin';
+
+  const recordAction = (description: string) => {
+    const actorName = isMasterAdmin
+      ? 'Gestor Mestre'
+      : currentUser?.name
+      ? `${currentUser.name}${canUserManage ? ' [Perfil Gestor]' : ''}`
+      : 'Sistema';
+    const newEntry = {
+      id: Date.now(),
+      timestamp: new Date().toLocaleString('pt-BR'),
+      user: actorName,
+      description
+    };
+    setAuditTrail(prev => [newEntry, ...prev.slice(0, 199)]);
   };
-
-  // --- FUNÇÕES AUXILIARES DE NEGÓCIO ---
-  const isAdmin = currentUser?.role === 'admin';
-  const activeDoctors = useMemo(() => doctors.filter(d => d.status === 'Ativo'), [doctors]);
-  const scheduleActiveDoctors = useMemo(
-    () => activeDoctors.filter(d => d.participatesInSchedule !== false),
-    [activeDoctors]
-  );
-  const adminDoctors = useMemo(
-    () =>
-      activeDoctors.filter(
-        d =>
-          d.participatesInSchedule === false ||
-          (d.accumulatedRoles || []).some((r: any) => r.categoryType === 'administrativa')
-      ),
-    [activeDoctors]
-  );
-  const pendingDoctors = useMemo(() => doctors.filter(d => d.status === 'Pendente'), [doctors]);
-
-  const dynamicCategories = useMemo(() => {
-    const keys = Object.keys(config.functionRates || {});
-    return keys.length > 0 ? keys : ALL_FUNCTIONS;
-  }, [config.functionRates]);
 
   const getDoctorById = (id: any) => doctors.find(d => Number(d.id) === Number(id));
-  const getDoctorName = (id: any) => getDoctorById(id)?.name || 'Médico não encontrado';
+
+  const dynamicCategories = useMemo(() => {
+    return Object.keys(config.functionRates || {});
+  }, [config.functionRates]);
 
   const getCategoryRulesList = (catName: string) => {
-    const catData = config.functionRates?.[catName];
-    if (!catData) {
-      return [
-        { id: 'fixo_mensal', label: 'Fixo Mensal / Semanal', billingMode: 'fixo_mensal', value: 15000 },
-        { id: 'extra_12h', label: 'Extra Avulso 12h (Dia Útil)', billingMode: 'por_12h', value: 1400 },
-        { id: 'extra_fds_12h', label: 'Extra Avulso 12h (Fim de Semana)', billingMode: 'por_12h', value: 1650 }
-      ];
-    }
-    if (Array.isArray(catData.rules)) return catData.rules;
-    return [
-      { id: 'fixo_mensal', label: 'Fixo Mensal / Semanal', billingMode: 'fixo_mensal', value: Number(catData.mensalFixo || 15000) },
-      { id: 'extra_12h', label: 'Plantão Extra Avulso 12h', billingMode: 'por_12h', value: Number(catData.extra12h || 1400) }
-    ];
+    return config.functionRates?.[catName]?.rules || [];
   };
 
-  const isDoctorAllowedForFunction = (doc: any, funcName: string) => {
-    if (!doc || doc.status !== 'Ativo') return false;
-    if (doc.participatesInSchedule === false) return false;
-    if (config.functionRates?.[funcName]?.unrestrictedSwaps) return true;
-    const accClinical = (doc.accumulatedRoles || [])
-      .filter((r: any) => r.categoryType === 'assistencial')
-      .map((r: any) => r.roleName);
-    const combinedAllowed = Array.from(new Set([...(doc.allowedFunctions || []), ...accClinical]));
-    if (combinedAllowed.length === 0) return doc.role === funcName;
-    return combinedAllowed.includes(funcName);
-  };
+  const activeDoctors = useMemo(
+    () => doctors.filter(d => d.status === 'Ativo' && d.participatesInSchedule !== false),
+    [doctors]
+  );
 
-  const getDoctorLevelForFunction = (doc: any, categoryName: string) => {
-    if (!doc) return 1;
-    const matchedRole = (doc.accumulatedRoles || []).find(
-      (r: any) => r.categoryType === 'assistencial' && r.roleName === categoryName && r.level
-    );
-    if (matchedRole) return Number(matchedRole.level);
-    return Number(doc.remunerationLevel || 1);
-  };
+  const adminDoctors = useMemo(
+    () => doctors.filter(d => d.status === 'Ativo' && d.participatesInSchedule === false),
+    [doctors]
+  );
 
-  const getDoctor12hRate = (doc: any, categoryName?: string) => {
-    if (!doc) return 1400;
-    const targetCategory = categoryName || doc.role;
-    const rules = getCategoryRulesList(targetCategory);
-    const extraRule = rules.find((r: any) => r.billingMode === 'por_12h') || rules[0];
-    const fnRate = Number(extraRule?.value || config.functionRates?.[targetCategory]?.extra12h || 1400);
-    const specificLevel = getDoctorLevelForFunction(doc, targetCategory);
-    const lvlBonus = config.levelBonuses12h?.[specificLevel]?.bonus12h || 0;
-    const specObj = (config.registeredSpecialties || []).find((s: any) => s.name === doc.specialty);
-    const specExtra = targetCategory === 'Plantão de Especialidade' && specObj ? Number(specObj.extra12h || 0) : 0;
-    return fnRate + lvlBonus + specExtra;
-  };
+  const pendingDoctors = useMemo(
+    () => doctors.filter(d => d.status === 'Pendente'),
+    [doctors]
+  );
 
-  // Suporta adicionais tanto em Valor Unitário (R$) quanto em Percentual (%)
-  const calculateShiftAdditionalsAmount = (additionalIds: string[] = [], hours = 12, shiftBaseAmount = 1400) => {
-    const ratio = hours / 12;
-    let total = 0;
-    const details: any[] = [];
-    additionalIds.forEach(addId => {
-      const found = (config.shiftAdditionals || []).find((a: any) => a.id === addId);
-      if (found) {
-        const val =
-          found.calcMode === 'percent'
-            ? (shiftBaseAmount * Number(found.percentValue || 0)) / 100
-            : Number(found.value12h || 0) * ratio;
-        total += val;
-        details.push({ id: found.id, name: found.name, amount: val });
-      }
-    });
-    return { total, details };
-  };
+  const competenceWindow = useMemo(
+    () => getCompetenceWindow(competenceMonth),
+    [competenceMonth]
+  );
 
   const handleToggleAdditionalOnExistingShift = (shiftId: number, additionalId: string) => {
     setShifts(prev =>
-      prev.map(s => {
-        if (s.id !== shiftId) return s;
-        const currentAdds: string[] = s.additionals || [];
-        const exists = currentAdds.includes(additionalId);
+      prev.map(sh => {
+        if (sh.id !== shiftId) return sh;
+        const curr = sh.additionals || [];
+        const exists = curr.includes(additionalId);
         return {
-          ...s,
-          additionals: exists ? currentAdds.filter(a => a !== additionalId) : [...currentAdds, additionalId]
+          ...sh,
+          additionals: exists ? curr.filter((id: string) => id !== additionalId) : [...curr, additionalId]
         };
       })
     );
   };
 
-  // --- CÁLCULO DA FOLHA DE PAGAMENTO PJ (26 A 25) ---
-  const competenceWindow = useMemo(() => getCompetenceWindow(competenceMonth), [competenceMonth]);
+  const handleToggleMonthlyAdditionalOnDoctor = (doctorId: number, additionalId: string) => {
+    setDoctors(prev =>
+      prev.map(d => {
+        if (Number(d.id) !== Number(doctorId)) return d;
+        const curr = d.monthlyAdditionals || [];
+        const exists = curr.includes(additionalId);
+        return {
+          ...d,
+          monthlyAdditionals: exists ? curr.filter((id: string) => id !== additionalId) : [...curr, additionalId]
+        };
+      })
+    );
+    recordAction(`Adicional mensal alterado na folha do médico ID ${doctorId}`);
+  };
 
+  // ============================================================================
+  // CÁLCULO DA FOLHA DE PAGAMENTO PJ (26 A 25)
+  // ============================================================================
   const payrollReport = useMemo(() => {
     const { startStr, endStr } = competenceWindow;
     const shiftsInWindow = shifts.filter(s => s.date >= startStr && s.date <= endStr);
@@ -391,331 +365,212 @@ export default function MedScaleApp() {
       sw => sw.status === 'Aprovado' && sw.movementType === 'Passagem' && sw.shiftDate >= startStr && sw.shiftDate <= endStr
     );
 
-    return activeDoctors.map(doc => {
-      const docShifts = shiftsInWindow.filter(s => Number(s.doctorId) === Number(doc.id));
-      const accRoles =
-        doc.accumulatedRoles && doc.accumulatedRoles.length > 0
-          ? doc.accumulatedRoles
-          : [
-              {
-                roleName: doc.role,
-                categoryType: dynamicCategories.includes(doc.role) ? 'assistencial' : 'administrativa',
-                level: doc.remunerationLevel || 1,
-                contractModality: doc.contractType
-              }
-            ];
-
-      let fixedClinicalMonthly = 0;
-      accRoles.forEach((r: any) => {
-        if (r.categoryType === 'assistencial' && r.contractModality === 'Fixo Mensal') {
-          const rules = getCategoryRulesList(r.roleName);
-          const fixedRule = rules.find((rl: any) => rl.billingMode === 'fixo_mensal') || rules[0];
-          const fnFixed = Number(fixedRule?.value || 15000);
-          const lvlBonus = config.levelBonuses12h?.[r.level || doc.remunerationLevel || 1]?.mensalBonus || 0;
-          fixedClinicalMonthly += fnFixed + lvlBonus;
-        }
-      });
-
-      let adminMonthlyTotal = 0;
-      const adminRoleDetails: any[] = [];
-      accRoles.forEach((r: any) => {
-        if (r.categoryType === 'administrativa') {
-          const admVal = config.adminFunctionRates?.[r.roleName]?.mensalFixo || 8500;
-          adminMonthlyTotal += admVal;
-          adminRoleDetails.push({ roleName: r.roleName, amount: admVal });
-        }
-      });
-
-      const docFixedAdditional = Number(doc.fixedMonthlyAdditional || 0);
-      const baseFixedMonthly = fixedClinicalMonthly + adminMonthlyTotal;
-      const isFixedContract = fixedClinicalMonthly > 0 || doc.contractType === 'Fixo Mensal';
-
-      let totalHoursWorked = 0;
-      let fixedHoursWorked = 0;
-      let extraHoursWorked = 0;
-      let fixedShiftsCount = 0;
-      let extraShiftsCount = 0;
-      let extraShiftsAmount = 0;
-      let totalAdditionalsAmount = docFixedAdditional;
-      const dailyBreakdown: any[] = [];
-      const additionalsList: any[] = [];
-
-      if (docFixedAdditional > 0) {
-        additionalsList.push({
-          date: competenceMonth,
-          weekday: 'Mensal',
-          name: doc.fixedMonthlyAdditionalLabel || 'Adicional Fixo Mensal',
-          hours: 0,
-          amount: docFixedAdditional
-        });
-      }
-
-      docShifts.forEach(sh => {
-        const hours = calculateDurationHours(sh.startTime, sh.endTime);
-        totalHoursWorked += hours;
-        const weekday = getWeekdayName(sh.date);
-        const isWeekend = weekday === 'Sábado' || weekday === 'Domingo';
-        const levelUsed = getDoctorLevelForFunction(doc, sh.category);
-        const lvlBonus12h = config.levelBonuses12h?.[levelUsed]?.bonus12h || 0;
-
-        const originPassagem = passagensInWindow.find(
-          sw => Number(sw.proposedDoctorId) === Number(doc.id) && sw.shiftDate === sh.date && sw.shiftCategory === sh.category
-        );
-        const isPaidDirectlyByTitular = originPassagem?.paymentResponsibility === 'titular';
-
-        const rules = getCategoryRulesList(sh.category);
-        const selectedRule =
-          rules.find((rl: any) => rl.id === sh.ruleId) ||
-          (isWeekend ? rules.find((rl: any) => rl.id.includes('fds') || rl.label.toLowerCase().includes('semana')) : null) ||
-          rules.find((rl: any) => rl.billingMode === 'por_12h') ||
-          rules[0];
-
-        const override = shiftCustomOverrides[sh.id];
-        const roleEntry = accRoles.find((r: any) => r.categoryType === 'assistencial' && r.roleName === sh.category);
-        const isCategoryExtraForDoc = roleEntry ? roleEntry.contractModality === 'Coringa / Extra' : !isFixedContract;
-        const isExtraShift = sh.billingType !== 'Fixo' || isCategoryExtraForDoc || Boolean(sh.customRate12h) || Boolean(override);
-
-        if (isExtraShift) {
-          extraHoursWorked += hours;
-          extraShiftsCount += 1;
+    const calculateShiftAdditionalsAmount = (addIds: string[], hours: number, shiftBaseRef: number) => {
+      let total = 0;
+      const details: { id: string; name: string; amount: number }[] = [];
+      (addIds || []).forEach(id => {
+        const addObj = (config.shiftAdditionals || []).find((a: any) => a.id === id);
+        if (!addObj || addObj.incidence === 'monthly') return;
+        let val = 0;
+        if (addObj.calcMode === 'percent') {
+          val = (shiftBaseRef * Number(addObj.percentValue || 0)) / 100;
         } else {
-          fixedHoursWorked += hours;
-          fixedShiftsCount += 1;
+          val = (hours / 12) * Number(addObj.value12h || 0);
         }
-
-        let base12hApplied = Number(selectedRule?.value || 1400) + lvlBonus12h;
-        if (sh.customRate12h !== undefined && sh.customRate12h !== '') {
-          base12hApplied = Number(sh.customRate12h);
-        }
-        if (override?.customRate12h !== undefined) {
-          base12hApplied = Number(override.customRate12h);
-        }
-
-        const proportionalBaseRef = (hours / 12) * base12hApplied;
-        let shiftBaseVal = 0;
-        if (!isPaidDirectlyByTitular && isExtraShift) {
-          shiftBaseVal = override?.customFixedTotal !== undefined ? Number(override.customFixedTotal) : proportionalBaseRef;
-        }
-
-        extraShiftsAmount += shiftBaseVal;
-
-        const addCalc = calculateShiftAdditionalsAmount(sh.additionals || [], hours, proportionalBaseRef);
-        totalAdditionalsAmount += addCalc.total;
-        addCalc.details.forEach(d => {
-          additionalsList.push({ date: sh.date, weekday, name: d.name, hours, amount: d.amount });
-        });
-
-        dailyBreakdown.push({
-          shiftId: sh.id,
-          date: sh.date,
-          weekday,
-          startTime: sh.startTime,
-          endTime: sh.endTime,
-          hours,
-          fractionLabel: `${hours}h (${((hours / 12) * 100).toFixed(0)}% de 12h)`,
-          type: sh.type,
-          category: sh.category,
-          isExtraShift,
-          additionals: sh.additionals || [],
-          additionalsDetails: addCalc.details,
-          ruleLabel:
-            override?.customRate12h || sh.customRate12h
-              ? 'Acordo Especial (Proporcional 12h)'
-              : selectedRule?.label || 'Padrão 12h',
-          base12hApplied,
-          levelUsed,
-          billingType: isPaidDirectlyByTitular ? 'Acerto Direto c/ Titular' : isExtraShift ? 'Extra / Avulso' : 'Fixo',
-          shiftBaseVal,
-          additionalsVal: addCalc.total
-        });
+        total += val;
+        details.push({ id: addObj.id, name: addObj.name, amount: val });
       });
+      return { total, details };
+    };
 
-      const docPassagensOut = passagensInWindow.filter(sw => Number(sw.requestingDoctorId) === Number(doc.id));
-      let totalDiscounts = 0;
-      const passagesDetails = docPassagensOut.map(sw => {
-        const hoursPassed = calculateDurationHours(sw.swapStartTime, sw.swapEndTime);
-        const subDoc = getDoctorById(sw.proposedDoctorId);
-        const titularRate12h = getDoctor12hRate(doc, sw.shiftCategory);
-        const subRate12h = getDoctor12hRate(subDoc, sw.shiftCategory);
-        const titularProportional = (hoursPassed / 12) * titularRate12h;
-        const subProportional = (hoursPassed / 12) * subRate12h;
-        const rateDiff = Math.max(0, titularProportional - subProportional);
+    return doctors
+      .filter(d => d.status === 'Ativo')
+      .map(doc => {
+        const docShifts = shiftsInWindow
+          .filter(s => Number(s.doctorId) === Number(doc.id))
+          .sort((a, b) => a.date.localeCompare(b.date));
 
-        const isTitularDirectPay = sw.paymentResponsibility === 'titular';
-        const calculatedDiscount = sw.discountMode === 'diferenca' ? rateDiff : titularProportional;
-        const effectiveDiscount = !isTitularDirectPay && sw.applyPayrollDiscount ? calculatedDiscount : 0;
-        totalDiscounts += effectiveDiscount;
+        const accRoles = doc.accumulatedRoles || [];
+        const isFixedContract = doc.contractType === 'Fixo Mensal';
+
+        let baseFixedMonthly = 0;
+        const allAllowedFns: string[] = Array.from(
+          new Set([doc.role, ...(doc.allowedFunctions || []), ...accRoles.map((r: any) => r.roleName)].filter(Boolean))
+        );
+
+        allAllowedFns.forEach(fnName => {
+          const fnRateCfg = config.functionRates?.[fnName];
+          const adminRateCfg = config.adminFunctionRates?.[fnName];
+
+          if (fnRateCfg && fnRateCfg.requiresSchedule === false) {
+            baseFixedMonthly += Number(fnRateCfg.mensalFixo || 0);
+          } else if (adminRateCfg) {
+            baseFixedMonthly += Number(adminRateCfg.mensalFixo || 0);
+          } else if (fnRateCfg && isFixedContract && fnName === doc.role) {
+            const lvlBonusMensal = config.levelBonuses12h?.[doc.remunerationLevel || 1]?.mensalBonus || 0;
+            baseFixedMonthly += Number(fnRateCfg.mensalFixo || 0) + lvlBonusMensal;
+          }
+        });
+
+        let totalHoursWorked = 0;
+        let fixedHoursWorked = 0;
+        let extraHoursWorked = 0;
+        let fixedShiftsCount = 0;
+        let extraShiftsCount = 0;
+        let extraShiftsAmount = 0;
+        let totalShiftAdditionalsOnly = 0;
+        let totalMonthlyAdditionalsOnly = 0;
+        const dailyBreakdown: any[] = [];
+
+        docShifts.forEach(sh => {
+          const hours = calculateDurationHours(sh.startTime, sh.endTime);
+          totalHoursWorked += hours;
+          const weekday = getWeekdayName(sh.date);
+          const isWeekend = weekday === 'Sábado' || weekday === 'Domingo';
+          const levelUsed = doc.remunerationLevel || 1;
+          const lvlBonus12h = config.levelBonuses12h?.[levelUsed]?.bonus12h || 0;
+
+          const rules = getCategoryRulesList(sh.category);
+          const selectedRule =
+            rules.find((rl: any) => rl.id === sh.ruleId) ||
+            (isWeekend ? rules.find((rl: any) => rl.id.includes('fds')) : null) ||
+            rules.find((rl: any) => rl.billingMode === 'por_12h') ||
+            rules[0];
+
+          const override = shiftCustomOverrides[sh.id];
+          const isExtraShift = sh.billingType !== 'Fixo' || !isFixedContract || Boolean(sh.customRate12h) || Boolean(override);
+
+          if (isExtraShift) {
+            extraHoursWorked += hours;
+            extraShiftsCount += 1;
+          } else {
+            fixedHoursWorked += hours;
+            fixedShiftsCount += 1;
+          }
+
+          let base12hApplied = Number(selectedRule?.value || 1400) + lvlBonus12h;
+          if (sh.customRate12h !== undefined && sh.customRate12h !== '') {
+            base12hApplied = Number(sh.customRate12h);
+          }
+          if (override?.customRate12h !== undefined) {
+            base12hApplied = Number(override.customRate12h);
+          }
+
+          const proportionalBaseRef = (hours / 12) * base12hApplied;
+          let shiftBaseVal = 0;
+          if (isExtraShift) {
+            shiftBaseVal = override?.customFixedTotal !== undefined ? Number(override.customFixedTotal) : proportionalBaseRef;
+          }
+
+          extraShiftsAmount += shiftBaseVal;
+
+          const addCalc = calculateShiftAdditionalsAmount(sh.additionals || [], hours, proportionalBaseRef);
+          totalShiftAdditionalsOnly += addCalc.total;
+
+          dailyBreakdown.push({
+            shiftId: sh.id,
+            date: sh.date,
+            weekday,
+            startTime: sh.startTime,
+            endTime: sh.endTime,
+            hours,
+            type: sh.type,
+            category: sh.category,
+            isExtraShift,
+            additionals: sh.additionals || [],
+            additionalsDetails: addCalc.details,
+            billingType: isExtraShift ? 'Extra / Avulso' : 'Fixo',
+            shiftBaseVal,
+            additionalsVal: addCalc.total
+          });
+        });
+
+        const monthlyAddCatalog = (config.shiftAdditionals || []).filter((a: any) => a.incidence === 'monthly');
+        const docMonthlyIds: string[] = doc.monthlyAdditionals || [];
+
+        monthlyAddCatalog.forEach((mAdd: any) => {
+          if (docMonthlyIds.includes(mAdd.id)) {
+            const baseForPercent = baseFixedMonthly + extraShiftsAmount;
+            const val =
+              mAdd.calcMode === 'percent'
+                ? (baseForPercent * Number(mAdd.percentValue || 0)) / 100
+                : Number(mAdd.value12h || 0);
+            totalMonthlyAdditionalsOnly += val;
+          }
+        });
+
+        if (Number(doc.fixedMonthlyAdditional || 0) > 0) {
+          totalMonthlyAdditionalsOnly += Number(doc.fixedMonthlyAdditional);
+        }
+
+        let totalDiscounts = 0;
+        passagensInWindow.forEach(sw => {
+          if (Number(sw.requestingDoctorId) === Number(doc.id) && sw.applyPayrollDiscount) {
+            totalDiscounts += 1400;
+          }
+        });
+
+        const manualAdjs = manualPayrollAdjustments[doc.id] || [];
+        const manualAdjustmentsTotal = manualAdjs.reduce((acc, item) => acc + Number(item.amount || 0), 0);
+
+        const totalAdditionalsAmount = totalShiftAdditionalsOnly + totalMonthlyAdditionalsOnly;
+        const netTotal =
+          baseFixedMonthly + extraShiftsAmount + totalAdditionalsAmount + manualAdjustmentsTotal - totalDiscounts;
 
         return {
-          ...sw,
-          paymentResponsibility: sw.paymentResponsibility || 'hospital',
-          weekday: getWeekdayName(sw.shiftDate),
-          hoursPassed,
-          subDocName: subDoc?.name || 'Substituto',
-          titularProportional,
-          subProportional,
-          rateDiff,
-          calculatedDiscount,
-          effectiveDiscount
+          ...doc,
+          totalHoursWorked,
+          weeklyAvgTotalHours: (totalHoursWorked / 4.33).toFixed(1),
+          fixedHoursWorked,
+          fixedShiftsCount,
+          extraHoursWorked,
+          extraShiftsCount,
+          baseFixedMonthly,
+          extraShiftsAmount,
+          totalShiftAdditionalsOnly,
+          totalMonthlyAdditionalsOnly,
+          totalAdditionalsAmount,
+          manualAdjustmentsTotal,
+          totalDiscounts,
+          netTotal,
+          dailyBreakdown
         };
       });
+  }, [doctors, shifts, swaps, config, competenceWindow, shiftCustomOverrides, manualPayrollAdjustments]);
 
-      const docManualAdjs = manualPayrollAdjustments[doc.id] || [];
-      const manualAdjustmentsTotal = docManualAdjs.reduce((acc, item) => acc + Number(item.amount || 0), 0);
-
-      const netTotal = Math.max(
-        0,
-        baseFixedMonthly + extraShiftsAmount + totalAdditionalsAmount + manualAdjustmentsTotal - totalDiscounts
-      );
-
-      const confKey = `${competenceMonth}_${doc.id}`;
-      const doctorConferenceNote = doctorConferenceData[confKey]?.errorNote || '';
-
-      return {
-        ...doc,
-        accRoles,
-        isFixedContract,
-        fixedClinicalMonthly,
-        adminMonthlyTotal,
-        adminRoleDetails,
-        baseFixedMonthly,
-        docFixedAdditional,
-        totalHoursWorked,
-        fixedHoursWorked,
-        extraHoursWorked,
-        fixedShiftsCount,
-        extraShiftsCount,
-        weeklyAvgTotalHours: Number((totalHoursWorked / 4.33).toFixed(1)),
-        weeklyAvgFixedHours: Number((fixedHoursWorked / 4.33).toFixed(1)),
-        weeklyAvgExtraHours: Number((extraHoursWorked / 4.33).toFixed(1)),
-        extraShiftsAmount,
-        totalAdditionalsAmount,
-        manualAdjustmentsTotal,
-        docManualAdjs,
-        totalDiscounts,
-        netTotal,
-        dailyBreakdown,
-        additionalsList,
-        passagesDetails,
-        doctorConferenceNote,
-        payStatus: payrollStatus[doc.id] || 'Pendente'
-      };
-    });
-  }, [
-    activeDoctors,
-    shifts,
-    swaps,
-    config,
-    competenceWindow,
-    payrollStatus,
-    shiftCustomOverrides,
-    manualPayrollAdjustments,
-    dynamicCategories,
-    competenceMonth,
-    doctorConferenceData
-  ]);
-
-  // --- ABERTURA DE MODAIS ---
-  const handleOpenShiftModal = (shiftToEdit?: any, defaultDate?: string) => {
-    if (shiftToEdit) {
-      setEditingShiftId(shiftToEdit.id);
-      setNewShift({
-        ...shiftToEdit,
-        additionals: shiftToEdit.additionals || []
+  const handleCloudSync = async () => {
+    try {
+      setSyncStatusMsg('A sincronizar com a nuvem...');
+      const supabase = createClient();
+      const res = await syncStateToSupabase(supabase, {
+        config,
+        doctors,
+        shifts,
+        openShifts,
+        doctorAvailability,
+        occurrences,
+        announcements,
+        swaps,
+        vacations,
+        courses,
+        hourlyDemand,
+        auditTrail,
+        manualPayrollAdjustments,
+        shiftCustomOverrides,
+        doctorConferenceData,
+        updatedByClientId: clientIdRef.current
       });
-    } else {
-      setEditingShiftId(null);
-      const defaultCat = dynamicCategories[0] || 'Médico Rotina/Sênior';
-      const firstEligible =
-        scheduleActiveDoctors.find(d => isDoctorAllowedForFunction(d, defaultCat)) || scheduleActiveDoctors[0];
-      const rules = getCategoryRulesList(defaultCat);
-      setNewShift({
-        date: defaultDate || '2026-10-18',
-        startTime: '07:00',
-        endTime: '19:00',
-        category: defaultCat,
-        doctorId: firstEligible?.id || '',
-        type: 'Plantão Diurno 12h',
-        billingType: 'Coringa/Extra',
-        ruleId: rules[0]?.id || '',
-        customRate12h: '',
-        additionals: firstEligible?.defaultShiftAdditionals || []
-      });
+      setRealtimeStatus('online');
+      setSyncStatusMsg(res.message);
+      setTimeout(() => setSyncStatusMsg(''), 5000);
+    } catch (err: any) {
+      setRealtimeStatus('offline');
+      setSyncStatusMsg(`Erro: ${err.message}`);
     }
-    setShowShiftModal(true);
   };
 
-  const handleOpenSwapModal = (shift: any) => {
-    setSelectedShiftForSwap(shift);
-    const eligibleSubstitutes = activeDoctors.filter(
-      d => d.id !== shift.doctorId && isDoctorAllowedForFunction(d, shift.category)
-    );
-    setSwapForm({
-      proposedDoctorId: eligibleSubstitutes[0]?.id || '',
-      movementType: 'Passagem',
-      isPartial: false,
-      swapStartTime: shift.startTime,
-      swapEndTime: '13:00',
-      reason: ''
-    });
-    setHandoffWarningAcknowledged(false);
-    setShowSwapModal(true);
-    setShowHandoffWarningPopup(true);
-  };
+  if (!isHydrated) return null;
 
-  const handleOpenDoctorEditModal = (doc?: any) => {
-    if (doc) {
-      setDoctorForm({
-        ...doc,
-        defaultShiftAdditionals: doc.defaultShiftAdditionals || [],
-        fixedMonthlyAdditional: doc.fixedMonthlyAdditional || 0,
-        fixedMonthlyAdditionalLabel: doc.fixedMonthlyAdditionalLabel || '',
-        allowedFunctions: doc.allowedFunctions || [doc.role],
-        accumulatedRoles: doc.accumulatedRoles || [],
-        workloadHistory: doc.workloadHistory || []
-      });
-    } else {
-      setDoctorForm({
-        id: null,
-        username: '',
-        name: '',
-        cpf: '',
-        birthDate: '1990-01-01',
-        email: '',
-        password: '123',
-        phone: '',
-        crm: '',
-        rqe: '',
-        specialty: 'Clínica Médica',
-        razaoSocial: '',
-        cnpj: '',
-        joinDate: new Date().toISOString().split('T')[0],
-        exitDate: '',
-        role: dynamicCategories[0] || 'Plantonista',
-        remunerationLevel: 1,
-        contractType: 'Coringa / Extra',
-        participatesInSchedule: true,
-        allowedFunctions: [dynamicCategories[0] || 'Plantonista'],
-        defaultShiftAdditionals: [],
-        fixedMonthlyAdditional: 0,
-        fixedMonthlyAdditionalLabel: '',
-        accumulatedRoles: [
-          {
-            id: `ar_${Date.now()}`,
-            roleName: dynamicCategories[0] || 'Plantonista',
-            categoryType: 'assistencial',
-            level: 1,
-            contractModality: 'Coringa / Extra'
-          }
-        ],
-        workloadHistory: [],
-        status: 'Ativo'
-      });
-    }
-    setShowDoctorEditModal(true);
-  };
-
-  // --- TELA DE LOGIN CASO NÃO AUTENTICADO ---
   if (!currentUser) {
     return (
       <AuthScreen
@@ -724,193 +579,168 @@ export default function MedScaleApp() {
         setDoctors={setDoctors}
         onLoginSuccess={user => {
           setCurrentUser(user);
-          setCurrentView(user.role === 'admin' ? 'dashboard' : 'schedule');
+          setManagerViewMode(user.canManage ? 'admin' : 'doctor');
+          setCurrentView('dashboard');
         }}
         recordAction={recordAction}
       />
     );
   }
 
-  // Contadores de notificações
-  const pendingSwapsCount = swaps.filter(s => s.status === 'Pendente').length;
-  const pendingVacationsCount = vacations.filter(
-    v => v.status === 'Pendente' || (v.status === 'Aprovado' && v.substitutionsStatus === 'Pendente Gestor')
-  ).length;
-  const unreadAnnouncementsCount = !isAdmin
-    ? announcements.filter(a => !(a.acknowledgedBy || []).includes(Number(currentUser.id))).length
-    : 0;
-  const expiredCoursesCount = !isAdmin
-    ? courses.filter(c => Number(c.doctorId) === Number(currentUser.id) && c.status !== 'Válido').length
-    : 0;
-
   const navItems = isAdmin
     ? [
-        { id: 'dashboard', label: 'Painel Geral', icon: Activity, badge: 0 },
-        { id: 'schedule', label: 'Escala Médica', icon: CalendarIcon, badge: 0 },
-        { id: 'assistance_map', label: 'Mapa Assistencial 24h', icon: Flame, badge: 0 },
-        { id: 'swaps', label: 'Trocas & Passagens', icon: Repeat, badge: pendingSwapsCount },
-        { id: 'vacations', label: 'Férias & Substituições', icon: Umbrella, badge: pendingVacationsCount },
-        { id: 'payroll', label: 'Folha PJ & Duplo Check', icon: DollarSign, badge: 0 },
-        { id: 'remuneration', label: 'Tabela de Remuneração', icon: Sliders, badge: 0 },
-        { id: 'staff', label: 'Corpo Clínico', icon: Users, badge: pendingDoctors.length },
-        { id: 'management_reports', label: 'Gestão à Vista & Ocorrências', icon: BarChart2, badge: 0 },
-        { id: 'courses', label: 'Cursos & Certificados', icon: BookOpen, badge: 0 }
+        { id: 'dashboard', label: 'Painel Geral', icon: LayoutDashboard },
+        { id: 'schedule', label: 'Escala Oficial', icon: Calendar },
+        { id: 'heatmap', label: 'Mapa 24h (Heatmap)', icon: Flame },
+        { id: 'open_shifts', label: 'Plantões em Aberto', icon: Megaphone },
+        { id: 'swaps', label: 'Trocas & Passagens', icon: RefreshCw },
+        { id: 'staff', label: 'Corpo Clínico', icon: Users },
+        { id: 'payroll', label: 'Folha PJ (26 a 25)', icon: DollarSign },
+        { id: 'remuneration', label: 'Tabela de Remuneração', icon: Sliders },
+        { id: 'vacations', label: 'Férias & Licenças', icon: Umbrella },
+        { id: 'courses', label: 'Cursos (ACLS/ATLS)', icon: GraduationCap },
+        { id: 'occurrences', label: 'Ocorrências', icon: ShieldAlert },
+        { id: 'announcements', label: 'Comunicados', icon: ClipboardList },
+        { id: 'audit', label: 'Auditoria', icon: History },
+        { id: 'settings', label: 'Configurações', icon: Sliders }
       ]
     : [
-        { id: 'schedule', label: 'Meus Plantões & Escala', icon: CalendarIcon, badge: 0 },
-        { id: 'payroll', label: 'Meu Saldo / Folha PJ', icon: DollarSign, badge: 0 },
-        {
-          id: 'swaps',
-          label: 'Trocas & Passagens',
-          icon: Repeat,
-          badge: swaps.filter(
-            s =>
-              (Number(s.requestingDoctorId) === Number(currentUser.id) ||
-                Number(s.proposedDoctorId) === Number(currentUser.id)) &&
-              s.status === 'Pendente'
-          ).length
-        },
-        {
-          id: 'vacations',
-          label: 'Minhas Férias',
-          icon: Umbrella,
-          badge: vacations.filter(
-            v =>
-              Number(v.doctorId) === Number(currentUser.id) &&
-              v.status === 'Aprovado' &&
-              v.substitutionsStatus === 'Aguardando Médico'
-          ).length
-        },
-        { id: 'management_reports', label: 'Gestão à Vista & Avisos', icon: BarChart2, badge: unreadAnnouncementsCount },
-        { id: 'courses', label: 'Meus Certificados', icon: BookOpen, badge: expiredCoursesCount },
-        { id: 'my_profile', label: 'Meu Cadastro PJ', icon: Users, badge: 0 }
+        { id: 'dashboard', label: 'Meu Painel', icon: LayoutDashboard },
+        { id: 'schedule', label: 'Minha Escala', icon: Calendar },
+        { id: 'open_shifts', label: 'Vagas Extras', icon: Megaphone },
+        { id: 'swaps', label: 'Minhas Trocas', icon: RefreshCw },
+        { id: 'payroll', label: 'Meu Extrato PJ', icon: DollarSign },
+        { id: 'vacations', label: 'Minhas Férias', icon: Umbrella },
+        { id: 'courses', label: 'Meus Certificados', icon: GraduationCap },
+        { id: 'announcements', label: 'Comunicados', icon: ClipboardList },
+        { id: 'profile', label: 'Meu Cadastro PJ', icon: UserCheck }
       ];
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col lg:flex-row pb-16 lg:pb-0">
-      {/* Topbar Mobile (Smartphones) */}
-      <header className="lg:hidden bg-slate-900 text-white px-4 py-3 flex items-center justify-between sticky top-0 z-40 shadow-md">
-        <div className="flex items-center gap-2.5">
+    <div className="min-h-screen bg-slate-100 flex flex-col lg:flex-row text-slate-800">
+      {/* BARRA LATERAL */}
+      <aside className="w-full lg:w-64 bg-slate-900 text-white flex flex-col shrink-0">
+        <div className="p-4 flex items-center justify-between border-b border-slate-800">
+          <div>
+            <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 bg-blue-600 rounded text-white">
+              {config.sectorUnitName}
+            </span>
+            <h1 className="text-lg font-extrabold mt-1">{config.appName}</h1>
+            <div className="mt-1.5 flex items-center gap-1.5 text-[11px] font-bold">
+              {realtimeStatus === 'online' ? (
+                <span className="text-emerald-400 flex items-center gap-1">
+                  <Wifi size={12} /> Nuvem Ao Vivo (Realtime)
+                </span>
+              ) : realtimeStatus === 'connecting' ? (
+                <span className="text-amber-400 flex items-center gap-1">
+                  <RefreshCw size={12} className="animate-spin" /> A ligar à nuvem...
+                </span>
+              ) : (
+                <span className="text-slate-400 flex items-center gap-1">
+                  <WifiOff size={12} /> Modo Local
+                </span>
+              )}
+            </div>
+          </div>
           <button
             type="button"
             onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-            className="p-2 rounded-lg bg-slate-800 text-slate-200"
+            className="lg:hidden p-2 text-slate-300"
           >
             {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
           </button>
-          <div>
-            <span className="font-bold text-sm block leading-none">
-              {config.appName} • {config.sectorUnitName || 'Emergência Adulta - HGD'}
+        </div>
+
+        {/* Alternador de visão para médico com perfil de Gestor */}
+        {!isMasterAdmin && canUserManage && (
+          <div className="p-3 bg-slate-800 border-b border-slate-700 text-xs space-y-1.5">
+            <span className="block text-[10px] uppercase font-bold text-amber-400">
+              Alternar Modo de Acesso:
             </span>
-            <span className="text-[10px] text-emerald-400 font-semibold">{currentUser.name}</span>
-          </div>
-        </div>
-        <button onClick={() => setCurrentUser(null)} className="p-2 text-slate-300 hover:text-white" title="Sair">
-          <LogOut size={18} />
-        </button>
-      </header>
-
-      {/* Barra Lateral Esquerda Fixa no Desktop & Menu Retrátil no Smartphone */}
-      <aside
-        className={`${
-          mobileMenuOpen ? 'fixed inset-0 z-30 pt-16 bg-slate-900/95 overflow-y-auto block' : 'hidden'
-        } lg:static lg:pt-0 lg:flex lg:flex-col w-full lg:w-64 bg-slate-900 text-white shrink-0 lg:min-h-screen p-4 justify-between`}
-      >
-        <div>
-          <div className="hidden lg:flex items-start gap-3 px-2 py-3 border-b border-slate-800 mb-4">
-            <div className="bg-blue-600 p-2 rounded-lg mt-0.5">
-              <CalendarIcon size={20} />
+            <div className="flex bg-slate-900 p-1 rounded-lg">
+              <button
+                type="button"
+                onClick={() => setManagerViewMode('admin')}
+                className={`flex-1 py-1.5 rounded font-bold text-[11px] ${
+                  managerViewMode === 'admin' ? 'bg-amber-500 text-slate-950' : 'text-slate-400'
+                }`}
+              >
+                Modo Gestor
+              </button>
+              <button
+                type="button"
+                onClick={() => setManagerViewMode('doctor')}
+                className={`flex-1 py-1.5 rounded font-bold text-[11px] ${
+                  managerViewMode === 'doctor' ? 'bg-blue-600 text-white' : 'text-slate-400'
+                }`}
+              >
+                Minha Agenda
+              </button>
             </div>
-            <div>
-              <h1 className="font-bold text-base leading-tight">{config.appName}</h1>
-              <span className="inline-block mt-1 px-2 py-0.5 rounded bg-blue-500/20 text-blue-300 font-extrabold text-[11px]">
-                {config.sectorUnitName || 'Emergência Adulta - HGD'}
+          </div>
+        )}
+
+        <nav className={`${mobileMenuOpen ? 'block' : 'hidden'} lg:block flex-1 p-3 space-y-1 overflow-y-auto`}>
+          {navItems.map(item => {
+            const Icon = item.icon;
+            const active = currentView === item.id;
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => {
+                  setCurrentView(item.id);
+                  setMobileMenuOpen(false);
+                }}
+                className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-all ${
+                  active ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-300 hover:bg-slate-800'
+                }`}
+              >
+                <Icon size={16} />
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+
+        <div className="p-4 border-t border-slate-800 space-y-2 text-xs">
+          <div className="flex items-center gap-2">
+            <Shield size={14} className={isMasterAdmin ? 'text-amber-400' : 'text-blue-400'} />
+            <div className="truncate">
+              <strong className="block truncate">{currentUser.name}</strong>
+              <span className="text-[10px] text-slate-400">
+                {isMasterAdmin
+                  ? 'Login Mestre (Gestor)'
+                  : canUserManage
+                  ? 'Médico c/ Perfil Gestor'
+                  : 'Médico Plantonista'}
               </span>
-              <p className="text-[11px] text-emerald-400 font-semibold mt-1.5">
-                {isAdmin ? '👔 Perfil: Gestor' : `👨‍⚕️ ${currentUser.name}`}
-              </p>
             </div>
           </div>
-
-          <nav className="space-y-1">
-            {navItems.map(item => {
-              const Icon = item.icon;
-              const active = currentView === item.id;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => {
-                    setCurrentView(item.id);
-                    setMobileMenuOpen(false);
-                  }}
-                  className={`w-full flex items-center justify-between px-3 py-2.5 rounded-xl text-xs font-semibold transition-colors ${
-                    active ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-300 hover:bg-slate-800 hover:text-white'
-                  }`}
-                >
-                  <span className="flex items-center gap-2.5">
-                    <Icon size={16} /> {item.label}
-                  </span>
-                  {item.badge ? (
-                    <span className="bg-amber-500 text-slate-950 font-extrabold px-2 py-0.5 rounded-full text-[10px]">
-                      {item.badge}
-                    </span>
-                  ) : null}
-                </button>
-              );
-            })}
-          </nav>
-        </div>
-
-        <div className="pt-4 border-t border-slate-800 mt-4">
           <button
             type="button"
             onClick={() => setCurrentUser(null)}
-            className="w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-xs font-semibold text-red-400 hover:bg-slate-800"
+            className="w-full bg-slate-800 hover:bg-red-600 text-white py-2 rounded-lg font-bold flex items-center justify-center gap-1.5 transition-colors"
           >
-            <LogOut size={16} /> Encerrar Sessão
+            <LogOut size={14} /> Sair da Conta
           </button>
         </div>
       </aside>
 
-      {/* Conteúdo Principal */}
-      <main className="flex-1 p-3.5 sm:p-6 lg:p-8 overflow-y-auto space-y-5">
-        {/* Alertas Pessoais do Médico no Topo */}
-        {!isAdmin && (expiredCoursesCount > 0 || unreadAnnouncementsCount > 0) && (
-          <div className="flex flex-col sm:flex-row gap-2.5">
-            {expiredCoursesCount > 0 && (
-              <div
-                onClick={() => setCurrentView('courses')}
-                className="flex-1 p-3 bg-red-50 border border-red-200 rounded-xl text-xs text-red-900 font-semibold flex items-center justify-between cursor-pointer"
-              >
-                <span className="flex items-center gap-2">
-                  <AlertTriangle size={16} className="text-red-600 shrink-0" />
-                  Você possui {expiredCoursesCount} certificado(s) vencido(s). Atualize na aba Certificados.
-                </span>
-                <span className="underline font-bold ml-2">Ver →</span>
-              </div>
-            )}
-            {unreadAnnouncementsCount > 0 && (
-              <div
-                onClick={() => setCurrentView('management_reports')}
-                className="flex-1 p-3 bg-blue-50 border border-blue-200 rounded-xl text-xs text-blue-900 font-semibold flex items-center justify-between cursor-pointer"
-              >
-                <span className="flex items-center gap-2">
-                  <Bell size={16} className="text-blue-600 shrink-0" />
-                  Há {unreadAnnouncementsCount} comunicado(s) da coordenação aguardando sua confirmação ("Ciente").
-                </span>
-                <span className="underline font-bold ml-2">Ler →</span>
-              </div>
-            )}
+      {/* CONTEÚDO PRINCIPAL */}
+      <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto space-y-6">
+        {syncStatusMsg && (
+          <div className="p-3 bg-blue-50 border border-blue-200 text-blue-900 rounded-xl text-xs font-bold">
+            {syncStatusMsg}
           </div>
         )}
 
-        {/* MÓDULOS 1 E 2: PAINEL GERAL, MAPA ASSISTENCIAL 24H E ESCALA MÉDICA */}
-        {(currentView === 'dashboard' || currentView === 'assistance_map' || currentView === 'schedule') && (
+        {['dashboard', 'schedule', 'heatmap', 'open_shifts', 'swaps'].includes(currentView) && (
           <ScheduleAndMapViews
             currentView={currentView}
             setCurrentView={setCurrentView}
             config={config}
+            setConfig={setConfig}
             isAdmin={isAdmin}
             currentUser={currentUser}
             doctors={doctors}
@@ -918,43 +748,34 @@ export default function MedScaleApp() {
             pendingDoctors={pendingDoctors}
             shifts={shifts}
             setShifts={setShifts}
-            swaps={swaps}
-            vacations={vacations}
             openShifts={openShifts}
             setOpenShifts={setOpenShifts}
             doctorAvailability={doctorAvailability}
             setDoctorAvailability={setDoctorAvailability}
+            swaps={swaps}
+            setSwaps={setSwaps}
+            vacations={vacations}
+            courses={courses}
+            occurrences={occurrences}
+            announcements={announcements}
+            setAnnouncements={setAnnouncements}
             hourlyDemand={hourlyDemand}
             setHourlyDemand={setHourlyDemand}
-            competenceMonth={competenceMonth}
-            payrollReport={payrollReport}
             dynamicCategories={dynamicCategories}
             getDoctorById={getDoctorById}
-            getDoctorName={getDoctorName}
             getCategoryRulesList={getCategoryRulesList}
-            isDoctorAllowedForFunction={isDoctorAllowedForFunction}
-            calculateShiftAdditionalsAmount={calculateShiftAdditionalsAmount}
-            onOpenShiftModal={handleOpenShiftModal}
-            onOpenSwapModal={handleOpenSwapModal}
-            onExportWorkloadAuditCSV={() => exportWorkloadAuditCSV(config, competenceWindow, payrollReport)}
-            handleSyncWithSupabase={handleSyncWithSupabase}
-            syncingSupabase={syncingSupabase}
-            syncNotification={syncNotification}
-            setSyncNotification={setSyncNotification}
+            handleCloudSync={handleCloudSync}
             recordAction={recordAction}
           />
         )}
 
-        {/* MÓDULOS 3 E 4: CORPO CLÍNICO, FOLHA PJ 26 A 25, REMUNERAÇÃO E MEU CADASTRO */}
-        {(currentView === 'staff' ||
-          currentView === 'payroll' ||
-          currentView === 'remuneration' ||
-          currentView === 'my_profile') && (
+        {['staff', 'payroll', 'remuneration', 'profile'].includes(currentView) && (
           <StaffAndFinanceViews
             currentView={currentView}
             config={config}
             setConfig={setConfig}
             isAdmin={isAdmin}
+            isMasterAdmin={isMasterAdmin}
             currentUser={currentUser}
             doctors={doctors}
             setDoctors={setDoctors}
@@ -981,25 +802,26 @@ export default function MedScaleApp() {
             getDoctorById={getDoctorById}
             getCategoryRulesList={getCategoryRulesList}
             handleToggleAdditionalOnExistingShift={handleToggleAdditionalOnExistingShift}
-            onOpenDoctorEditModal={handleOpenDoctorEditModal}
+            handleToggleMonthlyAdditionalOnDoctor={handleToggleMonthlyAdditionalOnDoctor}
+            onOpenDoctorEditModal={doc => {
+              setEditingDoctor(doc || null);
+              setIsDoctorModalOpen(true);
+            }}
             recordAction={recordAction}
           />
         )}
 
-        {/* MÓDULOS 5, 6, 7 E 8 + MODAIS GLOBAIS */}
         <GovernanceAndModals
           currentView={currentView}
           config={config}
           setConfig={setConfig}
           isAdmin={isAdmin}
+          isMasterAdmin={isMasterAdmin}
           currentUser={currentUser}
           doctors={doctors}
           setDoctors={setDoctors}
-          activeDoctors={activeDoctors}
           shifts={shifts}
           setShifts={setShifts}
-          swaps={swaps}
-          setSwaps={setSwaps}
           vacations={vacations}
           setVacations={setVacations}
           courses={courses}
@@ -1008,72 +830,15 @@ export default function MedScaleApp() {
           setOccurrences={setOccurrences}
           announcements={announcements}
           setAnnouncements={setAnnouncements}
-          doctorAvailability={doctorAvailability}
-          auditLogs={auditLogs}
-          handleUndoAuditLog={handleUndoAuditLog}
-          getDoctorById={getDoctorById}
-          getDoctorName={getDoctorName}
-          getCategoryRulesList={getCategoryRulesList}
-          isDoctorAllowedForFunction={isDoctorAllowedForFunction}
+          auditTrail={auditTrail}
           dynamicCategories={dynamicCategories}
-          showShiftModal={showShiftModal}
-          setShowShiftModal={setShowShiftModal}
-          editingShiftId={editingShiftId}
-          setEditingShiftId={setEditingShiftId}
-          newShift={newShift}
-          setNewShift={setNewShift}
-          showSwapModal={showSwapModal}
-          setShowSwapModal={setShowSwapModal}
-          selectedShiftForSwap={selectedShiftForSwap}
-          swapForm={swapForm}
-          setSwapForm={setSwapForm}
-          showHandoffWarningPopup={showHandoffWarningPopup}
-          setShowHandoffWarningPopup={setShowHandoffWarningPopup}
-          handoffWarningAcknowledged={handoffWarningAcknowledged}
-          setHandoffWarningAcknowledged={setHandoffWarningAcknowledged}
-          showDoctorEditModal={showDoctorEditModal}
-          setShowDoctorEditModal={setShowDoctorEditModal}
-          doctorForm={doctorForm}
-          setDoctorForm={setDoctorForm}
-          showCourseModal={showCourseModal}
-          setShowCourseModal={setShowCourseModal}
-          courseForm={courseForm}
-          setCourseForm={setCourseForm}
-          showVacationModal={showVacationModal}
-          setShowVacationModal={setShowVacationModal}
-          vacationForm={vacationForm}
-          setVacationForm={setVacationForm}
-          showOccurrenceModal={showOccurrenceModal}
-          setShowOccurrenceModal={setShowOccurrenceModal}
-          newOccurrence={newOccurrence}
-          setNewOccurrence={setNewOccurrence}
+          getDoctorById={getDoctorById}
           recordAction={recordAction}
+          isDoctorModalOpen={isDoctorModalOpen}
+          setIsDoctorModalOpen={setIsDoctorModalOpen}
+          editingDoctor={editingDoctor}
         />
       </main>
-
-      {/* Barra Inferior de Navegação Rápida para Smartphones */}
-      <nav className="lg:hidden fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 px-2 py-1.5 flex justify-around items-center z-30 shadow-lg">
-        {navItems.slice(0, 5).map(item => {
-          const Icon = item.icon;
-          const active = currentView === item.id;
-          return (
-            <button
-              key={item.id}
-              type="button"
-              onClick={() => {
-                setCurrentView(item.id);
-                setMobileMenuOpen(false);
-              }}
-              className={`flex flex-col items-center gap-0.5 px-2 py-1 rounded-lg text-[10px] font-bold ${
-                active ? 'text-blue-600' : 'text-slate-500'
-              }`}
-            >
-              <Icon size={17} />
-              <span className="truncate max-w-[64px]">{item.label.split(' ')[0]}</span>
-            </button>
-          );
-        })}
-      </nav>
     </div>
   );
 }
