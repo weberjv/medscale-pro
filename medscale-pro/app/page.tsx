@@ -69,7 +69,10 @@ export default function MedScaleProApp() {
   const [realtimeStatus, setRealtimeStatus] = useState<'connecting' | 'online' | 'offline'>('connecting');
 
   // Referências para controle de Sincronização em Tempo Real sem loop infinito
-  const clientIdRef = useRef<string>(`client_${Math.random().toString(36).slice(2, 10)}_${Date.now()}`);
+ const clientIdRef = useRef<string>('');
+if (!clientIdRef.current) {
+  clientIdRef.current = `client_${Math.random().toString(36).slice(2, 10)}_${Date.now()}`;
+}
   const isCloudReadyRef = useRef<boolean>(false);
   const lastStateSignatureRef = useRef<string>('');
 
