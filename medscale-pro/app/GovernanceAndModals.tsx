@@ -3,7 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import {
   Umbrella, GraduationCap, AlertTriangle, Megaphone, History,
-  Settings, Plus, Trash2, CheckCircle, XCircle, X, Shield, Lock
+  Settings, Plus, Trash2, CheckCircle, XCircle, X, Shield, Lock,
+  BarChart3, Sparkles, CheckSquare, Users, Eye
 } from 'lucide-react';
 import { calculateExpirationFromIssueDate } from './medscaleData';
 
@@ -42,26 +43,29 @@ export default function GovernanceAndModals({
   isAdmin,
   isMasterAdmin = false,
   currentUser,
-  doctors,
+  doctors = [],
   setDoctors,
-  shifts,
+  shifts = [],
   setShifts,
-  vacations,
+  vacations = [],
   setVacations,
-  courses,
+  courses = [],
   setCourses,
-  occurrences,
+  occurrences = [],
   setOccurrences,
-  announcements,
+  announcements = [],
   setAnnouncements,
-  auditTrail,
-  dynamicCategories,
+  auditTrail = [],
+  dynamicCategories = [],
   getDoctorById,
   recordAction,
   isDoctorModalOpen,
   setIsDoctorModalOpen,
   editingDoctor
 }: GovernanceAndModalsProps) {
+  const safeDoctors = Array.isArray(doctors) ? doctors : [];
+  const safeActiveDoctors = safeDoctors.filter((d: any) => d.status === 'Ativo');
+
   // Estado para o Modal de Cadastro/Edição de Médico
   const [docForm, setDocForm] = useState<any>({
     name: '',
@@ -153,13 +157,23 @@ export default function GovernanceAndModals({
     description: ''
   });
 
+  // Estados do Painel de Gestão à Vista & Comunicados
   const [annForm, setAnnForm] = useState({
     title: '',
-    category: 'Protocolo Clínico',
-    priority: 'Normal',
+    category: 'Gestão à Vista / Indicadores',
+    priority: 'Importante',
+    metricHighlight: '',
     content: ''
   });
 
+  const [newIndicatorForm, setNewIndicatorForm] = useState({
+    label: '',
+    value: '',
+    target: '',
+    status: 'otimo'
+  });
+
+  const [expandedAckAnnId, setExpandedAckAnnId] = useState<number | null>(null);
   const [newMasterPass, setNewMasterPass] = useState(config?.masterAdminPassword || 'admin123');
   const [passSavedMsg, setPassSavedMsg] = useState(false);
 
@@ -171,10 +185,8 @@ export default function GovernanceAndModals({
       .trim()
       .toLowerCase();
 
-    // Verifica se a função principal escolhida exige escala ou não na Tabela de Remuneração
     const roleConfig = config?.functionRates?.[docForm.role];
     const isRoleWithoutSchedule = roleConfig && roleConfig.requiresSchedule === false;
-
     const finalParticipates = isRoleWithoutSchedule ? false : Boolean(docForm.participatesInSchedule);
 
     const updatedDoc = {
@@ -229,7 +241,7 @@ export default function GovernanceAndModals({
     });
   };
 
-  // Renderização do Modal de Edição/Cadastro de Médico (Disponível em qualquer aba)
+  // Modal de Edição/Cadastro de Médico
   const renderDoctorModal = () => {
     if (!isDoctorModalOpen) return null;
     const allFnNames = Object.keys(config?.functionRates || {});
@@ -252,7 +264,6 @@ export default function GovernanceAndModals({
           </div>
 
           <form onSubmit={handleSaveDoctorModal} className="space-y-4">
-            {/* CONTROLE EXCLUSIVO DO LOGIN MESTRE (GESTOR) */}
             <div className="p-4 rounded-xl bg-amber-50 border-2 border-amber-300 space-y-2">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -280,9 +291,6 @@ export default function GovernanceAndModals({
                   Liberar perfil e funções de Gestor para este médico ao logar com a conta dele
                 </span>
               </label>
-              <p className="text-[11px] text-amber-900">
-                Nota: O médico com acesso de gestor poderá gerir escalas, trocas e folha, mas <strong>nunca</strong> poderá conceder ou revogar acesso de gestor de outros usuários.
-              </p>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -414,10 +422,9 @@ export default function GovernanceAndModals({
               </div>
             </div>
 
-            {/* Funções Exercidas (Com e Sem Escala) */}
             <div className="p-3.5 bg-slate-50 rounded-xl border space-y-2">
               <span className="block font-bold text-slate-800">
-                Funções Habilitadas / Acumuladas (Marque funções com ou sem escala):
+                Funções Habilitadas / Acumuladas (Com ou Sem Escala):
               </span>
               <div className="flex flex-wrap gap-2">
                 {allFnNames.map(fn => {
@@ -442,7 +449,6 @@ export default function GovernanceAndModals({
               </div>
             </div>
 
-            {/* Adicionais de Incidência no Mês vinculados ao médico */}
             {monthlyAdds.length > 0 && (
               <div className="p-3.5 bg-indigo-50/60 rounded-xl border border-indigo-200 space-y-2">
                 <span className="block font-bold text-indigo-950">
@@ -492,12 +498,499 @@ export default function GovernanceAndModals({
     );
   };
 
-  // ============================================================================
-  // ABAS DE GOVERNANÇA
-  // ============================================================================
   let viewContent = null;
 
-  if (currentView === 'vacations') {
+  // ============================================================================
+  // PAINEL COMPLETO DE GESTÃO À VISTA, INDICADORES & COMUNICADOS COM CIÊNCIA
+  // ============================================================================
+  if (currentView === 'announcements') {
+    const visualIndicators = Array.isArray(config?.visualManagementIndicators)
+      ? config.visualManagementIndicators
+      : [
+          { id: 'ind_1', label: 'Taxa de Cobertura da Escala', value: '98,5%', target: 'Meta: 100%', status: 'otimo' },
+          { id: 'ind_2', label: 'Tempo Porta-Médico (Emergência)', value: '11 min', target: 'Meta: < 15 min', status: 'otimo' },
+          { id: 'ind_3', label: 'Adesão Protocolo Sepse (1ª Hora)', value: '94%', target: 'Meta: > 90%', status: 'otimo' },
+          { id: 'ind_4', label: 'Absenteísmo / Faltas no Mês', value: '0%', target: 'Meta: 0%', status: 'otimo' }
+        ];
+
+    const handleAddIndicator = (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!newIndicatorForm.label.trim() || !newIndicatorForm.value.trim()) return;
+      const nextInd = {
+        id: `ind_${Date.now()}`,
+        label: newIndicatorForm.label.trim(),
+        value: newIndicatorForm.value.trim(),
+        target: newIndicatorForm.target.trim() || 'Meta definida pela gestão',
+        status: newIndicatorForm.status
+      };
+      setConfig((prev: any) => ({
+        ...prev,
+        visualManagementIndicators: [...visualIndicators, nextInd]
+      }));
+      setNewIndicatorForm({ label: '', value: '', target: '', status: 'otimo' });
+      recordAction(`Novo indicador de Gestão à Vista adicionado: ${nextInd.label}`);
+    };
+
+    const handleDeleteIndicator = (id: string) => {
+      setConfig((prev: any) => ({
+        ...prev,
+        visualManagementIndicators: visualIndicators.filter((i: any) => i.id !== id)
+      }));
+      recordAction('Indicador removido do Painel de Gestão à Vista');
+    };
+
+    const handleAddAnnouncement = (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!annForm.title.trim()) return;
+      const newA = {
+        id: Date.now(),
+        title: annForm.title.trim(),
+        category: annForm.category,
+        priority: annForm.priority,
+        metricHighlight: annForm.metricHighlight.trim(),
+        content: annForm.content.trim(),
+        date: new Date().toISOString().split('T')[0],
+        author: currentUser?.name || 'Coordenação Médica',
+        acknowledgedBy: []
+      };
+      setAnnouncements(prev => [newA, ...(Array.isArray(prev) ? prev : [])]);
+      setAnnForm({
+        title: '',
+        category: 'Gestão à Vista / Indicadores',
+        priority: 'Importante',
+        metricHighlight: '',
+        content: ''
+      });
+      recordAction(`Novo comunicado/indicador publicado no Gestão à Vista: ${newA.title}`);
+    };
+
+    const handleToggleAcknowledge = (annId: number) => {
+      const myId = Number(currentUser?.id || 0);
+      setAnnouncements(prev =>
+        (Array.isArray(prev) ? prev : []).map(a => {
+          if (a.id !== annId) return a;
+          const curr = Array.isArray(a.acknowledgedBy) ? a.acknowledgedBy : [];
+          const already = curr.includes(myId);
+          return {
+            ...a,
+            acknowledgedBy: already ? curr.filter((id: number) => id !== myId) : [...curr, myId]
+          };
+        })
+      );
+      recordAction(`Ciência registrada pela equipe no comunicado #${annId}`);
+    };
+
+    const handleDeleteAnnouncement = (annId: number) => {
+      if (!confirm('Deseja excluir este comunicado?')) return;
+      setAnnouncements(prev => (Array.isArray(prev) ? prev.filter(a => a.id !== annId) : []));
+      recordAction(`Comunicado #${annId} removido`);
+    };
+
+    viewContent = (
+      <div className="space-y-8 text-slate-800">
+        {/* CABEÇALHO E BANNER DE GESTÃO À VISTA */}
+        <div className="bg-slate-900 text-white rounded-2xl p-6 shadow-lg space-y-4">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="space-y-2 max-w-3xl">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-950 border border-blue-700 text-blue-300 text-[11px] font-extrabold uppercase">
+                <Sparkles size={13} /> Painel Oficial de Gestão à Vista, Indicadores & Comunicados
+              </span>
+              <h2 className="text-xl sm:text-2xl font-black">
+                Transparência Operacional, Metas Assistenciais & Alinhamento da Equipe
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-300 italic">
+                “{config?.motivationalQuote || `Cuidar de vidas com excelência, agilidade e empatia é a nossa maior missão diária na ${config?.sectorUnitName || 'Emergência Adulta - HGD'}.`}”
+              </p>
+            </div>
+
+            <div className="bg-emerald-500 text-white px-6 py-4 rounded-2xl text-center shrink-0 shadow-md">
+              <span className="block text-[10px] font-extrabold uppercase tracking-wider">
+                NPS UNIDADE
+              </span>
+              <strong className="text-3xl font-black">
+                {config?.unitNpsScore ?? 88}
+              </strong>
+            </div>
+          </div>
+
+          {/* Edição rápida da Frase Motivacional e do NPS (Apenas Gestor) */}
+          {isAdmin && (
+            <div className="pt-4 border-t border-slate-800 grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
+              <div className="md:col-span-3">
+                <label className="block text-slate-400 font-bold mb-1">
+                  Editar Frase Motivacional / Missão no Topo do Painel:
+                </label>
+                <input
+                  type="text"
+                  value={config?.motivationalQuote || `Cuidar de vidas com excelência, agilidade e empatia é a nossa maior missão diária na ${config?.sectorUnitName || 'Emergência Adulta - HGD'}.`}
+                  onChange={e => setConfig((prev: any) => ({ ...prev, motivationalQuote: e.target.value }))}
+                  className="w-full rounded-xl px-3.5 py-2 bg-slate-800 border border-slate-700 text-white font-semibold"
+                />
+              </div>
+              <div>
+                <label className="block text-slate-400 font-bold mb-1">
+                  Nota NPS da Unidade:
+                </label>
+                <input
+                  type="number"
+                  value={config?.unitNpsScore ?? 88}
+                  onChange={e => setConfig((prev: any) => ({ ...prev, unitNpsScore: Number(e.target.value) }))}
+                  className="w-full rounded-xl px-3.5 py-2 bg-slate-800 border border-slate-700 text-emerald-400 font-black text-sm"
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* SEÇÃO 1: CARTÕES DE INDICADORES DE GESTÃO À VISTA */}
+        <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+            <div>
+              <h3 className="text-base sm:text-lg font-extrabold text-slate-900 flex items-center gap-2">
+                <BarChart3 size={20} className="text-blue-600" />
+                1. Indicadores Assistenciais e Operacionais (Gestão à Vista)
+              </h3>
+              <p className="text-xs text-slate-500">
+                Acompanhamento transparente das metas de qualidade, tempos de atendimento e cobertura da unidade.
+              </p>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            {visualIndicators.map((ind: any) => (
+              <div
+                key={ind.id}
+                className="p-4 rounded-2xl border border-slate-200 bg-slate-50/70 flex flex-col justify-between space-y-2 relative"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <span className="text-xs font-extrabold text-slate-600">{ind.label}</span>
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteIndicator(ind.id)}
+                      className="text-slate-400 hover:text-red-600"
+                      title="Remover indicador"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  )}
+                </div>
+                <div className="text-2xl font-black text-slate-900">{ind.value}</div>
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-[11px] font-bold text-slate-500">{ind.target}</span>
+                  <span
+                    className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
+                      ind.status === 'atencao'
+                        ? 'bg-amber-100 text-amber-800'
+                        : ind.status === 'critico'
+                        ? 'bg-red-100 text-red-800'
+                        : 'bg-emerald-100 text-emerald-800'
+                    }`}
+                  >
+                    {ind.status === 'atencao' ? 'Atenção' : ind.status === 'critico' ? 'Crítico' : 'Na Meta'}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {isAdmin && (
+            <form onSubmit={handleAddIndicator} className="pt-3 border-t border-slate-200 grid grid-cols-1 sm:grid-cols-5 gap-2.5 text-xs items-end">
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Nome do Indicador *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ex: Tempo Porta-ECG"
+                  value={newIndicatorForm.label}
+                  onChange={e => setNewIndicatorForm({ ...newIndicatorForm, label: e.target.value })}
+                  className="w-full border rounded-lg px-3 py-2 font-semibold"
+                />
+              </div>
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Resultado Atual *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ex: 7 min (96%)"
+                  value={newIndicatorForm.value}
+                  onChange={e => setNewIndicatorForm({ ...newIndicatorForm, value: e.target.value })}
+                  className="w-full border rounded-lg px-3 py-2 font-bold"
+                />
+              </div>
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Meta Referência</label>
+                <input
+                  type="text"
+                  placeholder="Ex: Meta < 10 min"
+                  value={newIndicatorForm.target}
+                  onChange={e => setNewIndicatorForm({ ...newIndicatorForm, target: e.target.value })}
+                  className="w-full border rounded-lg px-3 py-2"
+                />
+              </div>
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Status</label>
+                <select
+                  value={newIndicatorForm.status}
+                  onChange={e => setNewIndicatorForm({ ...newIndicatorForm, status: e.target.value })}
+                  className="w-full border rounded-lg px-3 py-2 bg-white font-bold"
+                >
+                  <option value="otimo">🟢 Dentro da Meta</option>
+                  <option value="atencao">🟡 Em Atenção</option>
+                  <option value="critico">🔴 Crítico / Ação</option>
+                </select>
+              </div>
+              <button
+                type="submit"
+                className="bg-slate-900 hover:bg-slate-800 text-white rounded-lg px-4 py-2 font-bold flex items-center justify-center gap-1.5"
+              >
+                <Plus size={15} /> Adicionar Indicador
+              </button>
+            </form>
+          )}
+        </div>
+
+        {/* SEÇÃO 2: PUBLICAÇÃO E MURAL DE COMUNICADOS COM CONTROLE DE CIÊNCIA DA EQUIPE */}
+        <div className="space-y-4">
+          {isAdmin && (
+            <form onSubmit={handleAddAnnouncement} className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4 text-xs">
+              <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+                <Megaphone size={18} className="text-blue-600" />
+                2. Publicar Novo Comunicado, Diretriz ou Mensagem com Controle de Ciência
+              </h3>
+
+              <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                <div className="sm:col-span-2">
+                  <label className="block font-bold text-slate-700 mb-1">Título da Mensagem / Protocolo *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ex: Resultado Mensal de Indicadores e Atualização do Protocolo de Sepse"
+                    value={annForm.title}
+                    onChange={e => setAnnForm({ ...annForm, title: e.target.value })}
+                    className="w-full border rounded-xl px-3.5 py-2.5 font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Categoria</label>
+                  <select
+                    value={annForm.category}
+                    onChange={e => setAnnForm({ ...annForm, category: e.target.value })}
+                    className="w-full border rounded-xl px-3 py-2.5 bg-white font-bold"
+                  >
+                    <option value="Gestão à Vista / Indicadores">📊 Gestão à Vista / Indicadores</option>
+                    <option value="Protocolo Clínico">🩺 Protocolo Clínico</option>
+                    <option value="Aviso Operacional">⚡ Aviso Operacional / Escala</option>
+                    <option value="Financeiro PJ">💰 Financeiro / Folha PJ</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Prioridade</label>
+                  <select
+                    value={annForm.priority}
+                    onChange={e => setAnnForm({ ...annForm, priority: e.target.value })}
+                    className="w-full border rounded-xl px-3 py-2.5 bg-white font-bold"
+                  >
+                    <option value="Normal">Normal</option>
+                    <option value="Importante">Importante (Exige Ciência)</option>
+                    <option value="Urgente">🚨 Urgente / Leitura Obrigatória</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">
+                  Destaque de Meta / Indicador na Mensagem (Opcional)
+                </label>
+                <input
+                  type="text"
+                  placeholder="Ex: Meta Atingida: 94% de adesão ao pacote de 1ª hora • Tempo Porta-Antibiótico: 38 min"
+                  value={annForm.metricHighlight}
+                  onChange={e => setAnnForm({ ...annForm, metricHighlight: e.target.value })}
+                  className="w-full border rounded-xl px-3.5 py-2 font-semibold bg-blue-50/40"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">Conteúdo Completo e Orientações para a Equipe *</label>
+                <textarea
+                  rows={3}
+                  required
+                  placeholder="Descreva de forma transparente os indicadores, orientações assistenciais ou avisos importantes para que toda a equipe médica tome ciência..."
+                  value={annForm.content}
+                  onChange={e => setAnnForm({ ...annForm, content: e.target.value })}
+                  className="w-full border rounded-xl px-3.5 py-2.5"
+                />
+              </div>
+
+              <div className="flex justify-end">
+                <button
+                  type="submit"
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-bold shadow-sm flex items-center gap-2"
+                >
+                  <Megaphone size={15} /> Publicar no Painel e Solicitar Ciência da Equipe
+                </button>
+              </div>
+            </form>
+          )}
+
+          {/* LISTA DE COMUNICADOS PUBLICADOS E BARRA DE CIÊNCIA */}
+          <div className="space-y-4">
+            {(Array.isArray(announcements) ? announcements : []).map(a => {
+              const ackList: number[] = Array.isArray(a.acknowledgedBy) ? a.acknowledgedBy : [];
+              const myDocId = Number(currentUser?.id || 0);
+              const isConfirmedByMe = ackList.includes(myDocId);
+              const totalActive = Math.max(1, safeActiveDoctors.length);
+              const percentRead = Math.min(100, Math.round((ackList.length / totalActive) * 100));
+              const isDetailsOpen = expandedAckAnnId === a.id;
+
+              const confirmedDocs = safeActiveDoctors.filter((d: any) => ackList.includes(Number(d.id)));
+              const pendingReadDocs = safeActiveDoctors.filter((d: any) => !ackList.includes(Number(d.id)));
+
+              return (
+                <div
+                  key={a.id}
+                  className={`bg-white p-5 rounded-2xl border shadow-sm space-y-4 text-xs ${
+                    a.priority === 'Urgente'
+                      ? 'border-red-300'
+                      : a.priority === 'Importante'
+                      ? 'border-blue-200'
+                      : 'border-slate-200'
+                  }`}
+                >
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="px-2.5 py-1 rounded-lg bg-indigo-50 text-indigo-800 font-extrabold">
+                        {a.category || 'Protocolo Clínico'}
+                      </span>
+                      {a.priority && (
+                        <span
+                          className={`px-2.5 py-1 rounded-lg font-extrabold ${
+                            a.priority === 'Urgente'
+                              ? 'bg-red-100 text-red-800'
+                              : a.priority === 'Importante'
+                              ? 'bg-amber-100 text-amber-900'
+                              : 'bg-slate-100 text-slate-600'
+                          }`}
+                        >
+                          Prioridade: {a.priority}
+                        </span>
+                      )}
+                      <h4 className="text-base font-extrabold text-slate-900">{a.title}</h4>
+                    </div>
+
+                    <div className="flex items-center gap-3">
+                      <span className="text-slate-400 font-semibold">{a.date}</span>
+                      {isAdmin && (
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteAnnouncement(a.id)}
+                          className="text-slate-400 hover:text-red-600"
+                          title="Excluir comunicado"
+                        >
+                          <Trash2 size={15} />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {a.metricHighlight && (
+                    <div className="p-3 rounded-xl bg-blue-50 border border-blue-200 text-blue-950 font-bold flex items-center gap-2">
+                      <BarChart3 size={16} className="text-blue-600 shrink-0" />
+                      <span>{a.metricHighlight}</span>
+                    </div>
+                  )}
+
+                  <p className="text-slate-700 text-xs sm:text-sm leading-relaxed whitespace-pre-line">
+                    {a.content}
+                  </p>
+
+                  {/* Rodapé de Transparência e Botão de Dar Ciência */}
+                  <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                    <div className="flex-1 space-y-1.5">
+                      <div className="flex items-center justify-between text-[11px] font-bold text-slate-600">
+                        <span>
+                          ✓ Ciência da Equipe: {ackList.length} de {safeActiveDoctors.length} médicos confirmaram leitura ({percentRead}%)
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setExpandedAckAnnId(isDetailsOpen ? null : a.id)}
+                          className="text-blue-600 hover:underline flex items-center gap-1"
+                        >
+                          <Eye size={13} /> {isDetailsOpen ? 'Ocultar lista nominal' : 'Ver quem já deu ciência'}
+                        </button>
+                      </div>
+                      <div className="w-full h-2 bg-slate-100 rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-emerald-500 transition-all"
+                          style={{ width: `${percentRead}%` }}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => handleToggleAcknowledge(a.id)}
+                        className={`px-4 py-2.5 rounded-xl font-extrabold flex items-center gap-2 transition-all shadow-sm ${
+                          isConfirmedByMe
+                            ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+                            : 'bg-blue-600 hover:bg-blue-700 text-white'
+                        }`}
+                      >
+                        <CheckSquare size={15} />
+                        {isConfirmedByMe ? 'Ciência Registrada (Ciente)' : 'Confirmar Leitura / Dar Ciência'}
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Lista Nominal Transparente de quem já leu e quem falta ler */}
+                  {isDetailsOpen && (
+                    <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 grid grid-cols-1 sm:grid-cols-2 gap-3 text-[11px]">
+                      <div>
+                        <strong className="text-emerald-800 block mb-1">
+                          ✓ Médicos que já confirmaram ciência ({confirmedDocs.length}):
+                        </strong>
+                        {confirmedDocs.length === 0 ? (
+                          <span className="text-slate-400 italic">Nenhuma confirmação ainda.</span>
+                        ) : (
+                          <div className="flex flex-wrap gap-1">
+                            {confirmedDocs.map((d: any) => (
+                              <span key={d.id} className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-900 font-bold">
+                                {d.name}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <div>
+                        <strong className="text-amber-800 block mb-1">
+                          ⏳ Pendentes de confirmação ({pendingReadDocs.length}):
+                        </strong>
+                        {pendingReadDocs.length === 0 ? (
+                          <span className="text-emerald-700 font-bold">Toda a equipe já tomou ciência!</span>
+                        ) : (
+                          <div className="flex flex-wrap gap-1">
+                            {pendingReadDocs.map((d: any) => (
+                              <span key={d.id} className="px-2 py-0.5 rounded bg-amber-100 text-amber-900 font-semibold">
+                                {d.name}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+    );
+  } else if (currentView === 'vacations') {
     const displayedVacations = isAdmin
       ? vacations
       : vacations.filter(v => Number(v.doctorId) === Number(currentUser?.id));
@@ -618,7 +1111,7 @@ export default function GovernanceAndModals({
                 onChange={e => setCourseForm({ ...courseForm, doctorId: Number(e.target.value) })}
                 className="w-full border rounded-lg px-3 py-2 bg-white"
               >
-                {doctors.map(d => (
+                {safeDoctors.map(d => (
                   <option key={d.id} value={d.id}>{d.name}</option>
                 ))}
               </select>
@@ -690,7 +1183,7 @@ export default function GovernanceAndModals({
                 onChange={e => setOccForm({ ...occForm, doctorId: Number(e.target.value) })}
                 className="border rounded-lg px-3 py-2 bg-white font-bold"
               >
-                {doctors.map(d => (
+                {safeDoctors.map(d => (
                   <option key={d.id} value={d.id}>{d.name}</option>
                 ))}
               </select>
@@ -734,58 +1227,6 @@ export default function GovernanceAndModals({
               </div>
             );
           })}
-        </div>
-      </div>
-    );
-  } else if (currentView === 'announcements') {
-    const handleAddAnn = (e: React.FormEvent) => {
-      e.preventDefault();
-      if (!annForm.title.trim()) return;
-      const newA = {
-        id: Date.now(),
-        ...annForm,
-        date: new Date().toISOString().split('T')[0],
-        acknowledgedBy: []
-      };
-      setAnnouncements(prev => [newA, ...prev]);
-      setAnnForm({ title: '', category: 'Protocolo Clínico', priority: 'Normal', content: '' });
-      recordAction(`Novo comunicado publicado: ${newA.title}`);
-    };
-
-    viewContent = (
-      <div className="space-y-6 text-slate-800">
-        <h2 className="text-xl sm:text-2xl font-bold">Comunicados & Protocolos</h2>
-        {isAdmin && (
-          <form onSubmit={handleAddAnn} className="bg-white p-5 rounded-xl border border-slate-200 space-y-3 text-xs">
-            <input
-              type="text"
-              placeholder="Título do Comunicado"
-              value={annForm.title}
-              onChange={e => setAnnForm({ ...annForm, title: e.target.value })}
-              className="w-full border rounded-lg px-3 py-2 font-bold"
-            />
-            <textarea
-              placeholder="Conteúdo do protocolo ou aviso..."
-              value={annForm.content}
-              onChange={e => setAnnForm({ ...annForm, content: e.target.value })}
-              className="w-full border rounded-lg px-3 py-2"
-            />
-            <button type="submit" className="bg-blue-600 text-white px-4 py-2 rounded-lg font-bold">
-              Publicar Comunicado
-            </button>
-          </form>
-        )}
-
-        <div className="space-y-3">
-          {announcements.map(a => (
-            <div key={a.id} className="bg-white p-4 rounded-xl border border-slate-200 text-xs space-y-1">
-              <div className="flex justify-between">
-                <strong className="text-sm">{a.title}</strong>
-                <span className="text-slate-400">{a.date}</span>
-              </div>
-              <p className="text-slate-600">{a.content}</p>
-            </div>
-          ))}
         </div>
       </div>
     );
@@ -836,7 +1277,6 @@ export default function GovernanceAndModals({
           </div>
         </div>
 
-        {/* EXCLUSIVO DO LOGIN MESTRE: ALTERAR SENHA DO GESTOR MESTRE */}
         {isMasterAdmin && (
           <div className="bg-amber-50 p-5 rounded-xl border-2 border-amber-300 space-y-3 text-xs">
             <div className="flex items-center gap-2">
