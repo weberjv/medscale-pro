@@ -70,9 +70,10 @@ export default function MedScaleProApp() {
 
  // Referências para controle de Sincronização em Tempo Real sem loop infinito
 const clientIdRef = useRef<string>('');
-if (typeof window !== 'undefined' && !clientIdRef.current) {
+
+if (!clientIdRef.current && typeof window !== 'undefined') {
   clientIdRef.current = `client_${Math.random().toString(36).slice(2, 10)}_${Date.now()}`;
-  }
+}
   const isCloudReadyRef = useRef<boolean>(false);
   const lastStateSignatureRef = useRef<string>('');
 
