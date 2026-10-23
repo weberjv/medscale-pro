@@ -2,9 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import {
-  Umbrella, GraduationCap, AlertTriangle, Megaphone, History,
-  Settings, Plus, Trash2, CheckCircle, XCircle, X, Shield, Lock,
-  BarChart3, Sparkles, CheckSquare, Users, Eye
+  Megaphone, Plus, Trash2, X, Shield, Lock,
+  BarChart3, Sparkles, CheckSquare, Eye
 } from 'lucide-react';
 import { calculateExpirationFromIssueDate } from './medscaleData';
 
@@ -45,8 +44,6 @@ export default function GovernanceAndModals({
   currentUser,
   doctors = [],
   setDoctors,
-  shifts = [],
-  setShifts,
   vacations = [],
   setVacations,
   courses = [],
@@ -65,6 +62,19 @@ export default function GovernanceAndModals({
 }: GovernanceAndModalsProps) {
   const safeDoctors = Array.isArray(doctors) ? doctors : [];
   const safeActiveDoctors = safeDoctors.filter((d: any) => d.status === 'Ativo');
+
+  const registeredSpecialtiesList: { id: string; name: string }[] =
+    Array.isArray(config?.registeredSpecialties) && config.registeredSpecialties.length > 0
+      ? config.registeredSpecialties
+      : [
+          { id: 'esp_1', name: 'Clínica Médica' },
+          { id: 'esp_2', name: 'Emergência Médica' },
+          { id: 'esp_3', name: 'Cardiologia' },
+          { id: 'esp_4', name: 'Cirurgia Geral' },
+          { id: 'esp_5', name: 'Ortopedia' },
+          { id: 'esp_6', name: 'Pediatria' },
+          { id: 'esp_7', name: 'Terapia Intensiva' }
+        ];
 
   // Estado para o Modal de Cadastro/Edição de Médico
   const [docForm, setDocForm] = useState<any>({
@@ -113,7 +123,7 @@ export default function GovernanceAndModals({
         phone: '',
         crm: '',
         rqe: '',
-        specialty: config?.registeredSpecialties?.[0]?.name || 'Clínica Médica',
+        specialty: registeredSpecialtiesList[0]?.name || 'Clínica Médica',
         razaoSocial: '',
         cnpj: '',
         role: dynamicCategories[0] || 'Plantonista',
@@ -134,8 +144,8 @@ export default function GovernanceAndModals({
   const [vacForm, setVacForm] = useState({
     requestType: 'Férias',
     leaveSubtype: 'Férias Regulamentares',
-    startDate: '2026-11-01',
-    endDate: '2026-11-15',
+    startDate: '2026-10-05',
+    endDate: '2026-10-20',
     justification: '',
     freeTextSubstitutions: ''
   });
@@ -189,10 +199,16 @@ export default function GovernanceAndModals({
     const isRoleWithoutSchedule = roleConfig && roleConfig.requiresSchedule === false;
     const finalParticipates = isRoleWithoutSchedule ? false : Boolean(docForm.participatesInSchedule);
 
+    // Garantir que apenas o gestor possa definir ou alterar o Nível (1 a 4)
+    const assignedLevel = isAdmin
+      ? Number(docForm.remunerationLevel || 1)
+      : Number(editingDoctor?.remunerationLevel || 1);
+
     const updatedDoc = {
       ...docForm,
       id: editingDoctor ? editingDoctor.id : Date.now(),
       username: cleanUsername,
+      remunerationLevel: assignedLevel,
       participatesInSchedule: finalParticipates,
       hasManagerAccess: isMasterAdmin
         ? Boolean(docForm.hasManagerAccess)
@@ -204,7 +220,7 @@ export default function GovernanceAndModals({
           id: `ar_${Date.now()}_${i}`,
           roleName: fn,
           categoryType: fnNoSched ? 'administrativa' : 'assistencial',
-          level: docForm.remunerationLevel || 1,
+          level: assignedLevel,
           contractModality: fnNoSched ? 'Cargo Administrativo Fixo' : docForm.contractType
         };
       })
@@ -212,10 +228,10 @@ export default function GovernanceAndModals({
 
     if (editingDoctor) {
       setDoctors(prev => prev.map(d => (d.id === editingDoctor.id ? updatedDoc : d)));
-      recordAction(`Cadastro do médico ${updatedDoc.name} atualizado`);
+      recordAction(`Cadastro do médico ${updatedDoc.name} atualizado (Nível ${assignedLevel} • ${updatedDoc.specialty})`);
     } else {
       setDoctors(prev => [...prev, updatedDoc]);
-      recordAction(`Novo médico cadastrado: ${updatedDoc.name}`);
+      recordAction(`Novo médico cadastrado: ${updatedDoc.name} (Nível ${assignedLevel} • ${updatedDoc.specialty})`);
     }
 
     setIsDoctorModalOpen(false);
@@ -241,7 +257,7 @@ export default function GovernanceAndModals({
     });
   };
 
-  // Modal de Edição/Cadastro de Médico
+  // Modal de Edição/Cadastro de Médico (com Especialidades Dinâmicas e Nível exclusivo do Gestor)
   const renderDoctorModal = () => {
     if (!isDoctorModalOpen) return null;
     const allFnNames = Object.keys(config?.functionRates || {});
@@ -339,13 +355,21 @@ export default function GovernanceAndModals({
               </div>
 
               <div>
-                <label className="block font-bold mb-1">Especialidade</label>
-                <input
-                  type="text"
+                <label className="block font-bold mb-1">Especialidade na Emergência *</label>
+                <select
                   value={docForm.specialty}
                   onChange={e => setDocForm({ ...docForm, specialty: e.target.value })}
-                  className="w-full border rounded-lg px-3 py-2"
-                />
+                  className="w-full border rounded-lg px-3 py-2 bg-white font-bold text-slate-900"
+                >
+                  {registeredSpecialtiesList.map(sp => (
+                    <option key={sp.id} value={sp.name}>
+                      {sp.name}
+                    </option>
+                  ))}
+                  {!registeredSpecialtiesList.some(sp => sp.name === docForm.specialty) && docForm.specialty && (
+                    <option value={docForm.specialty}>{docForm.specialty}</option>
+                  )}
+                </select>
               </div>
 
               <div>
@@ -395,19 +419,24 @@ export default function GovernanceAndModals({
                 </select>
               </div>
 
-              <div>
-                <label className="block font-bold mb-1">Nível de Senioridade (1 a 4)</label>
-                <select
-                  value={docForm.remunerationLevel || 1}
-                  onChange={e => setDocForm({ ...docForm, remunerationLevel: Number(e.target.value) })}
-                  className="w-full border rounded-lg px-3 py-2 bg-white font-bold"
-                >
-                  <option value={1}>Nível 1 (Júnior)</option>
-                  <option value={2}>Nível 2 (Pleno)</option>
-                  <option value={3}>Nível 3 (Sênior)</option>
-                  <option value={4}>Nível 4 (Referência)</option>
-                </select>
-              </div>
+              {/* ATRIBUIÇÃO DE NÍVEL (1 A 4) EXCLUSIVA DO GESTOR */}
+              {isAdmin && (
+                <div>
+                  <label className="block font-extrabold text-blue-800 mb-1">
+                    Atribuição de Nível (Exclusivo Gestor)
+                  </label>
+                  <select
+                    value={docForm.remunerationLevel || 1}
+                    onChange={e => setDocForm({ ...docForm, remunerationLevel: Number(e.target.value) })}
+                    className="w-full border-2 border-blue-400 rounded-lg px-3 py-2 bg-blue-50 font-black text-blue-950"
+                  >
+                    <option value={1}>Nível 1</option>
+                    <option value={2}>Nível 2</option>
+                    <option value={3}>Nível 3</option>
+                    <option value={4}>Nível 4</option>
+                  </select>
+                </div>
+              )}
 
               <div className="flex items-center pt-5">
                 <label className="flex items-center gap-2 cursor-pointer font-bold text-slate-800">
@@ -613,7 +642,6 @@ export default function GovernanceAndModals({
             </div>
           </div>
 
-          {/* Edição rápida da Frase Motivacional e do NPS (Apenas Gestor) */}
           {isAdmin && (
             <div className="pt-4 border-t border-slate-800 grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
               <div className="md:col-span-3">
@@ -907,7 +935,6 @@ export default function GovernanceAndModals({
                     {a.content}
                   </p>
 
-                  {/* Rodapé de Transparência e Botão de Dar Ciência */}
                   <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
                     <div className="flex-1 space-y-1.5">
                       <div className="flex items-center justify-between text-[11px] font-bold text-slate-600">
@@ -946,7 +973,6 @@ export default function GovernanceAndModals({
                     </div>
                   </div>
 
-                  {/* Lista Nominal Transparente de quem já leu e quem falta ler */}
                   {isDetailsOpen && (
                     <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 grid grid-cols-1 sm:grid-cols-2 gap-3 text-[11px]">
                       <div>

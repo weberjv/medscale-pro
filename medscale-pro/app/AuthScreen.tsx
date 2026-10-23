@@ -2,275 +2,163 @@
 
 import React, { useState } from 'react';
 import {
-  Lock, UserPlus, Upload, Trash2, CheckCircle,
-  AlertCircle, Eye, EyeOff, FileText, RefreshCw
+  Activity, Lock, User, UserPlus, CheckCircle, AlertCircle,
+  Stethoscope, Building2, FileText, Mail, Phone, ShieldCheck
 } from 'lucide-react';
 
-interface AuthScreenProps {
-  config: any;
-  doctors: any[];
-  setDoctors: React.Dispatch<React.SetStateAction<any[]>>;
-  onLoginSuccess: (user: any) => void;
-  recordAction?: (description: string) => void;
-}
+export default function AuthScreen(props: any) {
+  const {
+    config = {},
+    doctors = [],
+    setDoctors,
+    onLoginSuccess,
+    handleLogin,
+    recordAction
+  } = props || {};
 
-export default function AuthScreen({
-  config,
-  doctors,
-  setDoctors,
-  onLoginSuccess,
-  recordAction
-}: AuthScreenProps) {
-  const [authTab, setAuthTab] = useState<'login' | 'register' | 'forgot'>('login');
-  const [loginUser, setLoginUser] = useState('');
-  const [loginPassword, setLoginPassword] = useState('');
-  const [showPassword, setShowPassword] = useState(false);
-  const [authMessage, setAuthMessage] = useState<{ type: 'error' | 'warning' | 'success'; text: string } | null>(null);
+  const [mode, setMode] = useState<'login' | 'register'>('login');
+  const [username, setUsername] = useState('');
+  const [password, setPassword] = useState('');
+  const [errorMsg, setErrorMsg] = useState('');
+  const [registerSuccess, setRegisterSuccess] = useState(false);
 
-  // Estado para Recuperação de Senha ("Esqueci minha senha")
-  const [forgotForm, setForgotForm] = useState({
-    userOrEmail: '',
-    cpfOrCrm: '',
-    newPassword: '',
-    confirmNewPassword: ''
-  });
+  // Lista dinâmica de Especialidades vinda da Tabela de Remuneração (com fallback seguro)
+  const registeredSpecialtiesList: { id: string; name: string }[] =
+    Array.isArray(config?.registeredSpecialties) && config.registeredSpecialties.length > 0
+      ? config.registeredSpecialties
+      : [
+          { id: 'esp_1', name: 'Clínica Médica' },
+          { id: 'esp_2', name: 'Emergência Médica' },
+          { id: 'esp_3', name: 'Cardiologia' },
+          { id: 'esp_4', name: 'Cirurgia Geral' },
+          { id: 'esp_5', name: 'Ortopedia' },
+          { id: 'esp_6', name: 'Pediatria' },
+          { id: 'esp_7', name: 'Terapia Intensiva' }
+        ];
 
-  // Estado para Solicitação de Cadastro Médico Completo
-  const [regForm, setRegForm] = useState<any>({
+  // Estado do formulário de Solicitação de Cadastro do Médico (Sem opção de escolha de Nível)
+  const [regForm, setRegForm] = useState({
     name: '',
     username: '',
+    password: '',
+    crm: '',
+    rqe: '',
     cpf: '',
     birthDate: '',
     email: '',
     phone: '',
-    crm: '',
-    rqe: '',
-    specialty: config?.registeredSpecialties?.[0]?.name || 'Clínica Médica',
+    specialty: registeredSpecialtiesList[0]?.name || 'Clínica Médica',
     razaoSocial: '',
-    cnpj: '',
-    password: '',
-    confirmPassword: '',
-    documents: [] as { name: string; type: string; size: string; uploadedAt: string }[]
+    cnpj: ''
   });
 
-  const handleLogin = (e: React.FormEvent) => {
-    e.preventDefault();
-    setAuthMessage(null);
-    const cleanInput = loginUser.trim().toLowerCase();
-    const masterPass = config?.masterAdminPassword || 'admin123';
+  const safeDoctors = Array.isArray(doctors) ? doctors : [];
 
-    // 1. Acesso do Login Mestre (Gestor Principal)
-    if (cleanInput === 'gestor' || cleanInput === 'gestor@medscale.com.br') {
-      if (loginPassword !== masterPass) {
-        setAuthMessage({
-          type: 'error',
-          text: 'Senha do Login Mestre (Gestor) incorreta.'
-        });
-        return;
-      }
-      onLoginSuccess({
-        role: 'admin',
-        isMasterAdmin: true,
-        canManage: true,
-        username: 'gestor',
-        name: 'Gestor Mestre',
-        email: 'gestor@medscale.com.br'
-      });
+  const onSubmitLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    setErrorMsg('');
+
+    const cleanUser = username.trim().toLowerCase();
+    const cleanPass = password.trim();
+
+    if (!cleanUser || !cleanPass) {
+      setErrorMsg('Preencha usuário e senha para acessar.');
       return;
     }
 
-    // 2. Busca médico por Username ou E-mail
-    const foundDoc = doctors.find(
-      d =>
-        (d.username && d.username.toLowerCase() === cleanInput) ||
-        (d.email && d.email.toLowerCase() === cleanInput)
+    // Se o componente pai forneceu uma função direta handleLogin, delega com segurança
+    if (typeof handleLogin === 'function') {
+      const result = handleLogin(cleanUser, cleanPass);
+      if (result === false) {
+        setErrorMsg('Credenciais inválidas ou cadastro ainda pendente de aprovação pelo gestor.');
+      }
+      return;
+    }
+
+    // Caso contrário, autentica diretamente verificando o Login Mestre e o Corpo Clínico
+    const masterPass = config?.masterAdminPassword || 'admin123';
+    if (cleanUser === 'gestor' && cleanPass === masterPass) {
+      if (typeof onLoginSuccess === 'function') {
+        onLoginSuccess({
+          id: 0,
+          name: 'Coordenação / Gestor Mestre',
+          username: 'gestor',
+          role: 'Gestor Geral',
+          isAdmin: true,
+          isMasterAdmin: true
+        });
+      }
+      return;
+    }
+
+    const foundDoc = safeDoctors.find(
+      (d: any) =>
+        (String(d?.username || '').trim().toLowerCase() === cleanUser ||
+          String(d?.email || '').trim().toLowerCase() === cleanUser ||
+          String(d?.crm || '').trim().toLowerCase() === cleanUser) &&
+        String(d?.password || '123').trim() === cleanPass
     );
 
     if (!foundDoc) {
-      setAuthMessage({
-        type: 'error',
-        text: 'Usuário não encontrado. Verifique seu usuário ou utilize a aba "Solicitar Cadastro".'
-      });
-      return;
-    }
-
-    if (foundDoc.password !== loginPassword) {
-      setAuthMessage({
-        type: 'error',
-        text: 'Senha incorreta. Caso não se lembre, clique em "Esqueci minha senha".'
-      });
+      setErrorMsg('Usuário ou senha incorretos. Verifique seus dados.');
       return;
     }
 
     if (foundDoc.status === 'Pendente') {
-      setAuthMessage({
-        type: 'warning',
-        text: `Olá, ${foundDoc.name}! Seu cadastro já foi enviado e aguarda a aprovação do Gestor da unidade.`
-      });
+      setErrorMsg(
+        'Sua solicitação de cadastro já foi recebida e aguarda aprovação do Gestor da unidade.'
+      );
       return;
     }
 
-    if (foundDoc.status === 'Inativo') {
-      setAuthMessage({
-        type: 'error',
-        text: 'Seu vínculo encontra-se Inativo no momento. Entre em contato com a coordenação médica.'
+    if (typeof onLoginSuccess === 'function') {
+      onLoginSuccess({
+        ...foundDoc,
+        isAdmin: Boolean(foundDoc.hasManagerAccess),
+        isMasterAdmin: false
       });
-      return;
     }
-
-    if (foundDoc.status === 'Recusado') {
-      setAuthMessage({
-        type: 'error',
-        text: 'Sua solicitação de cadastro não foi aprovada pela gestão médica.'
-      });
-      return;
-    }
-
-    // Se o Login Mestre liberou acesso de Gestor para este médico, ele entra com canManage = true (mas isMasterAdmin = false)
-    const hasManagerRole = Boolean(foundDoc.hasManagerAccess);
-
-    onLoginSuccess({
-      role: hasManagerRole ? 'admin' : 'doctor',
-      isMasterAdmin: false,
-      canManage: hasManagerRole,
-      id: foundDoc.id,
-      username: foundDoc.username || foundDoc.email,
-      name: foundDoc.name,
-      email: foundDoc.email
-    });
   };
 
-  const handleForgotPasswordSubmit = (e: React.FormEvent) => {
+  const onSubmitRegister = (e: React.FormEvent) => {
     e.preventDefault();
-    setAuthMessage(null);
+    setErrorMsg('');
 
-    const cleanUser = forgotForm.userOrEmail.trim().toLowerCase();
-    const cleanDocId = forgotForm.cpfOrCrm.replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-
-    if (!cleanUser || !cleanDocId) {
-      setAuthMessage({ type: 'error', text: 'Preencha seu Usuário/E-mail e seu CPF ou CRM para validar.' });
+    if (!regForm.name.trim() || !regForm.username.trim() || !regForm.password.trim() || !regForm.crm.trim()) {
+      setErrorMsg('Por favor, preencha todos os campos obrigatórios (*).');
       return;
     }
-
-    if (forgotForm.newPassword.length < 3) {
-      setAuthMessage({ type: 'error', text: 'A nova senha deve ter pelo menos 3 caracteres.' });
-      return;
-    }
-
-    if (forgotForm.newPassword !== forgotForm.confirmNewPassword) {
-      setAuthMessage({ type: 'error', text: 'A confirmação da nova senha não confere.' });
-      return;
-    }
-
-    const targetDoc = doctors.find(d => {
-      const matchUser =
-        (d.username && d.username.toLowerCase() === cleanUser) ||
-        (d.email && d.email.toLowerCase() === cleanUser);
-      const docCpfClean = (d.cpf || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-      const docCrmClean = (d.crm || '').replace(/[^a-zA-Z0-9]/g, '').toLowerCase();
-      const matchValidator =
-        (docCpfClean && docCpfClean.includes(cleanDocId)) ||
-        (docCrmClean && docCrmClean.includes(cleanDocId));
-      return matchUser && matchValidator;
-    });
-
-    if (!targetDoc) {
-      setAuthMessage({
-        type: 'error',
-        text: 'Dados de validação não conferem com nenhum médico cadastrado (Verifique Usuário + CPF ou CRM).'
-      });
-      return;
-    }
-
-    setDoctors(prev =>
-      prev.map(d => (d.id === targetDoc.id ? { ...d, password: forgotForm.newPassword } : d))
-    );
-
-    if (recordAction) {
-      recordAction(`Redefinição de senha realizada pelo médico ${targetDoc.name}`);
-    }
-
-    setForgotForm({ userOrEmail: '', cpfOrCrm: '', newPassword: '', confirmNewPassword: '' });
-    setAuthTab('login');
-    setAuthMessage({
-      type: 'success',
-      text: `Senha redefinida com sucesso para ${targetDoc.name}! Faça login com sua nova senha.`
-    });
-  };
-
-  const handleFileAttachment = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (!files || files.length === 0) return;
-    const today = new Date().toISOString().split('T')[0];
-    const addedDocs = Array.from(files).map(file => ({
-      name: file.name,
-      type: 'Documento Comprobatório',
-      size: `${Math.max(1, Math.round(file.size / 1024))} KB`,
-      uploadedAt: today
-    }));
-    setRegForm((prev: any) => ({
-      ...prev,
-      documents: [...(prev.documents || []), ...addedDocs]
-    }));
-  };
-
-  const handleRegisterSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    setAuthMessage(null);
 
     const cleanUsername = regForm.username.trim().toLowerCase();
-    const cleanEmail = regForm.email.trim().toLowerCase();
+    const exists = safeDoctors.some(
+      (d: any) => String(d?.username || '').trim().toLowerCase() === cleanUsername
+    );
 
-    if (!cleanUsername) {
-      setAuthMessage({ type: 'error', text: 'Informe um nome de usuário (username) para o seu acesso.' });
+    if (exists || cleanUsername === 'gestor') {
+      setErrorMsg('Este nome de usuário já está em uso. Escolha outro login.');
       return;
     }
 
-    if (regForm.password.length < 3) {
-      setAuthMessage({ type: 'error', text: 'A senha deve ter pelo menos 3 caracteres.' });
-      return;
-    }
+    const chosenSpecialty =
+      regForm.specialty || registeredSpecialtiesList[0]?.name || 'Clínica Médica';
 
-    if (regForm.password !== regForm.confirmPassword) {
-      setAuthMessage({ type: 'error', text: 'A confirmação de senha não confere.' });
-      return;
-    }
-
-    if (
-      cleanUsername === 'gestor' ||
-      doctors.some(
-        d =>
-          (d.username && d.username.toLowerCase() === cleanUsername) ||
-          (d.email && d.email.toLowerCase() === cleanEmail)
-      )
-    ) {
-      setAuthMessage({
-        type: 'error',
-        text: 'Já existe um profissional cadastrado com este Usuário (Username) ou E-mail.'
-      });
-      return;
-    }
-
-    const joinDateStr = new Date().toISOString().split('T')[0];
-
-    const newDocRecord = {
+    // Novo médico entra sempre como Pendente e Nível 1 padrão (o Gestor definirá o Nível 1 a 4 na aprovação)
+    const newDoctorRequest = {
       id: Date.now(),
-      username: cleanUsername,
       name: regForm.name.trim(),
+      username: cleanUsername,
+      password: regForm.password.trim(),
+      crm: regForm.crm.trim(),
+      rqe: regForm.rqe.trim(),
       cpf: regForm.cpf.trim(),
       birthDate: regForm.birthDate,
-      email: cleanEmail,
-      password: regForm.password,
+      email: regForm.email.trim(),
       phone: regForm.phone.trim(),
-      crm: regForm.crm.trim(),
-      rqe: regForm.rqe.trim() || 'Não informado',
-      specialty: regForm.specialty,
+      specialty: chosenSpecialty,
       razaoSocial: regForm.razaoSocial.trim(),
       cnpj: regForm.cnpj.trim(),
-      joinDate: joinDateStr,
-      exitDate: '',
       role: 'Plantonista',
-      remunerationLevel: 1,
+      remunerationLevel: 1, // Definido exclusivamente pelo gestor após o cadastro
       contractType: 'Coringa / Extra',
       participatesInSchedule: true,
       hasManagerAccess: false,
@@ -278,261 +166,164 @@ export default function AuthScreen({
       defaultShiftAdditionals: [],
       monthlyAdditionals: [],
       fixedMonthlyAdditional: 0,
-      fixedMonthlyAdditionalLabel: '',
-      fixedMonthlyAdditionalMode: 'fixed',
-      accumulatedRoles: [
-        {
-          id: `ar_${Date.now()}`,
-          roleName: 'Plantonista',
-          categoryType: 'assistencial',
-          level: 1,
-          contractModality: 'Coringa / Extra'
-        }
-      ],
-      workloadHistory: [
-        {
-          id: `wh_${Date.now()}`,
-          date: joinDateStr,
-          eventType: 'Solicitação de Cadastro',
-          details: 'Auto-cadastro enviado pelo portal aguardando homologação do gestor.'
-        }
-      ],
-      status: 'Pendente',
-      documents:
-        regForm.documents && regForm.documents.length > 0
-          ? regForm.documents
-          : [{ name: 'Cadastro_Digital_Validado.pdf', type: 'CRM / CNPJ', size: '250 KB', uploadedAt: joinDateStr }]
+      status: 'Pendente'
     };
 
-    setDoctors(prev => [...prev, newDocRecord]);
-    if (recordAction) {
-      recordAction(`Nova solicitação de cadastro enviada por ${newDocRecord.name}`);
+    if (typeof setDoctors === 'function') {
+      setDoctors((prev: any[]) => [...(Array.isArray(prev) ? prev : []), newDoctorRequest]);
+    }
+    if (typeof recordAction === 'function') {
+      recordAction(`Nova solicitação de cadastro enviada por ${newDoctorRequest.name} (${chosenSpecialty})`);
     }
 
+    setRegisterSuccess(true);
     setRegForm({
       name: '',
       username: '',
+      password: '',
+      crm: '',
+      rqe: '',
       cpf: '',
       birthDate: '',
       email: '',
       phone: '',
-      crm: '',
-      rqe: '',
-      specialty: config?.registeredSpecialties?.[0]?.name || 'Clínica Médica',
+      specialty: registeredSpecialtiesList[0]?.name || 'Clínica Médica',
       razaoSocial: '',
-      cnpj: '',
-      password: '',
-      confirmPassword: '',
-      documents: []
-    });
-
-    setAuthTab('login');
-    setLoginUser('');
-    setLoginPassword('');
-    setAuthMessage({
-      type: 'success',
-      text: 'Solicitação de cadastro enviada com sucesso! O gestor analisará seu perfil e documentos para liberar seu acesso.'
+      cnpj: ''
     });
   };
 
   return (
-    <div className="min-h-screen bg-slate-900 flex flex-col justify-center items-center p-4 text-slate-800">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-lg p-6 sm:p-8 space-y-6">
-        <div className="text-center space-y-1.5">
-          <span className="px-3.5 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-extrabold uppercase tracking-wide inline-block">
-            {config?.sectorUnitName || 'Emergência Adulta - HGD'}
-          </span>
-          <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 pt-1">
+    <div className="min-h-screen bg-slate-950 flex flex-col justify-center items-center p-4 text-slate-800">
+      <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl border border-slate-200 overflow-hidden">
+        {/* Cabeçalho Institucional */}
+        <div className="bg-slate-900 text-white p-6 text-center space-y-2">
+          <div className="w-12 h-12 rounded-2xl bg-blue-600 flex items-center justify-center mx-auto shadow-lg">
+            <Activity size={26} className="text-white" />
+          </div>
+          <h1 className="text-xl font-black tracking-tight">
             {config?.appName || 'MedScale Pro'}
           </h1>
+          <p className="text-xs text-slate-400 font-semibold">
+            {config?.sectorUnitName || 'Emergência Adulta - HGD'} • Governança & Escalas Médicas
+          </p>
         </div>
 
-        <div className="flex bg-slate-100 p-1 rounded-xl text-xs font-bold">
+        {/* Alternador Login vs Solicitar Cadastro */}
+        <div className="grid grid-cols-2 bg-slate-100 p-1.5 m-5 rounded-2xl text-xs font-extrabold">
           <button
             type="button"
             onClick={() => {
-              setAuthTab('login');
-              setAuthMessage(null);
+              setMode('login');
+              setErrorMsg('');
+              setRegisterSuccess(false);
             }}
-            className={`flex-1 py-2.5 rounded-lg transition-all ${
-              authTab === 'login' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+            className={`py-2.5 rounded-xl flex items-center justify-center gap-1.5 transition-all ${
+              mode === 'login'
+                ? 'bg-white text-slate-900 shadow-sm'
+                : 'text-slate-500 hover:text-slate-800'
             }`}
           >
-            Entrar no Sistema
+            <Lock size={14} /> Entrar na Conta
           </button>
           <button
             type="button"
             onClick={() => {
-              setAuthTab('register');
-              setAuthMessage(null);
+              setMode('register');
+              setErrorMsg('');
+              setRegisterSuccess(false);
             }}
-            className={`flex-1 py-2.5 rounded-lg transition-all ${
-              authTab === 'register' ? 'bg-white text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+            className={`py-2.5 rounded-xl flex items-center justify-center gap-1.5 transition-all ${
+              mode === 'register'
+                ? 'bg-white text-blue-700 shadow-sm'
+                : 'text-slate-500 hover:text-slate-800'
             }`}
           >
-            Solicitar Cadastro
+            <UserPlus size={14} /> Solicitar Cadastro
           </button>
         </div>
 
-        {authMessage && (
-          <div
-            className={`p-3.5 rounded-xl text-xs font-semibold flex items-start gap-2.5 border ${
-              authMessage.type === 'error'
-                ? 'bg-red-50 text-red-700 border-red-200'
-                : authMessage.type === 'warning'
-                ? 'bg-amber-50 text-amber-800 border-amber-200'
-                : 'bg-emerald-50 text-emerald-700 border-emerald-200'
-            }`}
-          >
-            {authMessage.type === 'success' ? (
-              <CheckCircle size={16} className="shrink-0 mt-0.5" />
-            ) : (
+        <div className="px-6 pb-6">
+          {errorMsg && (
+            <div className="mb-4 p-3.5 rounded-xl bg-red-50 border border-red-200 text-red-700 text-xs font-bold flex items-start gap-2">
               <AlertCircle size={16} className="shrink-0 mt-0.5" />
-            )}
-            <span>{authMessage.text}</span>
-          </div>
-        )}
-
-        {authTab === 'login' && (
-          <form onSubmit={handleLogin} className="space-y-4" autoComplete="off">
-            <div>
-              <label className="block text-xs font-bold text-slate-700 mb-1">
-                Usuário
-              </label>
-              <input
-                type="text"
-                required
-                value={loginUser}
-                onChange={e => setLoginUser(e.target.value)}
-                placeholder="Insira seu usuário"
-                autoComplete="off"
-                className="w-full border border-slate-300 rounded-xl px-3.5 py-2.5 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-              />
+              <span>{errorMsg}</span>
             </div>
+          )}
 
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <label className="block text-xs font-bold text-slate-700">
+          {mode === 'login' ? (
+            <form onSubmit={onSubmitLogin} className="space-y-4 text-xs">
+              <div>
+                <label className="block font-extrabold text-slate-700 uppercase mb-1">
+                  Usuário de Acesso / Login
+                </label>
+                <div className="relative">
+                  <User size={16} className="absolute left-3.5 top-2.5 text-slate-400" />
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ex: gestor ou seu usuário médico"
+                    value={username}
+                    onChange={e => setUsername(e.target.value)}
+                    className="w-full border border-slate-300 rounded-xl pl-10 pr-3.5 py-2.5 font-bold text-slate-900 focus:outline-none focus:border-blue-600"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block font-extrabold text-slate-700 uppercase mb-1">
                   Senha
                 </label>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setAuthTab('forgot');
-                    setAuthMessage(null);
-                  }}
-                  className="text-xs font-semibold text-blue-600 hover:underline"
-                >
-                  Esqueci minha senha
-                </button>
+                <div className="relative">
+                  <Lock size={16} className="absolute left-3.5 top-2.5 text-slate-400" />
+                  <input
+                    type="password"
+                    required
+                    placeholder="Digite sua senha..."
+                    value={password}
+                    onChange={e => setPassword(e.target.value)}
+                    className="w-full border border-slate-300 rounded-xl pl-10 pr-3.5 py-2.5 font-bold text-slate-900 focus:outline-none focus:border-blue-600"
+                  />
+                </div>
               </div>
-              <div className="relative">
-                <input
-                  type={showPassword ? 'text' : 'password'}
-                  required
-                  value={loginPassword}
-                  onChange={e => setLoginPassword(e.target.value)}
-                  placeholder="Insira sua senha"
-                  autoComplete="new-password"
-                  className="w-full border border-slate-300 rounded-xl px-3.5 py-2.5 pr-10 text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
-                >
-                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
-                </button>
-              </div>
-            </div>
 
-            <button
-              type="submit"
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-xl text-sm shadow-md transition-colors flex items-center justify-center gap-2"
-            >
-              <Lock size={16} /> Acessar Plataforma
-            </button>
-          </form>
-        )}
-
-        {authTab === 'forgot' && (
-          <form onSubmit={handleForgotPasswordSubmit} className="space-y-4 text-xs">
-            <div className="p-3 bg-blue-50 border border-blue-200 rounded-xl text-blue-900">
-              <strong className="block mb-0.5">Recuperação de Acesso</strong>
-              Informe seu Usuário (ou E-mail) e valide sua identidade com seu CPF ou CRM cadastrado.
-            </div>
-
-            <div>
-              <label className="block font-bold text-slate-700 mb-1">Usuário ou E-mail *</label>
-              <input
-                type="text"
-                required
-                placeholder="Insira seu usuário ou e-mail"
-                value={forgotForm.userOrEmail}
-                onChange={e => setForgotForm({ ...forgotForm, userOrEmail: e.target.value })}
-                className="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm"
-              />
-            </div>
-
-            <div>
-              <label className="block font-bold text-slate-700 mb-1">CPF ou CRM (Validação) *</label>
-              <input
-                type="text"
-                required
-                placeholder="Digite seu CPF ou número do CRM"
-                value={forgotForm.cpfOrCrm}
-                onChange={e => setForgotForm({ ...forgotForm, cpfOrCrm: e.target.value })}
-                className="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm"
-              />
-            </div>
-
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Nova Senha *</label>
-                <input
-                  type="password"
-                  required
-                  placeholder="Nova senha"
-                  value={forgotForm.newPassword}
-                  onChange={e => setForgotForm({ ...forgotForm, newPassword: e.target.value })}
-                  className="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm"
-                />
-              </div>
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Confirmar Senha *</label>
-                <input
-                  type="password"
-                  required
-                  placeholder="Repita a nova senha"
-                  value={forgotForm.confirmNewPassword}
-                  onChange={e => setForgotForm({ ...forgotForm, confirmNewPassword: e.target.value })}
-                  className="w-full border border-slate-300 rounded-xl px-3 py-2.5 text-sm"
-                />
-              </div>
-            </div>
-
-            <div className="flex gap-2 pt-2">
-              <button
-                type="button"
-                onClick={() => setAuthTab('login')}
-                className="flex-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold py-2.5 rounded-xl"
-              >
-                Voltar ao Login
-              </button>
               <button
                 type="submit"
-                className="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-bold py-2.5 rounded-xl flex items-center justify-center gap-1.5"
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-black text-xs uppercase tracking-wider shadow-md transition-all"
               >
-                <RefreshCw size={14} /> Redefinir Senha
+                Acessar Plataforma
+              </button>
+            </form>
+          ) : registerSuccess ? (
+            <div className="p-5 rounded-2xl bg-emerald-50 border-2 border-emerald-200 text-center space-y-3 text-xs">
+              <CheckCircle size={36} className="text-emerald-600 mx-auto" />
+              <h3 className="text-base font-black text-emerald-950">
+                Solicitação Enviada com Sucesso!
+              </h3>
+              <p className="text-emerald-800 leading-relaxed">
+                Seus dados cadastrais e sua especialidade foram encaminhados para a fila de homologação do <strong>Gestor Médico</strong>. Assim que aprovado, seu login estará liberado.
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  setRegisterSuccess(false);
+                  setMode('login');
+                }}
+                className="w-full bg-emerald-700 hover:bg-emerald-800 text-white py-2.5 rounded-xl font-bold"
+              >
+                Voltar para a Tela de Login
               </button>
             </div>
-          </form>
-        )}
+          ) : (
+            <form onSubmit={onSubmitRegister} className="space-y-3 text-xs max-h-[62vh] overflow-y-auto pr-1">
+              <div className="p-3 rounded-xl bg-blue-50 border border-blue-200 text-blue-900 flex items-center gap-2">
+                <ShieldCheck size={18} className="text-blue-600 shrink-0" />
+                <span>
+                  Preencha seus dados para solicitar ingresso no Corpo Clínico. O enquadramento de função e nível será atribuído pela gestão.
+                </span>
+              </div>
 
-        {authTab === 'register' && (
-          <form onSubmit={handleRegisterSubmit} className="space-y-3 text-xs max-h-[70vh] overflow-y-auto pr-1">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              <div className="sm:col-span-2">
+              <div>
                 <label className="block font-bold text-slate-700 mb-1">Nome Completo *</label>
                 <input
                   type="text"
@@ -540,205 +331,135 @@ export default function AuthScreen({
                   placeholder="Ex: Dr. João Silva"
                   value={regForm.name}
                   onChange={e => setRegForm({ ...regForm, name: e.target.value })}
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2"
+                  className="w-full border border-slate-300 rounded-xl px-3 py-2 font-semibold"
                 />
               </div>
 
-              <div>
-                <label className="block font-bold text-blue-700 mb-1">Usuário de Acesso (Username) *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ex: joaosilva"
-                  value={regForm.username}
-                  onChange={e => setRegForm({ ...regForm, username: e.target.value })}
-                  className="w-full border border-blue-300 bg-blue-50/30 rounded-lg px-3 py-2 font-bold"
-                />
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Usuário Login *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ex: joao.silva"
+                    value={regForm.username}
+                    onChange={e => setRegForm({ ...regForm, username: e.target.value })}
+                    className="w-full border border-slate-300 rounded-xl px-3 py-2 font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Criar Senha *</label>
+                  <input
+                    type="password"
+                    required
+                    placeholder="Sua senha"
+                    value={regForm.password}
+                    onChange={e => setRegForm({ ...regForm, password: e.target.value })}
+                    className="w-full border border-slate-300 rounded-xl px-3 py-2 font-bold"
+                  />
+                </div>
               </div>
 
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">CPF *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="000.000.000-00"
-                  value={regForm.cpf}
-                  onChange={e => setRegForm({ ...regForm, cpf: e.target.value })}
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2"
-                />
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">CRM (com UF) *</label>
+                  <input
+                    type="text"
+                    required
+                    placeholder="Ex: CRM-RJ 123456"
+                    value={regForm.crm}
+                    onChange={e => setRegForm({ ...regForm, crm: e.target.value })}
+                    className="w-full border border-slate-300 rounded-xl px-3 py-2 font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">RQE (Opcional)</label>
+                  <input
+                    type="text"
+                    placeholder="Nº RQE"
+                    value={regForm.rqe}
+                    onChange={e => setRegForm({ ...regForm, rqe: e.target.value })}
+                    className="w-full border border-slate-300 rounded-xl px-3 py-2"
+                  />
+                </div>
               </div>
 
+              {/* SELETOR DE ESPECIALIDADE SINCRONIZADO COM A TABELA DE REMUNERAÇÃO */}
               <div>
-                <label className="block font-bold text-slate-700 mb-1">CRM *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Ex: CRM-SP 123456"
-                  value={regForm.crm}
-                  onChange={e => setRegForm({ ...regForm, crm: e.target.value })}
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2"
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">RQE</label>
-                <input
-                  type="text"
-                  placeholder="Opcional"
-                  value={regForm.rqe}
-                  onChange={e => setRegForm({ ...regForm, rqe: e.target.value })}
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2"
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Especialidade Principal *</label>
+                <label className="block font-extrabold text-indigo-900 mb-1 flex items-center gap-1">
+                  <Stethoscope size={14} className="text-indigo-600" /> Especialidade Médica *
+                </label>
                 <select
                   value={regForm.specialty}
                   onChange={e => setRegForm({ ...regForm, specialty: e.target.value })}
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2 bg-white"
+                  className="w-full border-2 border-indigo-200 rounded-xl px-3 py-2 bg-indigo-50/40 font-extrabold text-slate-900"
                 >
-                  {(config?.registeredSpecialties || [{ name: 'Clínica Médica' }]).map((s: any) => (
-                    <option key={s.name} value={s.name}>
-                      {s.name}
+                  {registeredSpecialtiesList.map(sp => (
+                    <option key={sp.id} value={sp.name}>
+                      {sp.name}
                     </option>
                   ))}
                 </select>
               </div>
 
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Data de Nascimento *</label>
-                <input
-                  type="date"
-                  required
-                  value={regForm.birthDate}
-                  onChange={e => setRegForm({ ...regForm, birthDate: e.target.value })}
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2"
-                />
+              <div className="grid grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">E-mail</label>
+                  <input
+                    type="email"
+                    placeholder="medico@email.com"
+                    value={regForm.email}
+                    onChange={e => setRegForm({ ...regForm, email: e.target.value })}
+                    className="w-full border border-slate-300 rounded-xl px-3 py-2"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Telefone / WhatsApp</label>
+                  <input
+                    type="text"
+                    placeholder="(00) 90000-0000"
+                    value={regForm.phone}
+                    onChange={e => setRegForm({ ...regForm, phone: e.target.value })}
+                    className="w-full border border-slate-300 rounded-xl px-3 py-2"
+                  />
+                </div>
               </div>
 
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">E-mail *</label>
-                <input
-                  type="email"
-                  required
-                  placeholder="medico@email.com"
-                  value={regForm.email}
-                  onChange={e => setRegForm({ ...regForm, email: e.target.value })}
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2"
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Telefone / WhatsApp *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="(00) 90000-0000"
-                  value={regForm.phone}
-                  onChange={e => setRegForm({ ...regForm, phone: e.target.value })}
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2"
-                />
-              </div>
-
-              <div className="sm:col-span-2 pt-1 border-t border-slate-200">
-                <span className="text-[11px] font-extrabold uppercase text-emerald-800">
-                  Dados Fiscais PJ (Para Faturamento e Folha de Pagamento)
+              <div className="pt-2 border-t border-slate-100 space-y-2.5">
+                <span className="block text-[11px] font-extrabold uppercase text-slate-500 flex items-center gap-1">
+                  <Building2 size={13} /> Dados da Pessoa Jurídica (PJ) para Faturamento
                 </span>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">Razão Social PJ</label>
+                  <input
+                    type="text"
+                    placeholder="Nome da empresa médica Ltda"
+                    value={regForm.razaoSocial}
+                    onChange={e => setRegForm({ ...regForm, razaoSocial: e.target.value })}
+                    className="w-full border border-slate-300 rounded-xl px-3 py-2"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">CNPJ</label>
+                  <input
+                    type="text"
+                    placeholder="00.000.000/0001-00"
+                    value={regForm.cnpj}
+                    onChange={e => setRegForm({ ...regForm, cnpj: e.target.value })}
+                    className="w-full border border-slate-300 rounded-xl px-3 py-2"
+                  />
+                </div>
               </div>
 
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Razão Social (PJ) *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="Nome da Empresa Médica LTDA"
-                  value={regForm.razaoSocial}
-                  onChange={e => setRegForm({ ...regForm, razaoSocial: e.target.value })}
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2"
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">CNPJ *</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="00.000.000/0001-00"
-                  value={regForm.cnpj}
-                  onChange={e => setRegForm({ ...regForm, cnpj: e.target.value })}
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2"
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Senha *</label>
-                <input
-                  type="password"
-                  required
-                  placeholder="Crie uma senha"
-                  value={regForm.password}
-                  onChange={e => setRegForm({ ...regForm, password: e.target.value })}
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2"
-                />
-              </div>
-
-              <div>
-                <label className="block font-bold text-slate-700 mb-1">Confirmar Senha *</label>
-                <input
-                  type="password"
-                  required
-                  placeholder="Repita a senha"
-                  value={regForm.confirmPassword}
-                  onChange={e => setRegForm({ ...regForm, confirmPassword: e.target.value })}
-                  className="w-full border border-slate-300 rounded-lg px-3 py-2"
-                />
-              </div>
-
-              <div className="sm:col-span-2 pt-2">
-                <label className="block font-bold text-slate-700 mb-1">
-                  Anexar Documentos (Carteira CRM, RQE, Cartão CNPJ)
-                </label>
-                <label className="flex items-center justify-center gap-2 border-2 border-dashed border-slate-300 hover:border-blue-500 rounded-xl p-3 cursor-pointer bg-slate-50 text-slate-600 font-semibold">
-                  <Upload size={16} className="text-blue-600" />
-                  <span>Selecionar arquivos (PDF ou Imagem)</span>
-                  <input type="file" multiple onChange={handleFileAttachment} className="hidden" />
-                </label>
-
-                {regForm.documents && regForm.documents.length > 0 && (
-                  <div className="mt-2 space-y-1">
-                    {regForm.documents.map((doc: any, idx: number) => (
-                      <div key={idx} className="flex items-center justify-between bg-blue-50 px-3 py-1.5 rounded-lg text-[11px]">
-                        <span className="flex items-center gap-1.5 font-semibold text-blue-900 truncate">
-                          <FileText size={13} /> {doc.name} ({doc.size})
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setRegForm((prev: any) => ({
-                              ...prev,
-                              documents: prev.documents.filter((_: any, i: number) => i !== idx)
-                            }))
-                          }
-                          className="text-red-600 hover:text-red-800 ml-2"
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3 rounded-xl text-sm shadow-md mt-2 flex items-center justify-center gap-2"
-            >
-              <UserPlus size={16} /> Enviar Solicitação de Cadastro
-            </button>
-          </form>
-        )}
+              <button
+                type="submit"
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-black text-xs uppercase tracking-wider shadow-md mt-2"
+              >
+                Enviar Solicitação ao Gestor
+              </button>
+            </form>
+          )}
+        </div>
       </div>
     </div>
   );

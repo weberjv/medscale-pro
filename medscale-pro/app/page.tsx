@@ -59,21 +59,29 @@ export default function MedScaleProApp() {
 
   const [competenceMonth, setCompetenceMonth] = useState<string>('2026-10');
   const [payrollClosed, setPayrollClosed] = useState<boolean>(false);
-  const [manualPayrollAdjustments, setManualPayrollAdjustments] = useState<Record<number, { description: string; amount: number }[]>>({});
-  const [shiftCustomOverrides, setShiftCustomOverrides] = useState<Record<number, { customRate12h?: number; customFixedTotal?: number }>>({});
-  const [doctorConferenceData, setDoctorConferenceData] = useState<Record<string, { checked: boolean; checkedAt?: string; errorNote?: string }>>({});
+  const [manualPayrollAdjustments, setManualPayrollAdjustments] = useState<
+    Record<number, { description: string; amount: number }[]>
+  >({});
+  const [shiftCustomOverrides, setShiftCustomOverrides] = useState<
+    Record<number, { customRate12h?: number; customFixedTotal?: number }>
+  >({});
+  const [doctorConferenceData, setDoctorConferenceData] = useState<
+    Record<string, { checked: boolean; checkedAt?: string; errorNote?: string }>
+  >({});
 
   const [isDoctorModalOpen, setIsDoctorModalOpen] = useState(false);
   const [editingDoctor, setEditingDoctor] = useState<any | null>(null);
   const [syncStatusMsg, setSyncStatusMsg] = useState<string>('');
-  const [realtimeStatus, setRealtimeStatus] = useState<'connecting' | 'online' | 'offline'>('connecting');
+  const [realtimeStatus, setRealtimeStatus] = useState<'connecting' | 'online' | 'offline'>(
+    'connecting'
+  );
 
- // Referências para controle de Sincronização em Tempo Real sem loop infinito
-const clientIdRef = useRef<string>('');
+  // Referências para controle de Sincronização em Tempo Real sem loop infinito
+  const clientIdRef = useRef<string>('');
 
-if (!clientIdRef.current && typeof window !== 'undefined') {
-  clientIdRef.current = `client_${Math.random().toString(36).slice(2, 10)}_${Date.now()}`;
-}
+  if (!clientIdRef.current && typeof window !== 'undefined') {
+    clientIdRef.current = `client_${Math.random().toString(36).slice(2, 10)}_${Date.now()}`;
+  }
   const isCloudReadyRef = useRef<boolean>(false);
   const lastStateSignatureRef = useRef<string>('');
 
@@ -86,9 +94,13 @@ if (!clientIdRef.current && typeof window !== 'undefined') {
       doctors: Array.isArray(remote.doctors) ? remote.doctors : initialDoctors,
       shifts: Array.isArray(remote.shifts) ? remote.shifts : initialShifts,
       openShifts: Array.isArray(remote.openShifts) ? remote.openShifts : initialOpenShifts,
-      doctorAvailability: Array.isArray(remote.doctorAvailability) ? remote.doctorAvailability : initialDoctorAvailability,
+      doctorAvailability: Array.isArray(remote.doctorAvailability)
+        ? remote.doctorAvailability
+        : initialDoctorAvailability,
       occurrences: Array.isArray(remote.occurrences) ? remote.occurrences : initialOccurrences,
-      announcements: Array.isArray(remote.announcements) ? remote.announcements : initialAnnouncements,
+      announcements: Array.isArray(remote.announcements)
+        ? remote.announcements
+        : initialAnnouncements,
       swaps: Array.isArray(remote.swaps) ? remote.swaps : initialSwaps,
       vacations: Array.isArray(remote.vacations) ? remote.vacations : initialVacations,
       courses: Array.isArray(remote.courses) ? remote.courses : initialCourses,
@@ -282,7 +294,11 @@ if (!clientIdRef.current && typeof window !== 'undefined') {
     () => doctors.find(d => Number(d.id) === Number(currentUser?.id)),
     [doctors, currentUser]
   );
-  const canUserManage = isMasterAdmin || Boolean(loggedDoctorObj?.hasManagerAccess) || Boolean(currentUser?.canManage);
+  const canUserManage =
+    isMasterAdmin ||
+    Boolean(loggedDoctorObj?.hasManagerAccess) ||
+    Boolean(currentUser?.canManage) ||
+    Boolean(currentUser?.isAdmin);
   const isAdmin = isMasterAdmin ? true : canUserManage && managerViewMode === 'admin';
 
   const recordAction = (description: string) => {
@@ -352,7 +368,9 @@ if (!clientIdRef.current && typeof window !== 'undefined') {
         const exists = curr.includes(additionalId);
         return {
           ...d,
-          monthlyAdditionals: exists ? curr.filter((id: string) => id !== additionalId) : [...curr, additionalId]
+          monthlyAdditionals: exists
+            ? curr.filter((id: string) => id !== additionalId)
+            : [...curr, additionalId]
         };
       })
     );
@@ -366,10 +384,18 @@ if (!clientIdRef.current && typeof window !== 'undefined') {
     const { startStr, endStr } = competenceWindow;
     const shiftsInWindow = shifts.filter(s => s.date >= startStr && s.date <= endStr);
     const passagensInWindow = swaps.filter(
-      sw => sw.status === 'Aprovado' && sw.movementType === 'Passagem' && sw.shiftDate >= startStr && sw.shiftDate <= endStr
+      sw =>
+        sw.status === 'Aprovado' &&
+        sw.movementType === 'Passagem' &&
+        sw.shiftDate >= startStr &&
+        sw.shiftDate <= endStr
     );
 
-    const calculateShiftAdditionalsAmount = (addIds: string[], hours: number, shiftBaseRef: number) => {
+    const calculateShiftAdditionalsAmount = (
+      addIds: string[],
+      hours: number,
+      shiftBaseRef: number
+    ) => {
       let total = 0;
       const details: { id: string; name: string; amount: number }[] = [];
       (addIds || []).forEach(id => {
@@ -399,7 +425,13 @@ if (!clientIdRef.current && typeof window !== 'undefined') {
 
         let baseFixedMonthly = 0;
         const allAllowedFns: string[] = Array.from(
-          new Set([doc.role, ...(doc.allowedFunctions || []), ...accRoles.map((r: any) => r.roleName)].filter(Boolean))
+          new Set(
+            [
+              doc.role,
+              ...(doc.allowedFunctions || []),
+              ...accRoles.map((r: any) => r.roleName)
+            ].filter(Boolean)
+          )
         );
 
         allAllowedFns.forEach(fnName => {
@@ -407,11 +439,12 @@ if (!clientIdRef.current && typeof window !== 'undefined') {
           const adminRateCfg = config.adminFunctionRates?.[fnName];
 
           if (fnRateCfg && fnRateCfg.requiresSchedule === false) {
-            baseFixedMonthly += Number(fnRateCfg.mensalFixo || 0);
+            baseFixedMonthly += Number(fnRateCfg.mensalFixo || fnRateCfg.monthlyFixedValue || 0);
           } else if (adminRateCfg) {
             baseFixedMonthly += Number(adminRateCfg.mensalFixo || 0);
           } else if (fnRateCfg && isFixedContract && fnName === doc.role) {
-            const lvlBonusMensal = config.levelBonuses12h?.[doc.remunerationLevel || 1]?.mensalBonus || 0;
+            const lvlBonusMensal =
+              config.levelBonuses12h?.[doc.remunerationLevel || 1]?.mensalBonus || 0;
             baseFixedMonthly += Number(fnRateCfg.mensalFixo || 0) + lvlBonusMensal;
           }
         });
@@ -442,7 +475,11 @@ if (!clientIdRef.current && typeof window !== 'undefined') {
             rules[0];
 
           const override = shiftCustomOverrides[sh.id];
-          const isExtraShift = sh.billingType !== 'Fixo' || !isFixedContract || Boolean(sh.customRate12h) || Boolean(override);
+          const isExtraShift =
+            sh.billingType !== 'Fixo' ||
+            !isFixedContract ||
+            Boolean(sh.customRate12h) ||
+            Boolean(override);
 
           if (isExtraShift) {
             extraHoursWorked += hours;
@@ -463,12 +500,19 @@ if (!clientIdRef.current && typeof window !== 'undefined') {
           const proportionalBaseRef = (hours / 12) * base12hApplied;
           let shiftBaseVal = 0;
           if (isExtraShift) {
-            shiftBaseVal = override?.customFixedTotal !== undefined ? Number(override.customFixedTotal) : proportionalBaseRef;
+            shiftBaseVal =
+              override?.customFixedTotal !== undefined
+                ? Number(override.customFixedTotal)
+                : proportionalBaseRef;
           }
 
           extraShiftsAmount += shiftBaseVal;
 
-          const addCalc = calculateShiftAdditionalsAmount(sh.additionals || [], hours, proportionalBaseRef);
+          const addCalc = calculateShiftAdditionalsAmount(
+            sh.additionals || [],
+            hours,
+            proportionalBaseRef
+          );
           totalShiftAdditionalsOnly += addCalc.total;
 
           dailyBreakdown.push({
@@ -489,7 +533,9 @@ if (!clientIdRef.current && typeof window !== 'undefined') {
           });
         });
 
-        const monthlyAddCatalog = (config.shiftAdditionals || []).filter((a: any) => a.incidence === 'monthly');
+        const monthlyAddCatalog = (config.shiftAdditionals || []).filter(
+          (a: any) => a.incidence === 'monthly'
+        );
         const docMonthlyIds: string[] = doc.monthlyAdditionals || [];
 
         monthlyAddCatalog.forEach((mAdd: any) => {
@@ -515,14 +561,24 @@ if (!clientIdRef.current && typeof window !== 'undefined') {
         });
 
         const manualAdjs = manualPayrollAdjustments[doc.id] || [];
-        const manualAdjustmentsTotal = manualAdjs.reduce((acc, item) => acc + Number(item.amount || 0), 0);
+        const manualAdjustmentsTotal = manualAdjs.reduce(
+          (acc, item) => acc + Number(item.amount || 0),
+          0
+        );
 
         const totalAdditionalsAmount = totalShiftAdditionalsOnly + totalMonthlyAdditionalsOnly;
         const netTotal =
-          baseFixedMonthly + extraShiftsAmount + totalAdditionalsAmount + manualAdjustmentsTotal - totalDiscounts;
+          baseFixedMonthly +
+          extraShiftsAmount +
+          totalAdditionalsAmount +
+          manualAdjustmentsTotal -
+          totalDiscounts;
 
         return {
           ...doc,
+          doctor: doc,
+          shiftsCount: docShifts.length,
+          totalHours: totalHoursWorked,
           totalHoursWorked,
           weeklyAvgTotalHours: (totalHoursWorked / 4.33).toFixed(1),
           fixedHoursWorked,
@@ -531,6 +587,8 @@ if (!clientIdRef.current && typeof window !== 'undefined') {
           extraShiftsCount,
           baseFixedMonthly,
           extraShiftsAmount,
+          shiftAdditionalsTotal: totalShiftAdditionalsOnly,
+          monthlyAdditionalsTotal: totalMonthlyAdditionalsOnly,
           totalShiftAdditionalsOnly,
           totalMonthlyAdditionalsOnly,
           totalAdditionalsAmount,
@@ -540,7 +598,15 @@ if (!clientIdRef.current && typeof window !== 'undefined') {
           dailyBreakdown
         };
       });
-  }, [doctors, shifts, swaps, config, competenceWindow, shiftCustomOverrides, manualPayrollAdjustments]);
+  }, [
+    doctors,
+    shifts,
+    swaps,
+    config,
+    competenceWindow,
+    shiftCustomOverrides,
+    manualPayrollAdjustments
+  ]);
 
   const handleCloudSync = async () => {
     try {
@@ -581,9 +647,9 @@ if (!clientIdRef.current && typeof window !== 'undefined') {
         config={config}
         doctors={doctors}
         setDoctors={setDoctors}
-        onLoginSuccess={user => {
+        onLoginSuccess={(user: any) => {
           setCurrentUser(user);
-          setManagerViewMode(user.canManage ? 'admin' : 'doctor');
+          setManagerViewMode(user.canManage || user.isAdmin ? 'admin' : 'doctor');
           setCurrentView('dashboard');
         }}
         recordAction={recordAction}
@@ -666,7 +732,9 @@ if (!clientIdRef.current && typeof window !== 'undefined') {
                 type="button"
                 onClick={() => setManagerViewMode('admin')}
                 className={`flex-1 py-1.5 rounded font-bold text-[11px] ${
-                  managerViewMode === 'admin' ? 'bg-amber-500 text-slate-950' : 'text-slate-400'
+                  managerViewMode === 'admin'
+                    ? 'bg-amber-500 text-slate-950'
+                    : 'text-slate-400'
                 }`}
               >
                 Modo Gestor
@@ -684,7 +752,11 @@ if (!clientIdRef.current && typeof window !== 'undefined') {
           </div>
         )}
 
-        <nav className={`${mobileMenuOpen ? 'block' : 'hidden'} lg:block flex-1 p-3 space-y-1 overflow-y-auto`}>
+        <nav
+          className={`${
+            mobileMenuOpen ? 'block' : 'hidden'
+          } lg:block flex-1 p-3 space-y-1 overflow-y-auto`}
+        >
           {navItems.map(item => {
             const Icon = item.icon;
             const active = currentView === item.id;
@@ -697,7 +769,9 @@ if (!clientIdRef.current && typeof window !== 'undefined') {
                   setMobileMenuOpen(false);
                 }}
                 className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-all ${
-                  active ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-300 hover:bg-slate-800'
+                  active
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-slate-300 hover:bg-slate-800'
                 }`}
               >
                 <Icon size={16} />
@@ -709,7 +783,10 @@ if (!clientIdRef.current && typeof window !== 'undefined') {
 
         <div className="p-4 border-t border-slate-800 space-y-2 text-xs">
           <div className="flex items-center gap-2">
-            <Shield size={14} className={isMasterAdmin ? 'text-amber-400' : 'text-blue-400'} />
+            <Shield
+              size={14}
+              className={isMasterAdmin ? 'text-amber-400' : 'text-blue-400'}
+            />
             <div className="truncate">
               <strong className="block truncate">{currentUser.name}</strong>
               <span className="text-[10px] text-slate-400">
@@ -739,7 +816,9 @@ if (!clientIdRef.current && typeof window !== 'undefined') {
           </div>
         )}
 
-        {['dashboard', 'schedule', 'heatmap', 'open_shifts', 'swaps'].includes(currentView) && (
+        {['dashboard', 'schedule', 'heatmap', 'open_shifts', 'swaps'].includes(
+          currentView
+        ) && (
           <ScheduleAndMapViews
             currentView={currentView}
             setCurrentView={setCurrentView}
@@ -785,6 +864,8 @@ if (!clientIdRef.current && typeof window !== 'undefined') {
             handleToggleMonthlyAdditionalOnDoctor={handleToggleMonthlyAdditionalOnDoctor}
             handleCloudSync={handleCloudSync}
             recordAction={recordAction}
+            setIsDoctorModalOpen={setIsDoctorModalOpen}
+            setEditingDoctor={setEditingDoctor}
             onOpenDoctorEditModal={(doc: any) => {
               setEditingDoctor(doc || null);
               setIsDoctorModalOpen(true);
@@ -792,9 +873,11 @@ if (!clientIdRef.current && typeof window !== 'undefined') {
           />
         )}
 
-        {['staff', 'payroll', 'remuneration', 'profile'].includes(currentView) && (
+        {['staff', 'payroll', 'remuneration', 'rates', 'profile'].includes(
+          currentView
+        ) && (
           <StaffAndFinanceViews
-            currentView={currentView}
+            currentView={currentView === 'remuneration' ? 'rates' : currentView}
             config={config}
             setConfig={setConfig}
             isAdmin={isAdmin}
@@ -826,7 +909,9 @@ if (!clientIdRef.current && typeof window !== 'undefined') {
             getCategoryRulesList={getCategoryRulesList}
             handleToggleAdditionalOnExistingShift={handleToggleAdditionalOnExistingShift}
             handleToggleMonthlyAdditionalOnDoctor={handleToggleMonthlyAdditionalOnDoctor}
-            onOpenDoctorEditModal={doc => {
+            setIsDoctorModalOpen={setIsDoctorModalOpen}
+            setEditingDoctor={setEditingDoctor}
+            onOpenDoctorEditModal={(doc: any) => {
               setEditingDoctor(doc || null);
               setIsDoctorModalOpen(true);
             }}
