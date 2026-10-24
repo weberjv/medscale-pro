@@ -4,7 +4,7 @@ import React, { useState } from 'react';
 import {
   Calendar, Clock, Users, Download, Printer, Plus, Trash2,
   CheckCircle, AlertTriangle, ArrowLeftRight, RotateCcw, Copy,
-  Eye, Sparkles, BarChart3, CheckSquare, Moon, Scissors, Edit3
+  Sparkles, BarChart3, Scissors, UserPlus
 } from 'lucide-react';
 
 export default function ScheduleAndMapViews(props: any) {
@@ -12,7 +12,6 @@ export default function ScheduleAndMapViews(props: any) {
     currentView = 'dashboard',
     setCurrentView,
     config = {},
-    setConfig,
     isAdmin = false,
     currentUser = {},
     doctors = [],
@@ -22,8 +21,6 @@ export default function ScheduleAndMapViews(props: any) {
     swaps = [],
     setSwaps,
     vacations = [],
-    announcements = [],
-    setAnnouncements,
     competenceMonth = '2026-10',
     payrollReport = [],
     dynamicCategories = [],
@@ -37,12 +34,6 @@ export default function ScheduleAndMapViews(props: any) {
   };
   const safeSetSwaps = (updater: any) => {
     if (typeof setSwaps === 'function') setSwaps(updater);
-  };
-  const safeSetConfig = (updater: any) => {
-    if (typeof setConfig === 'function') setConfig(updater);
-  };
-  const safeSetAnnouncements = (updater: any) => {
-    if (typeof setAnnouncements === 'function') setAnnouncements(updater);
   };
   const safeRecordAction = (msg: string) => {
     if (typeof recordAction === 'function') recordAction(msg);
@@ -60,7 +51,6 @@ export default function ScheduleAndMapViews(props: any) {
   const safeShifts = Array.isArray(shifts) ? shifts : [];
   const safeSwaps = Array.isArray(swaps) ? swaps : [];
   const safeVacations = Array.isArray(vacations) ? vacations : [];
-  const safeAnnouncements = Array.isArray(announcements) ? announcements : [];
   const safePayroll = Array.isArray(payrollReport) ? payrollReport : [];
 
   const functionRatesObj = config?.functionRates || {};
@@ -83,6 +73,43 @@ export default function ScheduleAndMapViews(props: any) {
     return safeDoctors.find((d: any) => Number(d?.id) === Number(id)) || null;
   };
 
+  // Verifica se um plantão está coberto (por médico cadastrado OU plantonista alocado manualmente)
+  const isShiftCovered = (s: any): boolean => {
+    if (!s) return false;
+    if (s.isManualUnregisteredDoctor && String(s.manualDoctorName || '').trim()) {
+      return true;
+    }
+    return Boolean(s.doctorId);
+  };
+
+  // Resolve os dados de exibição do médico do plantão (Cadastrado ou Manual)
+  const resolveShiftDoctorInfo = (s: any) => {
+    if (s?.isManualUnregisteredDoctor && String(s?.manualDoctorName || '').trim()) {
+      return {
+        id: `manual_${s.id}`,
+        name: String(s.manualDoctorName).trim(),
+        crm: s.manualDoctorCrm || 'Alocação Manual',
+        specialty: 'Alocação Manual',
+        role: s.category || 'Plantonista',
+        remunerationLevel: Number(s.manualDoctorLevel || 1),
+        isManual: true
+      };
+    }
+    const found = resolveDoctor(s?.doctorId);
+    if (found) {
+      return { ...found, isManual: false };
+    }
+    return {
+      id: s?.doctorId || 0,
+      name: 'Médico',
+      crm: '—',
+      specialty: 'Clínica Médica',
+      role: s?.category || 'Plantonista',
+      remunerationLevel: 1,
+      isManual: false
+    };
+  };
+
   // ============================================================================
   // DATAS E AUXILIARES DE HORÁRIO
   // ============================================================================
@@ -96,9 +123,13 @@ export default function ScheduleAndMapViews(props: any) {
   const [filterCategory, setFilterCategory] = useState<string>('Todas');
   const [onlyMyShifts, setOnlyMyShifts] = useState<boolean>(false);
 
-  // Estado para alocação de novo plantão (Com opção de Recorrência Semanal a cada 7 dias)
+  // Estado para alocação de novo plantão (Suporta Corpo Clínico OU Plantonista Não Cadastrado Manual)
   const [newShiftForm, setNewShiftForm] = useState({
+    allocationMode: 'registered' as 'registered' | 'manual',
     doctorId: safeActiveDoctors[0]?.id || 1,
+    manualDoctorName: '',
+    manualDoctorCrm: '',
+    manualDoctorLevel: 1,
     date: defaultRefDate,
     startTime: '07:00',
     endTime: '19:00',
@@ -119,7 +150,7 @@ export default function ScheduleAndMapViews(props: any) {
   const getMondayStr = (dateStr: string): string => {
     const d = new Date(`${dateStr}T12:00:00`);
     if (isNaN(d.getTime())) return dateStr;
-    const day = d.getDay(); // 0 = Dom, 1 = Seg ...
+    const day = d.getDay();
     const diff = day === 0 ? -6 : 1 - day;
     d.setDate(d.getDate() + diff);
     return d.toISOString().split('T')[0];
@@ -165,8 +196,8 @@ export default function ScheduleAndMapViews(props: any) {
       const stA = String(a?.startTime || '07:00');
       const stB = String(b?.startTime || '07:00');
       if (stA !== stB) return stA.localeCompare(stB);
-      const docA = resolveDoctor(a?.doctorId)?.name || '';
-      const docB = resolveDoctor(b?.doctorId)?.name || '';
+      const docA = resolveShiftDoctorInfo(a)?.name || '';
+      const docB = resolveShiftDoctorInfo(b)?.name || '';
       return docA.localeCompare(docB);
     });
   };
@@ -177,7 +208,6 @@ export default function ScheduleAndMapViews(props: any) {
     19, 20, 21, 22, 23, 0, 1, 2, 3, 4, 5, 6
   ];
 
-  // Verifica se um plantão do dia está ativo numa determinada hora do ciclo 07h-06h
   const isShiftActiveInCycleHour = (shift: any, cycleIndex: number): boolean => {
     const st = String(shift?.startTime || '07:00');
     const et = String(shift?.endTime || '19:00');
@@ -193,17 +223,15 @@ export default function ScheduleAndMapViews(props: any) {
     return cycleIndex >= startOffset && cycleIndex < endOffset;
   };
 
-  // Meta ideal de médicos para uma hora específica
   const getTargetForHour = (h: number): number => {
     const customTargets = config?.hourlyTargets || {};
     if (customTargets[h] !== undefined) return Number(customTargets[h]);
-    // Padrão assistencial: Diurno (07h-18h) = 4 médicos; Noturno (19h-06h) = 3 médicos
     return h >= 7 && h < 19 ? Number(config?.dayTarget || 4) : Number(config?.nightTarget || 3);
   };
 
   // Identifica médicos em férias naquele MÊS CIVIL (mês do calendário, não competência)
   const getDoctorsOnVacationInCivilMonth = (refDateStr: string): string[] => {
-    const yearMonth = String(refDateStr || '').slice(0, 7); // Ex: "2026-10"
+    const yearMonth = String(refDateStr || '').slice(0, 7);
     if (!yearMonth) return [];
     const monthStart = `${yearMonth}-01`;
     const monthEnd = `${yearMonth}-31`;
@@ -218,7 +246,9 @@ export default function ScheduleAndMapViews(props: any) {
       })
       .map((v: any) => {
         const d = resolveDoctor(v?.doctorId);
-        return d ? `${d.name} (${formatShortBrDate(v.startDate)} a ${formatShortBrDate(v.endDate)})` : null;
+        return d
+          ? `${d.name} (${formatShortBrDate(v.startDate)} a ${formatShortBrDate(v.endDate)})`
+          : null;
       })
       .filter(Boolean) as string[];
 
@@ -232,14 +262,14 @@ export default function ScheduleAndMapViews(props: any) {
     if (typeof window === 'undefined') return;
 
     const dayShiftsCovered = sortShiftsByArrival(
-      safeShifts.filter((s: any) => s?.date === selectedDate && s?.doctorId)
+      safeShifts.filter((s: any) => s?.date === selectedDate && isShiftCovered(s))
     );
     const nextDayStr = addDaysStr(selectedDate, 1);
     const handoverShifts07h = sortShiftsByArrival(
       safeShifts.filter(
         (s: any) =>
           s?.date === nextDayStr &&
-          s?.doctorId &&
+          isShiftCovered(s) &&
           String(s?.startTime || '07:00').startsWith('07')
       )
     );
@@ -253,16 +283,12 @@ export default function ScheduleAndMapViews(props: any) {
         ? `<tr><td colspan="27" style="text-align:center;padding:18px;color:#64748b;">Nenhum plantão alocado para ${formatBrDate(selectedDate)}.</td></tr>`
         : dayShiftsCovered
             .map(s => {
-              const doc = resolveDoctor(s.doctorId);
+              const doc = resolveShiftDoctorInfo(s);
               const cells = heatmapHours
                 .map((h, cIdx) => {
                   const active = isShiftActiveInCycleHour(s, cIdx);
                   const isNight = h >= 19 || h < 7;
-                  const bg = active
-                    ? isNight
-                      ? '#312e81'
-                      : '#2563eb'
-                    : '#f8fafc';
+                  const bg = active ? (isNight ? '#312e81' : '#2563eb') : '#f8fafc';
                   const txt = active ? '#ffffff' : '#cbd5e1';
                   return `<td style="background:${bg};color:${txt};text-align:center;font-weight:700;font-size:9px;border:1px solid #e2e8f0;">${
                     active ? '●' : ''
@@ -305,7 +331,7 @@ export default function ScheduleAndMapViews(props: any) {
       handoverShifts07h.length > 0
         ? handoverShifts07h
             .map(s => {
-              const d = resolveDoctor(s.doctorId);
+              const d = resolveShiftDoctorInfo(s);
               return `${d?.name || 'Médico'} (${s.category || 'Plantonista'})`;
             })
             .join(' • ')
@@ -404,11 +430,10 @@ export default function ScheduleAndMapViews(props: any) {
         ? `🏖️ Médicos em Férias no Mês (${civilMonthLabel}): ${civilMonthVacations.join(' • ')}`
         : `🏖️ Médicos em Férias no Mês (${civilMonthLabel}): Nenhum médico em gozo de férias registado neste mês civil.`;
 
-    // PÁGINA 1: Colunas diárias compactas ("Horário - Nome") apenas com plantões cobertos
     const weeklyColumnsHtml = weekDays
       .map(wd => {
         const coveredDayShifts = sortShiftsByArrival(
-          safeShifts.filter((s: any) => s?.date === wd.date && s?.doctorId)
+          safeShifts.filter((s: any) => s?.date === wd.date && isShiftCovered(s))
         );
 
         const cardsHtml =
@@ -416,7 +441,7 @@ export default function ScheduleAndMapViews(props: any) {
             ? `<div style="color:#94a3b8;font-size:8px;text-align:center;padding:6px 0;">Sem plantões</div>`
             : coveredDayShifts
                 .map(s => {
-                  const doc = resolveDoctor(s.doctorId);
+                  const doc = resolveShiftDoctorInfo(s);
                   const isNightStart = String(s.startTime || '').startsWith('19');
                   return `
                     <div style="padding:2.5px 4px;margin-bottom:2.5px;border:1px solid ${
@@ -443,11 +468,10 @@ export default function ScheduleAndMapViews(props: any) {
       })
       .join('');
 
-    // PÁGINAS 2 A 8: Uma página detalhada para cada dia da semana
     const dailyPagesHtml = weekDays
       .map(wd => {
         const coveredDayShifts = sortShiftsByArrival(
-          safeShifts.filter((s: any) => s?.date === wd.date && s?.doctorId)
+          safeShifts.filter((s: any) => s?.date === wd.date && isShiftCovered(s))
         );
 
         let nightBannerInserted = false;
@@ -456,8 +480,7 @@ export default function ScheduleAndMapViews(props: any) {
             ? `<tr><td colspan="3" style="padding:16px;text-align:center;color:#64748b;">Nenhum plantão coberto registado nesta data.</td></tr>`
             : coveredDayShifts
                 .map(s => {
-                  const doc = resolveDoctor(s.doctorId);
-                  // Apenas o nome curto da função (ex: "Plantonista"), sem a descrição longa
+                  const doc = resolveShiftDoctorInfo(s);
                   const shortFunctionName = String(
                     s?.category || doc?.role || 'Plantonista'
                   ).split(' - ')[0];
@@ -494,7 +517,6 @@ export default function ScheduleAndMapViews(props: any) {
                 })
                 .join('');
 
-        // Trocas e substituições realizadas naquele dia
         const daySwaps = safeSwaps.filter(
           (sw: any) => sw?.date === wd.date && sw?.status === 'Aprovado'
         );
@@ -586,7 +608,6 @@ export default function ScheduleAndMapViews(props: any) {
         </style>
       </head>
       <body>
-        <!-- PÁGINA 1: ESCALA SEMANAL SIMPLIFICADA COMPACTA -->
         <div class="first-page">
           <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #0f172a;padding-bottom:4px;margin-bottom:6px;">
             <div>
@@ -610,7 +631,6 @@ export default function ScheduleAndMapViews(props: any) {
           </div>
         </div>
 
-        <!-- PÁGINAS 2 A 8: DETALHAMENTO DIÁRIO (1 PÁGINA POR DIA) -->
         ${dailyPagesHtml}
 
         <script>
@@ -629,11 +649,17 @@ export default function ScheduleAndMapViews(props: any) {
   };
 
   // ============================================================================
-  // AÇÕES DE ESCALA (ALOCAR COM RECORRÊNCIA A CADA 7 DIAS, CLONAR, ADICIONAIS)
+  // AÇÕES DE ESCALA (ALOCAR CORPO CLÍNICO OU PLANTONISTA NÃO CADASTRADO + RECORRÊNCIA)
   // ============================================================================
   const handleAddShiftWithRecurrence = (e: React.FormEvent) => {
     e.preventDefault();
     if (!isAdmin) return;
+
+    const isManual = newShiftForm.allocationMode === 'manual';
+    if (isManual && !newShiftForm.manualDoctorName.trim()) {
+      alert('Digite o nome do plantonista não cadastrado para alocar manualmente.');
+      return;
+    }
 
     const hrs = calcDurationHours(newShiftForm.startTime, newShiftForm.endTime);
     const totalOccurrences = newShiftForm.repeatWeeklyInMonth
@@ -643,27 +669,63 @@ export default function ScheduleAndMapViews(props: any) {
     const createdShifts: any[] = [];
     for (let i = 0; i < totalOccurrences; i++) {
       const targetDate = addDaysStr(newShiftForm.date, i * 7);
-      createdShifts.push({
-        id: Date.now() + i,
-        doctorId: Number(newShiftForm.doctorId),
-        date: targetDate,
-        startTime: newShiftForm.startTime,
-        endTime: newShiftForm.endTime,
-        hours: hrs,
-        category: newShiftForm.category,
-        shiftType: newShiftForm.shiftType,
-        modality: newShiftForm.shiftType,
-        additionals: []
-      });
+      if (isManual) {
+        createdShifts.push({
+          id: Date.now() + i,
+          doctorId: null,
+          isManualUnregisteredDoctor: true,
+          manualDoctorName: newShiftForm.manualDoctorName.trim(),
+          manualDoctorCrm: newShiftForm.manualDoctorCrm.trim() || 'Alocação Manual',
+          manualDoctorLevel: Number(newShiftForm.manualDoctorLevel || 1),
+          date: targetDate,
+          startTime: newShiftForm.startTime,
+          endTime: newShiftForm.endTime,
+          hours: hrs,
+          category: newShiftForm.category,
+          shiftType: 'Coringa/Extra',
+          modality: 'Coringa/Extra',
+          additionals: []
+        });
+      } else {
+        createdShifts.push({
+          id: Date.now() + i,
+          doctorId: Number(newShiftForm.doctorId),
+          isManualUnregisteredDoctor: false,
+          date: targetDate,
+          startTime: newShiftForm.startTime,
+          endTime: newShiftForm.endTime,
+          hours: hrs,
+          category: newShiftForm.category,
+          shiftType: newShiftForm.shiftType,
+          modality: newShiftForm.shiftType,
+          additionals: []
+        });
+      }
     }
 
     safeSetShifts((prev: any[]) => [...(Array.isArray(prev) ? prev : []), ...createdShifts]);
-    const doc = resolveDoctor(newShiftForm.doctorId);
-    safeRecordAction(
-      totalOccurrences > 1
-        ? `Alocada recorrência semanal (${totalOccurrences} semanas a cada 7 dias) para ${doc?.name || 'Médico'} em ${newShiftForm.category}`
-        : `Plantão alocado para ${doc?.name || 'Médico'} em ${formatBrDate(newShiftForm.date)}`
-    );
+
+    if (isManual) {
+      safeRecordAction(
+        `Plantonista alocado manualmente (${newShiftForm.manualDoctorName.trim()}) inserido na escala em ${formatBrDate(
+          newShiftForm.date
+        )}`
+      );
+      setNewShiftForm(prev => ({
+        ...prev,
+        manualDoctorName: '',
+        manualDoctorCrm: ''
+      }));
+    } else {
+      const doc = resolveDoctor(newShiftForm.doctorId);
+      safeRecordAction(
+        totalOccurrences > 1
+          ? `Alocada recorrência semanal (${totalOccurrences} semanas a cada 7 dias) para ${
+              doc?.name || 'Médico'
+            } em ${newShiftForm.category}`
+          : `Plantão alocado para ${doc?.name || 'Médico'} em ${formatBrDate(newShiftForm.date)}`
+      );
+    }
   };
 
   const handleClonePreviousWeek = () => {
@@ -713,7 +775,7 @@ export default function ScheduleAndMapViews(props: any) {
   };
 
   // ============================================================================
-  // ESTADOS E FUNÇÕES DE TROCAS & PASSAGENS AVANÇADAS (ETAPA D INTEGRADA)
+  // ESTADOS E FUNÇÕES DE TROCAS & PASSAGENS AVANÇADAS
   // ============================================================================
   const myEligibleShifts = sortShiftsByArrival(
     safeShifts.filter((s: any) =>
@@ -791,7 +853,6 @@ export default function ScheduleAndMapViews(props: any) {
     setSwapForm({ ...swapForm, reason: '' });
   };
 
-  // Edição pelo Gestor enquanto a troca/passagem está "Em Análise" (Pendente / Em Revisão)
   const handleManagerUpdatePendingSwap = (swapId: number, updater: (sw: any) => any) => {
     if (!isAdmin) return;
     safeSetSwaps((prev: any[]) =>
@@ -801,7 +862,6 @@ export default function ScheduleAndMapViews(props: any) {
     );
   };
 
-  // Aprovar / Homologar Troca ou Passagem (Integral ou Fracionada por Faixas Horárias)
   const handleApproveSwap = (swapItem: any) => {
     if (!isAdmin) return;
 
@@ -852,7 +912,6 @@ export default function ScheduleAndMapViews(props: any) {
         `Passagem por faixas horárias homologada pelo gestor para ${formatBrDate(swapItem.date)}`
       );
     } else {
-      // Passagem / Troca de turno integral (ou com faixa ajustada pelo gestor)
       safeSetShifts((prev: any[]) =>
         (Array.isArray(prev) ? prev : []).map((s: any) =>
           String(s?.id) === String(swapItem.shiftId)
@@ -886,7 +945,6 @@ export default function ScheduleAndMapViews(props: any) {
     }
   };
 
-  // Botão "Desfazer Troca/Passagem" (Exclusivo Gestor — Restaura plantão original)
   const handleUndoApprovedSwap = (swapItem: any) => {
     if (!isAdmin) return;
     const snapshot = swapItem.originalShiftSnapshot;
@@ -925,7 +983,6 @@ export default function ScheduleAndMapViews(props: any) {
     );
   };
 
-  // Botão "Solicitar Revisão" (Pelo Plantonista)
   const handleRequestSwapReview = (swapId: number) => {
     const note = (reviewInputBySwap[swapId] || '').trim();
     if (!note) {
@@ -968,10 +1025,34 @@ export default function ScheduleAndMapViews(props: any) {
     const visualIndicators = Array.isArray(config?.visualManagementIndicators)
       ? config.visualManagementIndicators
       : [
-          { id: 'ind_1', label: 'Taxa de Cobertura da Escala', value: '98,5%', target: 'Meta: 100%', status: 'otimo' },
-          { id: 'ind_2', label: 'Tempo Porta-Médico (Emergência)', value: '11 min', target: 'Meta: < 15 min', status: 'otimo' },
-          { id: 'ind_3', label: 'Adesão Protocolo Sepse (1ª Hora)', value: '94%', target: 'Meta: > 90%', status: 'otimo' },
-          { id: 'ind_4', label: 'Absenteísmo / Faltas no Mês', value: '0%', target: 'Meta: 0%', status: 'otimo' }
+          {
+            id: 'ind_1',
+            label: 'Taxa de Cobertura da Escala',
+            value: '98,5%',
+            target: 'Meta: 100%',
+            status: 'otimo'
+          },
+          {
+            id: 'ind_2',
+            label: 'Tempo Porta-Médico (Emergência)',
+            value: '11 min',
+            target: 'Meta: < 15 min',
+            status: 'otimo'
+          },
+          {
+            id: 'ind_3',
+            label: 'Adesão Protocolo Sepse (1ª Hora)',
+            value: '94%',
+            target: 'Meta: > 90%',
+            status: 'otimo'
+          },
+          {
+            id: 'ind_4',
+            label: 'Absenteísmo / Faltas no Mês',
+            value: '0%',
+            target: 'Meta: 0%',
+            status: 'otimo'
+          }
         ];
 
     return (
@@ -986,7 +1067,10 @@ export default function ScheduleAndMapViews(props: any) {
               Olá, {currentUser?.name || 'Doutor(a)'}
             </h2>
             <p className="text-xs sm:text-sm text-slate-300 italic">
-              “{config?.motivationalQuote || 'Cuidar de vidas com excelência, agilidade e empatia é a nossa maior missão diária.'}”
+              “
+              {config?.motivationalQuote ||
+                'Cuidar de vidas com excelência, agilidade e empatia é a nossa maior missão diária.'}
+              ”
             </p>
           </div>
 
@@ -1137,7 +1221,6 @@ export default function ScheduleAndMapViews(props: any) {
 
   // ============================================================================
   // 2. VIEW: TROCAS & PASSAGENS AVANÇADAS
-  // (FAIXAS HORÁRIAS, EDIÇÃO PELO GESTOR, BOTÃO DESFAZER E SOLICITAR REVISÃO)
   // ============================================================================
   if (currentView === 'swaps') {
     const displayedSwaps = isAdmin
@@ -1154,7 +1237,6 @@ export default function ScheduleAndMapViews(props: any) {
 
     return (
       <div className="space-y-6 text-slate-800">
-        {/* Cabeçalho */}
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
           <h2 className="text-xl sm:text-2xl font-bold text-slate-900 flex items-center gap-2">
             <ArrowLeftRight className="text-blue-600" size={24} />
@@ -1165,7 +1247,6 @@ export default function ScheduleAndMapViews(props: any) {
           </p>
         </div>
 
-        {/* Formulário de Nova Passagem / Troca (Com opção de Fracionar por Faixa Horária) */}
         <form
           onSubmit={handleCreateSwapRequest}
           className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4 text-xs"
@@ -1210,7 +1291,7 @@ export default function ScheduleAndMapViews(props: any) {
                 className="w-full border border-slate-300 rounded-xl px-3 py-2 bg-white font-bold"
               >
                 {myEligibleShifts.map((s: any) => {
-                  const d = resolveDoctor(s.doctorId);
+                  const d = resolveShiftDoctorInfo(s);
                   return (
                     <option key={s.id} value={s.id}>
                       {formatBrDate(s.date)} • {s.startTime || '07:00'} às{' '}
@@ -1366,7 +1447,10 @@ export default function ScheduleAndMapViews(props: any) {
                       >
                         {safeActiveDoctors.map((d: any) => (
                           <option key={d.id} value={d.id}>
-                            {d.name} {Number(d.id) === Number(currentUser?.id) ? '(Eu mesmo - Manter faixa)' : ''}
+                            {d.name}{' '}
+                            {Number(d.id) === Number(currentUser?.id)
+                              ? '(Eu mesmo - Manter faixa)'
+                              : ''}
                           </option>
                         ))}
                       </select>
@@ -1398,7 +1482,6 @@ export default function ScheduleAndMapViews(props: any) {
           </div>
         </form>
 
-        {/* Lista de Solicitações de Trocas & Passagens */}
         <div className="space-y-3">
           {displayedSwaps.map((sw: any) => {
             const reqDoc = resolveDoctor(sw.requesterId);
@@ -1439,7 +1522,6 @@ export default function ScheduleAndMapViews(props: any) {
                     </span>
                   </div>
 
-                  {/* Botões de Ação (Aprovar, Desfazer pelo Gestor, Solicitar Revisão pelo Plantonista) */}
                   <div className="flex flex-wrap items-center gap-2">
                     {isAdmin && isPendingAnalysis && (
                       <button
@@ -1456,7 +1538,6 @@ export default function ScheduleAndMapViews(props: any) {
                         type="button"
                         onClick={() => handleUndoApprovedSwap(sw)}
                         className="bg-amber-600 hover:bg-amber-700 text-white px-3.5 py-1.5 rounded-xl font-bold flex items-center gap-1 shadow-sm"
-                        title="Desfaz a troca/passagem e restaura o plantão original na escala"
                       >
                         <RotateCcw size={14} /> ↩ Desfazer Troca/Passagem
                       </button>
@@ -1474,7 +1555,6 @@ export default function ScheduleAndMapViews(props: any) {
                   </div>
                 </div>
 
-                {/* Detalhes e Edição pelo Gestor enquanto "Em Análise" */}
                 <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2.5">
                   <div className="text-slate-700">
                     <strong>Plantonista Titular Solicitante:</strong>{' '}
@@ -1645,7 +1725,6 @@ export default function ScheduleAndMapViews(props: any) {
                   )}
                 </div>
 
-                {/* Caixa para o Plantonista enviar pedido de revisão */}
                 {openReviewBoxId === sw.id && (
                   <div className="p-3 rounded-xl bg-amber-50 border border-amber-300 flex flex-col sm:flex-row gap-2">
                     <input
@@ -1678,7 +1757,7 @@ export default function ScheduleAndMapViews(props: any) {
   }
 
   // ============================================================================
-  // 3. VIEW: ESCALA OFICIAL SEMANAL & MATRIZ HEATMAP 24H (SCHEDULE / MAP)
+  // 3. VIEW: ESCALA OFICIAL SEMANAL & MATRIZ HEATMAP 24H (SCHEDULE / HEATMAP)
   // ============================================================================
   const filteredShifts = safeShifts.filter((s: any) => {
     if (filterCategory !== 'Todas' && s?.category !== filterCategory) return false;
@@ -1687,14 +1766,14 @@ export default function ScheduleAndMapViews(props: any) {
   });
 
   const selectedDayCoveredShifts = sortShiftsByArrival(
-    filteredShifts.filter((s: any) => s?.date === selectedDate && s?.doctorId)
+    filteredShifts.filter((s: any) => s?.date === selectedDate && isShiftCovered(s))
   );
   const nextDayStr = addDaysStr(selectedDate, 1);
   const nextDayHandover07h = sortShiftsByArrival(
     filteredShifts.filter(
       (s: any) =>
         s?.date === nextDayStr &&
-        s?.doctorId &&
+        isShiftCovered(s) &&
         String(s?.startTime || '07:00').startsWith('07')
     )
   );
@@ -1716,7 +1795,6 @@ export default function ScheduleAndMapViews(props: any) {
             </p>
           </div>
 
-          {/* Botões de Download em PDF (Disponíveis para Gestor e Equipa) */}
           <div className="flex flex-wrap items-center gap-2 text-xs">
             <button
               type="button"
@@ -1746,7 +1824,7 @@ export default function ScheduleAndMapViews(props: any) {
           </div>
         </div>
 
-        {/* Filtros e Seletor de Data de Referência */}
+        {/* Filtros e Seletor de Data */}
         <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3 text-xs">
           <div className="flex flex-wrap items-center gap-2">
             <label className="font-extrabold text-slate-700">Data / Dia do Heatmap:</label>
@@ -1815,7 +1893,6 @@ export default function ScheduleAndMapViews(props: any) {
             >
               Apenas Heatmap 24h
             </button>
-            {/* O botão "Apenas Lista Detalhada" fica disponível apenas para o Gestor */}
             {isAdmin && (
               <button
                 type="button"
@@ -1833,34 +1910,112 @@ export default function ScheduleAndMapViews(props: any) {
         </div>
       </div>
 
-      {/* Formulário do Gestor para Alocar Plantão (Com Recorrência Semanal a cada 7 dias) */}
+      {/* Formulário do Gestor para Alocar Plantão (Corpo Clínico OU Plantonista Não Cadastrado Manual) */}
       {isAdmin && (
         <form
           onSubmit={handleAddShiftWithRecurrence}
-          className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3 text-xs"
+          className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3.5 text-xs"
         >
-          <h3 className="font-extrabold text-sm text-slate-900 flex items-center gap-2">
-            <Plus size={16} className="text-blue-600" />
-            Alocar Plantão na Escala Oficial (Com Opção de Recorrência Semanal a cada 7 dias)
-          </h3>
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
+            <h3 className="font-extrabold text-sm text-slate-900 flex items-center gap-2">
+              <Plus size={16} className="text-blue-600" />
+              Alocar Plantão na Escala Oficial (Corpo Clínico ou Plantonista Não Cadastrado)
+            </h3>
+
+            {/* Alternador: Médico do Corpo Clínico vs. Plantonista Não Cadastrado (Manual) */}
+            <div className="inline-flex rounded-xl bg-slate-100 p-1 font-extrabold text-[11px]">
+              <button
+                type="button"
+                onClick={() =>
+                  setNewShiftForm({ ...newShiftForm, allocationMode: 'registered' })
+                }
+                className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                  newShiftForm.allocationMode === 'registered'
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Users size={13} /> 👤 Médico do Corpo Clínico
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setNewShiftForm({
+                    ...newShiftForm,
+                    allocationMode: 'manual',
+                    shiftType: 'Coringa/Extra'
+                  })
+                }
+                className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                  newShiftForm.allocationMode === 'manual'
+                    ? 'bg-amber-500 text-slate-950 shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <UserPlus size={13} /> ✍️ Plantonista Não Cadastrado (Manual)
+              </button>
+            </div>
+          </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-6 gap-2.5 items-end">
-            <div className="sm:col-span-2">
-              <label className="block font-bold mb-1">Médico *</label>
-              <select
-                value={newShiftForm.doctorId}
-                onChange={e =>
-                  setNewShiftForm({ ...newShiftForm, doctorId: Number(e.target.value) })
-                }
-                className="w-full border rounded-xl px-3 py-2 bg-white font-bold"
-              >
-                {safeActiveDoctors.map((d: any) => (
-                  <option key={d.id} value={d.id}>
-                    {d.name} (Nível {d.remunerationLevel || 1})
-                  </option>
-                ))}
-              </select>
-            </div>
+            {newShiftForm.allocationMode === 'registered' ? (
+              <div className="sm:col-span-2">
+                <label className="block font-bold mb-1">Médico do Corpo Clínico *</label>
+                <select
+                  value={newShiftForm.doctorId}
+                  onChange={e =>
+                    setNewShiftForm({ ...newShiftForm, doctorId: Number(e.target.value) })
+                  }
+                  className="w-full border rounded-xl px-3 py-2 bg-white font-bold"
+                >
+                  {safeActiveDoctors.map((d: any) => (
+                    <option key={d.id} value={d.id}>
+                      {d.name} (Nível {d.remunerationLevel || 1})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-2 p-2.5 rounded-xl bg-amber-50/70 border border-amber-300">
+                <div className="sm:col-span-2">
+                  <label className="block font-extrabold text-amber-950 mb-1">
+                    Nome do Plantonista (Manual) *
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Ex: Dr. Marcos Vinícius"
+                    value={newShiftForm.manualDoctorName}
+                    onChange={e =>
+                      setNewShiftForm({
+                        ...newShiftForm,
+                        manualDoctorName: e.target.value
+                      })
+                    }
+                    className="w-full border border-amber-400 rounded-lg px-2.5 py-1.5 bg-white font-bold text-slate-900"
+                  />
+                </div>
+                <div>
+                  <label className="block font-extrabold text-amber-950 mb-1">
+                    Nível Ref.
+                  </label>
+                  <select
+                    value={newShiftForm.manualDoctorLevel}
+                    onChange={e =>
+                      setNewShiftForm({
+                        ...newShiftForm,
+                        manualDoctorLevel: Number(e.target.value)
+                      })
+                    }
+                    className="w-full border border-amber-400 rounded-lg px-2 py-1.5 bg-white font-black text-amber-950"
+                  >
+                    <option value={1}>Nível 1</option>
+                    <option value={2}>Nível 2</option>
+                    <option value={3}>Nível 3</option>
+                    <option value={4}>Nível 4</option>
+                  </select>
+                </div>
+              </div>
+            )}
 
             <div>
               <label className="block font-bold mb-1">Data Inicial *</label>
@@ -1914,7 +2069,12 @@ export default function ScheduleAndMapViews(props: any) {
             <div>
               <label className="block font-bold mb-1">Regime do Turno</label>
               <select
-                value={newShiftForm.shiftType}
+                value={
+                  newShiftForm.allocationMode === 'manual'
+                    ? 'Coringa/Extra'
+                    : newShiftForm.shiftType
+                }
+                disabled={newShiftForm.allocationMode === 'manual'}
                 onChange={e =>
                   setNewShiftForm({ ...newShiftForm, shiftType: e.target.value })
                 }
@@ -1941,7 +2101,7 @@ export default function ScheduleAndMapViews(props: any) {
                   className="w-4 h-4 accent-blue-600"
                 />
                 <span>
-                  🔁 Repetir semanalmente a cada 7 dias (Recorrência de Plantonista Fixo)
+                  🔁 Repetir semanalmente a cada 7 dias (Recorrência no mês)
                 </span>
               </label>
 
@@ -1963,11 +2123,17 @@ export default function ScheduleAndMapViews(props: any) {
                   </select>
                 </div>
               )}
+
+              {newShiftForm.allocationMode === 'manual' && (
+                <span className="text-[11px] font-bold text-amber-800">
+                  * Será contabilizado na Auditoria e na Folha PJ como “Plantonista alocado manualmente ({newShiftForm.manualDoctorName || 'Nome'})”.
+                </span>
+              )}
             </div>
 
             <button
               type="submit"
-              className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-xl font-bold shadow-sm"
+              className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-xl font-bold shadow-sm shrink-0"
             >
               + Alocar na Escala
             </button>
@@ -1990,7 +2156,7 @@ export default function ScheduleAndMapViews(props: any) {
           <div className="grid grid-cols-7 min-w-[980px] divide-x divide-slate-200 text-xs">
             {weekDays.map(wd => {
               const dayList = sortShiftsByArrival(
-                filteredShifts.filter((s: any) => s?.date === wd.date && s?.doctorId)
+                filteredShifts.filter((s: any) => s?.date === wd.date && isShiftCovered(s))
               );
               const isSelectedDay = wd.date === selectedDate;
 
@@ -2020,13 +2186,15 @@ export default function ScheduleAndMapViews(props: any) {
                       </div>
                     ) : (
                       dayList.map((s: any) => {
-                        const doc = resolveDoctor(s.doctorId);
+                        const doc = resolveShiftDoctorInfo(s);
                         const isNight = String(s.startTime || '') >= '19:00';
                         return (
                           <div
                             key={s.id}
                             className={`p-2.5 rounded-xl border shadow-sm space-y-1 ${
-                              isNight
+                              doc.isManual
+                                ? 'bg-amber-50/80 border-amber-300'
+                                : isNight
                                 ? 'bg-indigo-50/70 border-indigo-200'
                                 : 'bg-white border-slate-200'
                             }`}
@@ -2051,8 +2219,16 @@ export default function ScheduleAndMapViews(props: any) {
                             </strong>
                             <div className="flex items-center justify-between text-[10px] text-slate-500">
                               <span className="truncate">{s.category || 'Plantonista'}</span>
-                              <span className="font-bold text-blue-700">
-                                {s.shiftType === 'Fixo' ? 'Fixo' : 'Extra'}
+                              <span
+                                className={`font-bold ${
+                                  doc.isManual ? 'text-amber-800' : 'text-blue-700'
+                                }`}
+                              >
+                                {doc.isManual
+                                  ? 'Manual'
+                                  : s.shiftType === 'Fixo'
+                                  ? 'Fixo'
+                                  : 'Extra'}
                               </span>
                             </div>
                           </div>
@@ -2068,7 +2244,7 @@ export default function ScheduleAndMapViews(props: any) {
       )}
 
       {/* BLOCO 2: MATRIZ HEATMAP VISUAL ASSISTENCIAL 24H (07H ÀS 06H + RENDIÇÃO 07H) */}
-      {(displayMode === 'both' || displayMode === 'heatmap') && (
+      {(displayMode === 'both' || displayMode === 'heatmap' || currentView === 'heatmap') && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
           <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
             <div>
@@ -2123,7 +2299,7 @@ export default function ScheduleAndMapViews(props: any) {
                 </tr>
               ) : (
                 selectedDayCoveredShifts.map((s: any) => {
-                  const doc = resolveDoctor(s.doctorId);
+                  const doc = resolveShiftDoctorInfo(s);
                   return (
                     <tr key={s.id} className="hover:bg-slate-50">
                       <td className="py-2 px-3 font-extrabold text-slate-900 whitespace-nowrap">
@@ -2134,7 +2310,8 @@ export default function ScheduleAndMapViews(props: any) {
                           {doc?.name || 'Médico'}
                         </strong>
                         <span className="text-[10px] text-slate-500">
-                          {s.category || 'Plantonista'}
+                          {s.category || 'Plantonista'}{' '}
+                          {doc.isManual ? '• (Alocado Manualmente)' : ''}
                         </span>
                       </td>
                       {heatmapHours.map((h, cIdx) => {
@@ -2194,7 +2371,6 @@ export default function ScheduleAndMapViews(props: any) {
             </tfoot>
           </table>
 
-          {/* Faixa de Passagem de Plantão às 07h do Dia Seguinte */}
           <div className="p-3.5 bg-slate-50 border-t border-slate-200 text-xs flex flex-wrap items-center gap-2">
             <strong className="text-slate-800">
               🔁 Rendição / Passagem de Plantão às 07:00 de {formatBrDate(nextDayStr)}:
@@ -2205,7 +2381,7 @@ export default function ScheduleAndMapViews(props: any) {
               </span>
             ) : (
               nextDayHandover07h.map((hs: any) => {
-                const hd = resolveDoctor(hs.doctorId);
+                const hd = resolveShiftDoctorInfo(hs);
                 return (
                   <span
                     key={hs.id}
@@ -2235,7 +2411,7 @@ export default function ScheduleAndMapViews(props: any) {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {sortShiftsByArrival(filteredShifts).map((s: any) => {
-              const doc = resolveDoctor(s.doctorId);
+              const doc = resolveShiftDoctorInfo(s);
               const shiftAdds: string[] = Array.isArray(s.additionals)
                 ? s.additionals
                 : [];
@@ -2243,7 +2419,11 @@ export default function ScheduleAndMapViews(props: any) {
               return (
                 <div
                   key={s.id}
-                  className="p-4 rounded-2xl border border-slate-200 bg-slate-50/50 space-y-2.5"
+                  className={`p-4 rounded-2xl border space-y-2.5 ${
+                    doc.isManual
+                      ? 'border-amber-300 bg-amber-50/40'
+                      : 'border-slate-200 bg-slate-50/50'
+                  }`}
                 >
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <div className="flex items-center gap-2">
@@ -2268,16 +2448,18 @@ export default function ScheduleAndMapViews(props: any) {
                       {s.category || 'Plantonista'}
                     </span>
                     <span className="px-2.5 py-0.5 rounded-full bg-slate-200 text-slate-800 font-bold">
-                      {s.shiftType || 'Fixo'}
+                      {doc.isManual ? 'Plantonista Alocado Manualmente' : s.shiftType || 'Fixo'}
                     </span>
                   </div>
 
                   <div>
                     <strong className="text-sm font-black text-slate-900">
-                      {doc?.name || 'Vaga em Aberto'}
+                      {doc.isManual
+                        ? `Plantonista alocado manualmente (${doc.name})`
+                        : doc?.name || 'Vaga em Aberto'}
                     </strong>{' '}
                     <span className="text-slate-500">
-                      ({doc?.crm || '—'} • {doc?.specialty || 'Clínica Médica'})
+                      ({doc?.crm || '—'} • Nível {doc?.remunerationLevel || 1})
                     </span>
                   </div>
 

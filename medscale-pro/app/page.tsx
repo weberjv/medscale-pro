@@ -76,7 +76,6 @@ export default function MedScaleProApp() {
     'connecting'
   );
 
-  // Referências para controle de Sincronização em Tempo Real sem loop infinito
   const clientIdRef = useRef<string>('');
 
   if (!clientIdRef.current && typeof window !== 'undefined') {
@@ -88,11 +87,22 @@ export default function MedScaleProApp() {
   const applyRemotePayload = (remote: any) => {
     if (!remote || typeof remote !== 'object') return;
 
+    const mergedConfig = remote.config ? { ...DEFAULT_CONFIG, ...remote.config } : DEFAULT_CONFIG;
+    const isCleared = Boolean(mergedConfig?.demoDoctorsCleared);
+
     const cleanSnapshot = {
-      config: remote.config ? { ...DEFAULT_CONFIG, ...remote.config } : DEFAULT_CONFIG,
+      config: mergedConfig,
       hourlyDemand: remote.hourlyDemand || DEFAULT_HOURLY_DEMAND,
-      doctors: Array.isArray(remote.doctors) ? remote.doctors : initialDoctors,
-      shifts: Array.isArray(remote.shifts) ? remote.shifts : initialShifts,
+      doctors: Array.isArray(remote.doctors)
+        ? remote.doctors
+        : isCleared
+        ? []
+        : initialDoctors,
+      shifts: Array.isArray(remote.shifts)
+        ? remote.shifts
+        : isCleared
+        ? []
+        : initialShifts,
       openShifts: Array.isArray(remote.openShifts) ? remote.openShifts : initialOpenShifts,
       doctorAvailability: Array.isArray(remote.doctorAvailability)
         ? remote.doctorAvailability
@@ -102,8 +112,16 @@ export default function MedScaleProApp() {
         ? remote.announcements
         : initialAnnouncements,
       swaps: Array.isArray(remote.swaps) ? remote.swaps : initialSwaps,
-      vacations: Array.isArray(remote.vacations) ? remote.vacations : initialVacations,
-      courses: Array.isArray(remote.courses) ? remote.courses : initialCourses,
+      vacations: Array.isArray(remote.vacations)
+        ? remote.vacations
+        : isCleared
+        ? []
+        : initialVacations,
+      courses: Array.isArray(remote.courses)
+        ? remote.courses
+        : isCleared
+        ? []
+        : initialCourses,
       auditTrail: Array.isArray(remote.auditTrail) ? remote.auditTrail : [],
       manualPayrollAdjustments: remote.manualPayrollAdjustments || {},
       shiftCustomOverrides: remote.shiftCustomOverrides || {},
@@ -150,10 +168,13 @@ export default function MedScaleProApp() {
     const initCloudAndRealtime = async () => {
       try {
         const cloudPayload = await fetchStateFromSupabase(supabase);
-        if (cloudPayload && Array.isArray(cloudPayload.doctors) && cloudPayload.doctors.length > 0) {
+        if (
+          cloudPayload &&
+          typeof cloudPayload === 'object' &&
+          (Array.isArray(cloudPayload.doctors) || cloudPayload.config?.demoDoctorsCleared)
+        ) {
           applyRemotePayload(cloudPayload);
         } else {
-          // Se a nuvem estiver vazia na primeira vez, sobe os dados atuais para inicializar a nuvem
           const initialToUpload = localParsed || {
             config: DEFAULT_CONFIG,
             hourlyDemand: DEFAULT_HOURLY_DEMAND,
@@ -184,7 +205,6 @@ export default function MedScaleProApp() {
         setRealtimeStatus('offline');
       }
 
-      // Subscreve ao canal Realtime para receber atualizações ao vivo de outros aparelhos
       channel = supabase
         .channel('medscale_live_sync')
         .on(
@@ -219,7 +239,7 @@ export default function MedScaleProApp() {
     };
   }, []);
 
-  // 2. Guarda automaticamente no LocalStorage e envia para a Nuvem em Tempo Real a cada alteração
+  // 2. Guarda automaticamente no LocalStorage e envia para a Nuvem em Tempo Real
   useEffect(() => {
     if (!isHydrated) return;
 
@@ -417,7 +437,7 @@ export default function MedScaleProApp() {
       .filter(d => d.status === 'Ativo')
       .map(doc => {
         const docShifts = shiftsInWindow
-          .filter(s => Number(s.doctorId) === Number(doc.id))
+          .filter(s => Number(s.doctorId) === Number(doc.id) && !s.isManualUnregisteredDoctor)
           .sort((a, b) => a.date.localeCompare(b.date));
 
         const accRoles = doc.accumulatedRoles || [];
@@ -657,6 +677,7 @@ export default function MedScaleProApp() {
     );
   }
 
+  // Menu de navegação: "Vagas Extras" removido do login do médico plantonista
   const navItems = isAdmin
     ? [
         { id: 'dashboard', label: 'Painel Geral', icon: LayoutDashboard },
@@ -677,7 +698,6 @@ export default function MedScaleProApp() {
     : [
         { id: 'dashboard', label: 'Meu Painel', icon: LayoutDashboard },
         { id: 'schedule', label: 'Minha Escala', icon: Calendar },
-        { id: 'open_shifts', label: 'Vagas Extras', icon: Megaphone },
         { id: 'swaps', label: 'Minhas Trocas', icon: RefreshCw },
         { id: 'payroll', label: 'Meu Extrato PJ', icon: DollarSign },
         { id: 'vacations', label: 'Minhas Férias', icon: Umbrella },
@@ -889,8 +909,13 @@ export default function MedScaleProApp() {
             adminDoctors={adminDoctors}
             pendingDoctors={pendingDoctors}
             shifts={shifts}
+            setShifts={setShifts}
             swaps={swaps}
             setSwaps={setSwaps}
+            vacations={vacations}
+            setVacations={setVacations}
+            courses={courses}
+            setCourses={setCourses}
             occurrences={occurrences}
             competenceMonth={competenceMonth}
             setCompetenceMonth={setCompetenceMonth}
