@@ -1,11 +1,11 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   Umbrella, GraduationCap, ShieldAlert, ClipboardList, History,
   Sliders, Plus, Trash2, CheckCircle, AlertTriangle, RotateCcw,
-  Lock, Unlock, X, UserCheck, Award, Stethoscope, Calendar,
-  Sparkles, Eye, CheckSquare, Users, Tag, Clock
+  Lock, Unlock, X, Calendar, Sparkles, CheckSquare, Tag,
+  BarChart3, Edit3, Megaphone, Save
 } from 'lucide-react';
 
 export default function GovernanceAndModals(props: any) {
@@ -178,7 +178,6 @@ export default function GovernanceAndModals(props: any) {
     );
   };
 
-  // Verifica se o intervalo [startDate, endDate] toca num determinado mês YYYY-MM
   const doesRangeTouchMonth = (startDate: string, endDate: string, yearMonth: string): boolean => {
     if (!startDate || !endDate) return false;
     const mStart = `${yearMonth}-01`;
@@ -195,7 +194,6 @@ export default function GovernanceAndModals(props: any) {
       return;
     }
 
-    // Verifica se algum mês tocado pelo pedido de FÉRIAS está bloqueado (para médicos plantonistas)
     const startYM = vacForm.startDate.slice(0, 7);
     const endYM = vacForm.endDate.slice(0, 7);
 
@@ -234,7 +232,6 @@ export default function GovernanceAndModals(props: any) {
     );
   };
 
-  // Etapa 1: Gestor aprova inicialmente o período e abre para receber substituições
   const handleInitialApproveVacation = (vacId: number) => {
     if (!isAdmin) return;
     safeSetVacations((prev: any[]) =>
@@ -252,7 +249,6 @@ export default function GovernanceAndModals(props: any) {
     );
   };
 
-  // Adicionar linha de substituto/cobertura dentro da solicitação de Férias/Licença
   const handleAddVacationSubstitution = (vacId: number) => {
     const draft = subDraftByVacId[vacId] || {
       dateInfo: '',
@@ -309,7 +305,6 @@ export default function GovernanceAndModals(props: any) {
     );
   };
 
-  // Etapa 2: Gestor homologa as substituições e conclui a aprovação final
   const handleFinalApproveVacation = (vacId: number) => {
     if (!isAdmin) return;
     safeSetVacations((prev: any[]) =>
@@ -335,7 +330,6 @@ export default function GovernanceAndModals(props: any) {
     safeRecordAction(`Solicitação de Férias/Licença #${vacId} recusada pelo gestor`);
   };
 
-  // Botão "Desfazer / Re-analisar" (Exclusivo Gestor)
   const handleUndoOrReanalyzeVacation = (vacId: number) => {
     if (!isAdmin) return;
     safeSetVacations((prev: any[]) =>
@@ -351,7 +345,6 @@ export default function GovernanceAndModals(props: any) {
     safeRecordAction(`Férias/Licença #${vacId} revertida pelo gestor para Re-análise (Pendente)`);
   };
 
-  // Botão "Solicitar Revisão" (Pelo Médico)
   const handleRequestVacationReview = (vacId: number) => {
     const note = (vacReviewInput[vacId] || '').trim();
     if (!note) {
@@ -554,19 +547,70 @@ export default function GovernanceAndModals(props: any) {
   };
 
   // ============================================================================
-  // ESTADOS DE OCORRÊNCIAS, COMUNICADOS E CONFIGURAÇÕES
+  // ESTADOS DE GESTÃO À VISTA, GOVERNANÇA & COMUNICADOS UNIFICADOS
   // ============================================================================
-  const [occForm, setOccForm] = useState({
-    date: new Date().toISOString().split('T')[0],
-    severity: 'Moderada',
-    category: 'Assistencial / Fluxo',
-    description: ''
+  const defaultVisualIndicators = [
+    {
+      id: 'ind_1',
+      label: 'Taxa de Cobertura da Escala',
+      value: '98,5%',
+      target: 'Meta: 100%',
+      status: 'otimo'
+    },
+    {
+      id: 'ind_2',
+      label: 'Tempo Porta-Médico (Emergência)',
+      value: '11 min',
+      target: 'Meta: < 15 min',
+      status: 'otimo'
+    },
+    {
+      id: 'ind_3',
+      label: 'Adesão Protocolo Sepse (1ª Hora)',
+      value: '94%',
+      target: 'Meta: > 90%',
+      status: 'otimo'
+    },
+    {
+      id: 'ind_4',
+      label: 'Absenteísmo / Faltas no Mês',
+      value: '0%',
+      target: 'Meta: 0%',
+      status: 'otimo'
+    }
+  ];
+
+  const visualIndicatorsList: {
+    id: string;
+    label: string;
+    value: string;
+    target: string;
+    status?: string;
+  }[] =
+    Array.isArray(config?.visualManagementIndicators) &&
+    config.visualManagementIndicators.length > 0
+      ? config.visualManagementIndicators
+      : defaultVisualIndicators;
+
+  const [newIndicatorForm, setNewIndicatorForm] = useState({
+    label: '',
+    value: '',
+    target: '',
+    status: 'otimo'
   });
 
   const [annForm, setAnnForm] = useState({
     title: '',
     priority: 'Alta',
+    category: 'Governança Clínica / Comunicado Oficial',
     content: ''
+  });
+
+  const [occForm, setOccForm] = useState({
+    date: new Date().toISOString().split('T')[0],
+    severity: 'Moderada',
+    category: 'Assistencial / Fluxo',
+    description: ''
   });
 
   const [settingsForm, setSettingsForm] = useState({
@@ -580,7 +624,8 @@ export default function GovernanceAndModals(props: any) {
   });
 
   // ============================================================================
-  // ESTADO DO MODAL DE FICHA CADASTRAL COMPLETA DO MÉDICO (EDITAR / NOVO)
+  // ESTADO DO MODAL DE FICHA CADASTRAL COMPLETA DO MÉDICO
+  // (COM HISTÓRICO DE TRABALHO E OCORRÊNCIAS INDIVIDUAIS INTEGRADOS)
   // ============================================================================
   const [docModalForm, setDocModalForm] = useState<any>({
     name: '',
@@ -602,10 +647,26 @@ export default function GovernanceAndModals(props: any) {
     hasManagerAccess: false,
     allowedFunctions: [allFunctionNames[0] || 'Plantonista'],
     fixedMonthlyAdditional: 0,
+    workHistory: [],
+    individualOccurrences: [],
     status: 'Ativo'
   });
 
-  React.useEffect(() => {
+  const [modalWhDraft, setModalWhDraft] = useState({
+    type: 'Início de Função',
+    date: new Date().toISOString().split('T')[0],
+    endDate: '',
+    details: ''
+  });
+
+  const [modalOccDraft, setModalOccDraft] = useState({
+    date: new Date().toISOString().split('T')[0],
+    severity: 'Apontamento Operacional',
+    title: '',
+    description: ''
+  });
+
+  useEffect(() => {
     if (isDoctorModalOpen) {
       if (editingDoctor) {
         setDocModalForm({
@@ -635,6 +696,12 @@ export default function GovernanceAndModals(props: any) {
               ? editingDoctor.allowedFunctions
               : [editingDoctor.role || allFunctionNames[0] || 'Plantonista'],
           fixedMonthlyAdditional: Number(editingDoctor.fixedMonthlyAdditional || 0),
+          workHistory: Array.isArray(editingDoctor.workHistory)
+            ? editingDoctor.workHistory
+            : [],
+          individualOccurrences: Array.isArray(editingDoctor.individualOccurrences)
+            ? editingDoctor.individualOccurrences
+            : [],
           status: editingDoctor.status || 'Ativo'
         });
       } else {
@@ -658,6 +725,8 @@ export default function GovernanceAndModals(props: any) {
           hasManagerAccess: false,
           allowedFunctions: [allFunctionNames[0] || 'Plantonista'],
           fixedMonthlyAdditional: 0,
+          workHistory: [],
+          individualOccurrences: [],
           status: 'Ativo'
         });
       }
@@ -748,7 +817,6 @@ export default function GovernanceAndModals(props: any) {
     // 1. ABA: FÉRIAS & LICENÇAS (MATRIZ ANUAL MÊS x MÉDICO + BLOQUEIO + 2 ETAPAS)
     // --------------------------------------------------------------------------
     if (currentView === 'vacations') {
-      // Filtra médicos que têm Férias ou Licença no ano selecionado para a Tabela Matriz do Gestor
       const yearStr = String(matrixYear);
       const vacationsInSelectedYear = safeVacations.filter(
         (v: any) =>
@@ -773,7 +841,6 @@ export default function GovernanceAndModals(props: any) {
 
       return (
         <div className="space-y-6 text-slate-800">
-          {/* Cabeçalho */}
           <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <h2 className="text-xl sm:text-2xl font-bold text-slate-900 flex items-center gap-2">
@@ -803,7 +870,6 @@ export default function GovernanceAndModals(props: any) {
             )}
           </div>
 
-          {/* VISÃO EXCLUSIVA DO GESTOR: TABELA MATRIZ (COLUNAS = MESES + BLOQUEIO ; LINHAS = MÉDICOS EM FÉRIAS/LICENÇA) */}
           {isAdmin && (
             <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
               <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -855,11 +921,6 @@ export default function GovernanceAndModals(props: any) {
                                 ? 'bg-red-600 hover:bg-red-500 text-white'
                                 : 'bg-emerald-600/90 hover:bg-emerald-500 text-white'
                             }`}
-                            title={
-                              blocked
-                                ? 'Mês bloqueado para pedidos de férias. Clique para liberar.'
-                                : 'Mês liberado para pedidos de férias. Clique para bloquear.'
-                            }
                           >
                             {blocked ? (
                               <>
@@ -971,7 +1032,6 @@ export default function GovernanceAndModals(props: any) {
             </div>
           )}
 
-          {/* Aviso de Meses Bloqueados para o Médico Plantonista */}
           {!isAdmin && blockedVacationMonths.length > 0 && (
             <div className="p-3.5 rounded-2xl bg-red-50 border border-red-200 text-red-900 text-xs flex items-center gap-2 font-bold">
               <Lock size={16} className="text-red-600 shrink-0" />
@@ -982,7 +1042,6 @@ export default function GovernanceAndModals(props: any) {
             </div>
           )}
 
-          {/* FORMULÁRIO: SOLICITAR FÉRIAS OU LICENÇA */}
           <form
             onSubmit={handleSubmitVacationRequest}
             className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4 text-xs"
@@ -1082,7 +1141,6 @@ export default function GovernanceAndModals(props: any) {
             </div>
           </form>
 
-          {/* FILA DE AVALIAÇÃO DE SOLICITAÇÕES, SUBSTITUIÇÕES, DESFAZER E PEDIDO DE REVISÃO */}
           <div className="space-y-3">
             <h3 className="text-sm font-black text-slate-900 uppercase px-1">
               {isAdmin
@@ -1111,7 +1169,6 @@ export default function GovernanceAndModals(props: any) {
                       : 'border-slate-200'
                   }`}
                 >
-                  {/* Topo do Cartão da Solicitação */}
                   <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
                     <div className="space-y-1">
                       <div className="flex items-center gap-2 flex-wrap">
@@ -1153,7 +1210,6 @@ export default function GovernanceAndModals(props: any) {
                       )}
                     </div>
 
-                    {/* Botões de Controle do Gestor (Etapa 1, Etapa 2, Desfazer/Re-analisar) + Botão Revisão do Médico */}
                     <div className="flex flex-wrap items-center gap-2">
                       {isAdmin &&
                         (v.status === 'Pendente' || v.status === 'Em Revisão Solicitada') && (
@@ -1181,7 +1237,6 @@ export default function GovernanceAndModals(props: any) {
                           type="button"
                           onClick={() => handleUndoOrReanalyzeVacation(v.id)}
                           className="bg-amber-600 hover:bg-amber-700 text-white px-3 py-2 rounded-xl font-bold flex items-center gap-1 shadow-sm"
-                          title="Desfaz a decisão atual e coloca novamente em análise"
                         >
                           <RotateCcw size={14} /> ↩ Desfazer / Re-analisar
                         </button>
@@ -1209,7 +1264,6 @@ export default function GovernanceAndModals(props: any) {
                     </div>
                   </div>
 
-                  {/* Painel de Substituições / Coberturas do Período de Férias ou Licença */}
                   <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
                     <div className="flex items-center justify-between">
                       <span className="font-extrabold text-slate-800 uppercase text-[10px]">
@@ -1248,7 +1302,6 @@ export default function GovernanceAndModals(props: any) {
                       </div>
                     )}
 
-                    {/* Inserir nova substituição */}
                     <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 pt-1">
                       <input
                         type="text"
@@ -1300,12 +1353,11 @@ export default function GovernanceAndModals(props: any) {
                     </div>
                   </div>
 
-                  {/* Caixa de Pedido de Revisão pelo Médico */}
                   {openVacReviewId === v.id && (
                     <div className="p-3 rounded-xl bg-amber-50 border border-amber-300 flex flex-col sm:flex-row gap-2">
                       <input
                         type="text"
-                        placeholder="Explique o motivo do pedido de revisão (ex: alteração de datas ou substituto)..."
+                        placeholder="Explique o motivo do pedido de revisão..."
                         value={vacReviewInput[v.id] || ''}
                         onChange={e =>
                           setVacReviewInput(prev => ({
@@ -1376,18 +1428,16 @@ export default function GovernanceAndModals(props: any) {
 
       return (
         <div className="space-y-6 text-slate-800">
-          {/* Cabeçalho */}
           <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
             <h2 className="text-xl sm:text-2xl font-bold text-slate-900 flex items-center gap-2">
               <GraduationCap className="text-blue-600" size={24} />
               Central de Cursos, Certificações & Controle de Vencimentos
             </h2>
             <p className="text-xs text-slate-500 mt-1">
-              Diferenciação visual por tipo de curso cadastrado e abas dedicadas para identificar imediatamente certificados vencidos ou a vencer (integrado à planilha XLS do Corpo Clínico).
+              Diferenciação visual por tipo de curso cadastrado e abas dedicadas para identificar imediatamente certificados vencidos ou a vencer.
             </p>
           </div>
 
-          {/* PAINEL DO GESTOR: CADASTRAR E DESTACAR TIPOS DE CURSO */}
           {isAdmin && (
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4 text-xs">
               <h3 className="text-sm font-black text-slate-900 uppercase flex items-center gap-2">
@@ -1411,7 +1461,6 @@ export default function GovernanceAndModals(props: any) {
                           type="button"
                           onClick={() => handleRemoveCourseType(ct.name)}
                           className="text-slate-500 hover:text-red-600 font-black"
-                          title="Remover tipo de curso"
                         >
                           ×
                         </button>
@@ -1470,7 +1519,6 @@ export default function GovernanceAndModals(props: any) {
             </div>
           )}
 
-          {/* FORMULÁRIO PARA REGISTAR CERTIFICADO DE MÉDICO */}
           <form
             onSubmit={handleAddCertificateRecord}
             className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3 text-xs"
@@ -1554,7 +1602,6 @@ export default function GovernanceAndModals(props: any) {
             </div>
           </form>
 
-          {/* BARRA DE ABAS VISUAIS DE VENCIMENTO E DIFERENCIAÇÃO POR CURSO */}
           <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-3 text-xs">
             <div className="flex flex-wrap items-center gap-2">
               <button
@@ -1625,7 +1672,6 @@ export default function GovernanceAndModals(props: any) {
             )}
           </div>
 
-          {/* MODO 1: AGRUPADO E DESTACADO POR CADA TIPO DE CURSO CADASTRADO */}
           {courseActiveTab === 'by_course' ? (
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
               {registeredCourseTypes.map(ct => {
@@ -1734,7 +1780,6 @@ export default function GovernanceAndModals(props: any) {
               })}
             </div>
           ) : (
-            /* MODO 2: ABA DEDICADA (VENCIDOS, A VENCER OU EM DIA) */
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3 text-xs">
               {filteredForListTab.length === 0 ? (
                 <div className="py-10 text-center text-slate-400 italic">
@@ -1820,7 +1865,525 @@ export default function GovernanceAndModals(props: any) {
     }
 
     // --------------------------------------------------------------------------
-    // 3. ABA: OCORRÊNCIAS ASSISTENCIAIS / ADMINISTRATIVAS
+    // 3. ABA UNIFICADA: GESTÃO À VISTA, GOVERNANÇA & COMUNICADOS
+    //    (FRASE MOTIVACIONAL, NPS, INDICADORES ASSISTENCIAIS E MURAL COM CIÊNCIA)
+    // --------------------------------------------------------------------------
+    if (currentView === 'announcements') {
+      const handleUpdateQuoteOrNps = (field: 'motivationalQuote' | 'unitNpsScore', val: any) => {
+        if (!isAdmin) return;
+        safeSetConfig((prev: any) => ({
+          ...prev,
+          [field]: val
+        }));
+      };
+
+      const handleUpdateIndicatorItem = (
+        indId: string,
+        field: 'label' | 'value' | 'target' | 'status',
+        val: string
+      ) => {
+        if (!isAdmin) return;
+        const nextList = visualIndicatorsList.map(ind =>
+          ind.id === indId ? { ...ind, [field]: val } : ind
+        );
+        safeSetConfig((prev: any) => ({
+          ...prev,
+          visualManagementIndicators: nextList
+        }));
+      };
+
+      const handleAddIndicatorItem = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!isAdmin) return;
+        if (!newIndicatorForm.label.trim() || !newIndicatorForm.value.trim()) return;
+        const created = {
+          id: `ind_${Date.now()}`,
+          label: newIndicatorForm.label.trim(),
+          value: newIndicatorForm.value.trim(),
+          target: newIndicatorForm.target.trim() || 'Meta Institucional',
+          status: newIndicatorForm.status
+        };
+        safeSetConfig((prev: any) => ({
+          ...prev,
+          visualManagementIndicators: [...visualIndicatorsList, created]
+        }));
+        setNewIndicatorForm({ label: '', value: '', target: '', status: 'otimo' });
+        safeRecordAction(`Novo indicador de Gestão à Vista adicionado: ${created.label}`);
+      };
+
+      const handleDeleteIndicatorItem = (indId: string) => {
+        if (!isAdmin) return;
+        const nextList = visualIndicatorsList.filter(ind => ind.id !== indId);
+        safeSetConfig((prev: any) => ({
+          ...prev,
+          visualManagementIndicators: nextList
+        }));
+      };
+
+      const handleAddAnnouncement = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!annForm.title.trim() || !annForm.content.trim()) return;
+        const created = {
+          id: Date.now(),
+          date: new Date().toISOString().split('T')[0],
+          title: annForm.title.trim(),
+          priority: annForm.priority,
+          category: annForm.category,
+          content: annForm.content.trim(),
+          acknowledgedBy: []
+        };
+        safeSetAnnouncements((prev: any[]) => [
+          created,
+          ...(Array.isArray(prev) ? prev : [])
+        ]);
+        setAnnForm({
+          title: '',
+          priority: 'Alta',
+          category: 'Governança Clínica / Comunicado Oficial',
+          content: ''
+        });
+        safeRecordAction(`Novo comunicado publicado na Gestão à Vista: ${created.title}`);
+      };
+
+      const handleDeleteAnnouncement = (annId: number) => {
+        if (!isAdmin) return;
+        if (!confirm('Deseja remover este comunicado do mural?')) return;
+        safeSetAnnouncements((prev: any[]) =>
+          (Array.isArray(prev) ? prev : []).filter((a: any) => a.id !== annId)
+        );
+      };
+
+      const handleAcknowledge = (annId: number) => {
+        const myName = currentUser?.name || 'Médico';
+        safeSetAnnouncements((prev: any[]) =>
+          (Array.isArray(prev) ? prev : []).map((a: any) => {
+            if (a.id !== annId) return a;
+            const curr = Array.isArray(a.acknowledgedBy) ? a.acknowledgedBy : [];
+            if (curr.includes(myName)) return a;
+            return { ...a, acknowledgedBy: [...curr, myName] };
+          })
+        );
+        safeRecordAction(`${myName} registou ciência no comunicado #${annId}`);
+      };
+
+      return (
+        <div className="space-y-6 text-slate-800 text-xs">
+          {/* Cabeçalho da Aba Unificada */}
+          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+            <h2 className="text-xl sm:text-2xl font-bold text-slate-900 flex items-center gap-2">
+              <ClipboardList className="text-blue-600" size={24} />
+              Gestão à Vista, Governança Clínica & Mural de Comunicados
+            </h2>
+            <p className="text-xs text-slate-500 mt-1">
+              Painel central unificado com a frase motivacional da unidade, NPS, indicadores assistenciais de desempenho e comunicados importantes com confirmação de ciência da equipa.
+            </p>
+          </div>
+
+          {/* 1. BANNER VISUAL DA UNIDADE (FRASE MOTIVACIONAL & NPS — VISÍVEL PARA GESTOR E MÉDICOS) */}
+          <div className="bg-slate-900 text-white rounded-2xl p-6 shadow-md flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="space-y-2 max-w-3xl flex-1">
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-950 border border-blue-700 text-blue-300 text-[11px] font-extrabold uppercase">
+                <Sparkles size={13} /> {config?.sectorUnitName || 'Emergência Adulta - HGD'} — Gestão à Vista
+              </span>
+              <p className="text-sm sm:text-base text-slate-100 italic font-semibold leading-relaxed">
+                “
+                {config?.motivationalQuote ||
+                  'Cuidar de vidas com excelência, agilidade e empatia é a nossa maior missão diária.'}
+                ”
+              </p>
+            </div>
+
+            <div className="bg-emerald-500 text-white px-6 py-4 rounded-2xl text-center shrink-0 shadow-lg">
+              <span className="block text-[10px] font-extrabold uppercase tracking-wider">
+                NPS da Unidade
+              </span>
+              <strong className="text-3xl font-black">
+                {config?.unitNpsScore ?? 88}
+              </strong>
+            </div>
+          </div>
+
+          {/* PAINEL DE EDIÇÃO RÁPIDA DE FRASE MOTIVACIONAL E NPS (EXCLUSIVO GESTOR) */}
+          {isAdmin && (
+            <div className="bg-white p-5 rounded-2xl border-2 border-blue-200 shadow-sm space-y-3">
+              <h3 className="text-sm font-black text-blue-950 uppercase flex items-center gap-2">
+                <Sliders size={16} className="text-blue-600" />
+                Configurar Frase Motivacional & Nota NPS da Gestão à Vista (Gestor)
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 items-end">
+                <div className="sm:col-span-4">
+                  <label className="block font-bold text-slate-700 mb-1">
+                    Frase Motivacional / Mensagem Institucional do Topo:
+                  </label>
+                  <input
+                    type="text"
+                    value={
+                      config?.motivationalQuote ||
+                      'Cuidar de vidas com excelência, agilidade e empatia é a nossa maior missão diária.'
+                    }
+                    onChange={e =>
+                      handleUpdateQuoteOrNps('motivationalQuote', e.target.value)
+                    }
+                    className="w-full border border-slate-300 rounded-xl px-3.5 py-2 font-semibold text-slate-900"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold text-slate-700 mb-1">
+                    Placar NPS da Unidade:
+                  </label>
+                  <input
+                    type="number"
+                    value={config?.unitNpsScore ?? 88}
+                    onChange={e =>
+                      handleUpdateQuoteOrNps('unitNpsScore', Number(e.target.value))
+                    }
+                    className="w-full border-2 border-emerald-400 rounded-xl px-3 py-2 font-black text-emerald-900 text-center"
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* 2. INDICADORES ASSISTENCIAIS DE GESTÃO À VISTA (VISÍVEIS PARA TODOS E EDITÁVEIS PELO GESTOR) */}
+          <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-sm sm:text-base font-black text-slate-900 uppercase flex items-center gap-2">
+                  <BarChart3 size={18} className="text-blue-600" />
+                  Indicadores Assistenciais & Metas de Governança da Unidade
+                </h3>
+                <p className="text-[11px] text-slate-500">
+                  Acompanhamento transparente de metas assistenciais e operacionais para todo o corpo clínico.
+                </p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+              {visualIndicatorsList.map(ind => {
+                const statusColors =
+                  ind.status === 'critico'
+                    ? 'border-red-300 bg-red-50/50'
+                    : ind.status === 'atencao'
+                    ? 'border-amber-300 bg-amber-50/50'
+                    : 'border-emerald-200 bg-slate-50';
+
+                return (
+                  <div
+                    key={ind.id}
+                    className={`p-4 rounded-2xl border ${statusColors} flex flex-col justify-between space-y-2`}
+                  >
+                    {isAdmin ? (
+                      <div className="space-y-2">
+                        <div className="flex items-center justify-between gap-1">
+                          <input
+                            type="text"
+                            value={ind.label}
+                            onChange={e =>
+                              handleUpdateIndicatorItem(ind.id, 'label', e.target.value)
+                            }
+                            className="w-full border border-slate-300 rounded-lg px-2 py-1 bg-white font-bold text-slate-800 text-[11px]"
+                            title="Título do Indicador"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteIndicatorItem(ind.id)}
+                            className="text-slate-400 hover:text-red-600 p-1 shrink-0"
+                            title="Remover indicador"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-2 gap-1.5">
+                          <div>
+                            <label className="block text-[9px] font-bold text-slate-500">
+                              Resultado Atual
+                            </label>
+                            <input
+                              type="text"
+                              value={ind.value}
+                              onChange={e =>
+                                handleUpdateIndicatorItem(ind.id, 'value', e.target.value)
+                              }
+                              className="w-full border border-slate-300 rounded-lg px-2 py-1 bg-white font-black text-slate-900"
+                            />
+                          </div>
+                          <div>
+                            <label className="block text-[9px] font-bold text-slate-500">
+                              Meta
+                            </label>
+                            <input
+                              type="text"
+                              value={ind.target}
+                              onChange={e =>
+                                handleUpdateIndicatorItem(ind.id, 'target', e.target.value)
+                              }
+                              className="w-full border border-slate-300 rounded-lg px-2 py-1 bg-white font-bold text-emerald-800"
+                            />
+                          </div>
+                        </div>
+                        <select
+                          value={ind.status || 'otimo'}
+                          onChange={e =>
+                            handleUpdateIndicatorItem(ind.id, 'status', e.target.value)
+                          }
+                          className="w-full border border-slate-300 rounded-lg px-2 py-1 bg-white font-bold text-[10px]"
+                        >
+                          <option value="otimo">🟢 Dentro da Meta (Ótimo)</option>
+                          <option value="atencao">🟡 Em Atenção</option>
+                          <option value="critico">🔴 Crítico / Fora da Meta</option>
+                        </select>
+                      </div>
+                    ) : (
+                      <>
+                        <span className="text-slate-600 font-extrabold block">
+                          {ind.label}
+                        </span>
+                        <strong className="text-2xl font-black text-slate-900 block">
+                          {ind.value}
+                        </strong>
+                        <div className="flex items-center justify-between pt-1">
+                          <span className="text-[11px] font-bold text-emerald-800">
+                            {ind.target}
+                          </span>
+                          <span
+                            className={`px-2 py-0.5 rounded-full text-[9px] font-black uppercase ${
+                              ind.status === 'critico'
+                                ? 'bg-red-600 text-white'
+                                : ind.status === 'atencao'
+                                ? 'bg-amber-500 text-slate-950'
+                                : 'bg-emerald-600 text-white'
+                            }`}
+                          >
+                            {ind.status === 'critico'
+                              ? 'Crítico'
+                              : ind.status === 'atencao'
+                              ? 'Atenção'
+                              : 'Na Meta'}
+                          </span>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Adicionar novo indicador (Gestor) */}
+            {isAdmin && (
+              <form
+                onSubmit={handleAddIndicatorItem}
+                className="pt-3 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-5 gap-2.5 items-end"
+              >
+                <div className="sm:col-span-2">
+                  <label className="block font-bold mb-1">
+                    Novo Indicador Assistencial *
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Ex: Taxa de Reinternação em 48h"
+                    value={newIndicatorForm.label}
+                    onChange={e =>
+                      setNewIndicatorForm({ ...newIndicatorForm, label: e.target.value })
+                    }
+                    className="w-full border rounded-xl px-3 py-2 font-semibold"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold mb-1">Valor Atual *</label>
+                  <input
+                    type="text"
+                    placeholder="Ex: 1,2%"
+                    value={newIndicatorForm.value}
+                    onChange={e =>
+                      setNewIndicatorForm({ ...newIndicatorForm, value: e.target.value })
+                    }
+                    className="w-full border rounded-xl px-3 py-2 font-bold"
+                  />
+                </div>
+                <div>
+                  <label className="block font-bold mb-1">Meta Ideal</label>
+                  <input
+                    type="text"
+                    placeholder="Ex: Meta: < 2%"
+                    value={newIndicatorForm.target}
+                    onChange={e =>
+                      setNewIndicatorForm({ ...newIndicatorForm, target: e.target.value })
+                    }
+                    className="w-full border rounded-xl px-3 py-2 font-bold"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl px-4 py-2 font-bold"
+                >
+                  + Incluir Indicador
+                </button>
+              </form>
+            )}
+          </div>
+
+          {/* 3. MURAL DE COMUNICADOS IMPORTANTES & DIRETRIZES DE GOVERNANÇA */}
+          <div className="space-y-4">
+            {isAdmin && (
+              <form
+                onSubmit={handleAddAnnouncement}
+                className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm space-y-3"
+              >
+                <h3 className="text-sm font-black text-slate-900 uppercase flex items-center gap-2">
+                  <Megaphone size={17} className="text-blue-600" />
+                  Publicar Novo Comunicado Importante / Diretriz para a Equipa
+                </h3>
+
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+                  <input
+                    type="text"
+                    required
+                    placeholder="Título do Comunicado Importante *"
+                    value={annForm.title}
+                    onChange={e => setAnnForm({ ...annForm, title: e.target.value })}
+                    className="sm:col-span-2 border border-slate-300 rounded-xl px-3.5 py-2 font-bold"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Categoria (ex: Protocolo Clínico / Escala)"
+                    value={annForm.category}
+                    onChange={e => setAnnForm({ ...annForm, category: e.target.value })}
+                    className="border border-slate-300 rounded-xl px-3 py-2 font-semibold"
+                  />
+                  <select
+                    value={annForm.priority}
+                    onChange={e => setAnnForm({ ...annForm, priority: e.target.value })}
+                    className="border border-slate-300 rounded-xl px-3 py-2 bg-white font-extrabold"
+                  >
+                    <option value="Urgente">🚨 Prioridade Urgente / Crítica</option>
+                    <option value="Alta">⚠️ Prioridade Alta</option>
+                    <option value="Normal">ℹ️ Informativo Normal</option>
+                  </select>
+                </div>
+
+                <textarea
+                  rows={3}
+                  required
+                  placeholder="Escreva aqui o conteúdo completo do comunicado ou diretriz para conhecimento e confirmação de leitura dos plantonistas..."
+                  value={annForm.content}
+                  onChange={e => setAnnForm({ ...annForm, content: e.target.value })}
+                  className="w-full border border-slate-300 rounded-xl px-3.5 py-2"
+                />
+
+                <div className="flex justify-end">
+                  <button
+                    type="submit"
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-bold shadow-sm"
+                  >
+                    Publicar no Mural de Gestão à Vista
+                  </button>
+                </div>
+              </form>
+            )}
+
+            <div className="space-y-3">
+              <h3 className="text-sm font-black text-slate-900 uppercase px-1">
+                Mural Oficial de Comunicados & Confirmação de Ciência ({safeAnnouncements.length})
+              </h3>
+
+              {safeAnnouncements.map((ann: any) => {
+                const ackList: string[] = Array.isArray(ann.acknowledgedBy)
+                  ? ann.acknowledgedBy
+                  : [];
+                const alreadyAck = ackList.includes(currentUser?.name || '');
+                const isUrgent = ann.priority === 'Urgente' || ann.priority === 'Alta';
+
+                return (
+                  <div
+                    key={ann.id}
+                    className={`bg-white p-5 rounded-2xl border shadow-sm space-y-3 ${
+                      ann.priority === 'Urgente'
+                        ? 'border-red-300 bg-red-50/20'
+                        : isUrgent
+                        ? 'border-amber-300'
+                        : 'border-slate-200'
+                    }`}
+                  >
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span
+                            className={`px-2.5 py-0.5 rounded-md font-black text-[10px] uppercase ${
+                              ann.priority === 'Urgente'
+                                ? 'bg-red-600 text-white'
+                                : ann.priority === 'Alta'
+                                ? 'bg-amber-500 text-slate-950'
+                                : 'bg-blue-100 text-blue-900'
+                            }`}
+                          >
+                            {ann.priority || 'Comunicado'}
+                          </span>
+                          {ann.category && (
+                            <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-bold text-[10px]">
+                              {ann.category}
+                            </span>
+                          )}
+                          <span className="text-slate-400 font-bold text-[11px]">
+                            Publicado em {formatBrDate(ann.date)}
+                          </span>
+                        </div>
+                        <strong className="text-base font-black text-slate-900 block">
+                          {ann.title}
+                        </strong>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleAcknowledge(ann.id)}
+                          className={`px-3.5 py-2 rounded-xl font-extrabold flex items-center gap-1.5 shadow-xs ${
+                            alreadyAck
+                              ? 'bg-emerald-100 text-emerald-900 border border-emerald-300'
+                              : 'bg-blue-600 hover:bg-blue-700 text-white'
+                          }`}
+                        >
+                          <CheckSquare size={14} />
+                          {alreadyAck
+                            ? '✓ Ciência Registada'
+                            : 'Confirmar Leitura / Dar Ciência'}
+                        </button>
+
+                        {isAdmin && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteAnnouncement(ann.id)}
+                            className="p-2 rounded-xl bg-red-50 hover:bg-red-100 text-red-600"
+                            title="Excluir comunicado"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    <p className="text-slate-700 leading-relaxed whitespace-pre-line">
+                      {ann.content}
+                    </p>
+
+                    <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
+                      <span>
+                        Médicos cientes ({ackList.length}):{' '}
+                        <strong className="text-slate-700">
+                          {ackList.length > 0 ? ackList.join(', ') : 'Aguardando confirmações'}
+                        </strong>
+                      </span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // --------------------------------------------------------------------------
+    // 4. ABA: OCORRÊNCIAS GERAIS DA UNIDADE
     // --------------------------------------------------------------------------
     if (currentView === 'occurrences') {
       const handleAddOccurrence = (e: React.FormEvent) => {
@@ -1836,7 +2399,7 @@ export default function GovernanceAndModals(props: any) {
         };
         safeSetOccurrences((prev: any[]) => [created, ...(Array.isArray(prev) ? prev : [])]);
         setOccForm({ ...occForm, description: '' });
-        safeRecordAction(`Nova ocorrência registada (${created.category})`);
+        safeRecordAction(`Nova ocorrência geral registada (${created.category})`);
       };
 
       return (
@@ -1844,7 +2407,7 @@ export default function GovernanceAndModals(props: any) {
           <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
             <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
               <ShieldAlert className="text-red-600" size={24} />
-              Registo de Ocorrências & Eventos de Governança
+              Registo Geral de Ocorrências da Unidade
             </h2>
           </div>
 
@@ -1905,131 +2468,6 @@ export default function GovernanceAndModals(props: any) {
                 </div>
               </div>
             ))}
-          </div>
-        </div>
-      );
-    }
-
-    // --------------------------------------------------------------------------
-    // 4. ABA: COMUNICADOS & CIÊNCIA DA EQUIPA
-    // --------------------------------------------------------------------------
-    if (currentView === 'announcements') {
-      const handleAddAnnouncement = (e: React.FormEvent) => {
-        e.preventDefault();
-        if (!annForm.title.trim() || !annForm.content.trim()) return;
-        const created = {
-          id: Date.now(),
-          date: new Date().toISOString().split('T')[0],
-          title: annForm.title.trim(),
-          priority: annForm.priority,
-          content: annForm.content.trim(),
-          acknowledgedBy: []
-        };
-        safeSetAnnouncements((prev: any[]) => [
-          created,
-          ...(Array.isArray(prev) ? prev : [])
-        ]);
-        setAnnForm({ title: '', priority: 'Alta', content: '' });
-        safeRecordAction(`Novo comunicado publicado: ${created.title}`);
-      };
-
-      const handleAcknowledge = (annId: number) => {
-        const myName = currentUser?.name || 'Médico';
-        safeSetAnnouncements((prev: any[]) =>
-          (Array.isArray(prev) ? prev : []).map((a: any) => {
-            if (a.id !== annId) return a;
-            const curr = Array.isArray(a.acknowledgedBy) ? a.acknowledgedBy : [];
-            if (curr.includes(myName)) return a;
-            return { ...a, acknowledgedBy: [...curr, myName] };
-          })
-        );
-      };
-
-      return (
-        <div className="space-y-6 text-slate-800 text-xs">
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-            <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-              <ClipboardList className="text-blue-600" size={24} />
-              Mural de Comunicados Oficiais & Ciência da Equipa
-            </h2>
-          </div>
-
-          {isAdmin && (
-            <form
-              onSubmit={handleAddAnnouncement}
-              className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3"
-            >
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <input
-                  type="text"
-                  placeholder="Título do Comunicado *"
-                  value={annForm.title}
-                  onChange={e => setAnnForm({ ...annForm, title: e.target.value })}
-                  className="sm:col-span-2 border rounded-xl px-3 py-2 font-bold"
-                />
-                <select
-                  value={annForm.priority}
-                  onChange={e => setAnnForm({ ...annForm, priority: e.target.value })}
-                  className="border rounded-xl px-3 py-2 bg-white font-bold"
-                >
-                  <option value="Alta">Prioridade Alta</option>
-                  <option value="Normal">Prioridade Normal</option>
-                </select>
-              </div>
-              <textarea
-                rows={2}
-                placeholder="Mensagem para toda a equipa médica..."
-                value={annForm.content}
-                onChange={e => setAnnForm({ ...annForm, content: e.target.value })}
-                className="w-full border rounded-xl px-3 py-2"
-              />
-              <button
-                type="submit"
-                className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-xl font-bold"
-              >
-                Publicar Comunicado
-              </button>
-            </form>
-          )}
-
-          <div className="space-y-3">
-            {safeAnnouncements.map((ann: any) => {
-              const ackList: string[] = Array.isArray(ann.acknowledgedBy)
-                ? ann.acknowledgedBy
-                : [];
-              const alreadyAck = ackList.includes(currentUser?.name || '');
-
-              return (
-                <div
-                  key={ann.id}
-                  className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-2.5"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <strong className="text-sm font-black text-slate-900">
-                      {ann.title}
-                    </strong>
-                    <button
-                      type="button"
-                      onClick={() => handleAcknowledge(ann.id)}
-                      className={`px-3 py-1.5 rounded-xl font-bold flex items-center gap-1 ${
-                        alreadyAck
-                          ? 'bg-emerald-100 text-emerald-800'
-                          : 'bg-blue-600 text-white'
-                      }`}
-                    >
-                      <CheckSquare size={13} />
-                      {alreadyAck ? 'Ciência Registada' : 'Confirmar Leitura / Ciência'}
-                    </button>
-                  </div>
-                  <p className="text-slate-600">{ann.content}</p>
-                  {ackList.length > 0 && (
-                    <p className="text-[11px] text-slate-400">
-                      Cientes ({ackList.length}): {ackList.join(', ')}
-                    </p>
-                  )}
-                </div>
-              );
-            })}
           </div>
         </div>
       );
@@ -2174,19 +2612,20 @@ export default function GovernanceAndModals(props: any) {
 
       {/* ==========================================================================
           MODAL DE EDIÇÃO / CADASTRO COMPLETO DA FICHA INDIVIDUAL DO MÉDICO
+          (DADOS CADASTRAIS + HISTÓRICO DE TRABALHO + OCORRÊNCIAS INDIVIDUAIS)
          ========================================================================== */}
       {isDoctorModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
-          <div className="bg-white w-full max-w-3xl rounded-3xl shadow-2xl border border-slate-200 overflow-hidden my-8 text-xs text-slate-800">
+          <div className="bg-white w-full max-w-4xl rounded-3xl shadow-2xl border border-slate-200 overflow-hidden my-8 text-xs text-slate-800">
             <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
               <div>
                 <h3 className="text-base font-black">
                   {editingDoctor
-                    ? `Ficha Cadastral Completa — ${editingDoctor.name}`
+                    ? `Ficha Cadastral, Histórico & Ocorrências — ${editingDoctor.name}`
                     : 'Cadastrar Novo Médico no Corpo Clínico'}
                 </h3>
                 <p className="text-[11px] text-slate-400">
-                  Todos os dados pessoais, profissionais, PJ, especialidade e atribuição de Nível (1 a 4).
+                  Dados pessoais, PJ, especialidade, Nível (1 a 4), histórico profissional e ocorrências individuais.
                 </p>
               </div>
               <button
@@ -2200,7 +2639,7 @@ export default function GovernanceAndModals(props: any) {
 
             <form
               onSubmit={handleSaveDoctorModal}
-              className="p-6 space-y-4 max-h-[80vh] overflow-y-auto"
+              className="p-6 space-y-5 max-h-[82vh] overflow-y-auto"
             >
               {/* Dados Pessoais e Registo Profissional */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -2278,7 +2717,7 @@ export default function GovernanceAndModals(props: any) {
                 </div>
               </div>
 
-              {/* Especialidade e Nível de Senioridade (Exclusivo Gestor) */}
+              {/* Especialidade e Nível de Senioridade */}
               <div className="p-4 rounded-2xl bg-blue-50/60 border border-blue-200 grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block font-extrabold text-indigo-950 mb-1">
@@ -2374,6 +2813,201 @@ export default function GovernanceAndModals(props: any) {
                 </div>
               </div>
 
+              {/* BLOCO NO MODAL: HISTÓRICO DE TRABALHO DO PLANTONISTA */}
+              <div className="p-4 rounded-2xl bg-indigo-50/50 border border-indigo-200 space-y-3">
+                <strong className="text-indigo-950 uppercase flex items-center gap-1.5">
+                  <History size={15} className="text-indigo-600" />
+                  Histórico de Trabalho (Início de Função, Mudança de Carga Horária, Férias Passadas)
+                </strong>
+
+                <div className="space-y-1.5">
+                  {(docModalForm.workHistory || []).map((wh: any) => (
+                    <div
+                      key={wh.id}
+                      className="p-2 rounded-lg bg-white border border-indigo-200 flex items-center justify-between gap-2"
+                    >
+                      <div>
+                        <span className="px-2 py-0.5 rounded bg-indigo-700 text-white font-black text-[9px] uppercase mr-1.5">
+                          {wh.type}
+                        </span>
+                        <strong>
+                          {formatBrDate(wh.date)}
+                          {wh.endDate ? ` a ${formatBrDate(wh.endDate)}` : ''}:
+                        </strong>{' '}
+                        <span>{wh.details}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setDocModalForm({
+                            ...docModalForm,
+                            workHistory: (docModalForm.workHistory || []).filter(
+                              (x: any) => x.id !== wh.id
+                            )
+                          })
+                        }
+                        className="text-slate-400 hover:text-red-600"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 pt-1">
+                  <select
+                    value={modalWhDraft.type}
+                    onChange={e =>
+                      setModalWhDraft({ ...modalWhDraft, type: e.target.value })
+                    }
+                    className="border rounded-lg px-2 py-1.5 bg-white font-bold"
+                  >
+                    <option value="Início de Função">Início de Função</option>
+                    <option value="Mudança de Carga Horária (Aumento)">
+                      Mudança Carga (Aumento)
+                    </option>
+                    <option value="Mudança de Carga Horária (Redução)">
+                      Mudança Carga (Redução)
+                    </option>
+                    <option value="Férias Passadas">Férias Passadas</option>
+                  </select>
+                  <input
+                    type="date"
+                    value={modalWhDraft.date}
+                    onChange={e =>
+                      setModalWhDraft({ ...modalWhDraft, date: e.target.value })
+                    }
+                    className="border rounded-lg px-2 py-1.5 bg-white font-bold"
+                  />
+                  <input
+                    type="text"
+                    placeholder="Detalhe (ex: Redução de 24h para 12h)"
+                    value={modalWhDraft.details}
+                    onChange={e =>
+                      setModalWhDraft({ ...modalWhDraft, details: e.target.value })
+                    }
+                    className="border rounded-lg px-2.5 py-1.5 bg-white"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const item = {
+                        id: `wh_${Date.now()}`,
+                        type: modalWhDraft.type,
+                        date: modalWhDraft.date,
+                        endDate: modalWhDraft.endDate,
+                        details: modalWhDraft.details.trim() || modalWhDraft.type
+                      };
+                      setDocModalForm({
+                        ...docModalForm,
+                        workHistory: [item, ...(docModalForm.workHistory || [])]
+                      });
+                      setModalWhDraft({ ...modalWhDraft, details: '' });
+                    }}
+                    className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg px-3 py-1.5 font-bold"
+                  >
+                    + Incluir Histórico
+                  </button>
+                </div>
+              </div>
+
+              {/* BLOCO NO MODAL: OCORRÊNCIAS INDIVIDUAIS DO PLANTONISTA */}
+              <div className="p-4 rounded-2xl bg-rose-50/50 border border-rose-200 space-y-3">
+                <strong className="text-rose-950 uppercase flex items-center gap-1.5">
+                  <ShieldAlert size={15} className="text-rose-600" />
+                  Ocorrências Individuais deste Plantonista
+                </strong>
+
+                <div className="space-y-1.5">
+                  {(docModalForm.individualOccurrences || []).map((oc: any) => (
+                    <div
+                      key={oc.id}
+                      className="p-2 rounded-lg bg-white border border-rose-200 flex items-center justify-between gap-2"
+                    >
+                      <div>
+                        <span className="px-2 py-0.5 rounded bg-rose-700 text-white font-black text-[9px] uppercase mr-1.5">
+                          {oc.severity}
+                        </span>
+                        <strong>
+                          {formatBrDate(oc.date)} — {oc.title}:
+                        </strong>{' '}
+                        <span>{oc.description}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setDocModalForm({
+                            ...docModalForm,
+                            individualOccurrences: (
+                              docModalForm.individualOccurrences || []
+                            ).filter((x: any) => x.id !== oc.id)
+                          })
+                        }
+                        className="text-slate-400 hover:text-red-600"
+                      >
+                        <Trash2 size={13} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 pt-1">
+                  <input
+                    type="date"
+                    value={modalOccDraft.date}
+                    onChange={e =>
+                      setModalOccDraft({ ...modalOccDraft, date: e.target.value })
+                    }
+                    className="border rounded-lg px-2 py-1.5 bg-white font-bold"
+                  />
+                  <select
+                    value={modalOccDraft.severity}
+                    onChange={e =>
+                      setModalOccDraft({ ...modalOccDraft, severity: e.target.value })
+                    }
+                    className="border rounded-lg px-2 py-1.5 bg-white font-bold"
+                  >
+                    <option value="Apontamento Operacional">Apontamento Operacional</option>
+                    <option value="Elogio / Destaque Assistencial">Elogio / Destaque</option>
+                    <option value="Atraso / Falta / Alinhamento">Atraso / Alinhamento</option>
+                    <option value="Advertência / Notificação">Advertência</option>
+                  </select>
+                  <input
+                    type="text"
+                    placeholder="Descrição da ocorrência individual..."
+                    value={modalOccDraft.description}
+                    onChange={e =>
+                      setModalOccDraft({ ...modalOccDraft, description: e.target.value })
+                    }
+                    className="border rounded-lg px-2.5 py-1.5 bg-white"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!modalOccDraft.description.trim()) return;
+                      const item = {
+                        id: `ind_occ_${Date.now()}`,
+                        date: modalOccDraft.date,
+                        severity: modalOccDraft.severity,
+                        title: modalOccDraft.title || modalOccDraft.severity,
+                        description: modalOccDraft.description.trim()
+                      };
+                      setDocModalForm({
+                        ...docModalForm,
+                        individualOccurrences: [
+                          item,
+                          ...(docModalForm.individualOccurrences || [])
+                        ]
+                      });
+                      setModalOccDraft({ ...modalOccDraft, description: '' });
+                    }}
+                    className="bg-rose-600 hover:bg-rose-700 text-white rounded-lg px-3 py-1.5 font-bold"
+                  >
+                    + Registar Ocorrência
+                  </button>
+                </div>
+              </div>
+
               {/* Credenciais de Login e Permissão de Gestão */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-slate-100">
                 <div>
@@ -2439,9 +3073,9 @@ export default function GovernanceAndModals(props: any) {
                   </button>
                   <button
                     type="submit"
-                    className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black shadow-md"
+                    className="px-5 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black shadow-md flex items-center gap-1.5"
                   >
-                    Guardar Ficha do Médico
+                    <Save size={15} /> Guardar Ficha Completa
                   </button>
                 </div>
               </div>

@@ -321,11 +321,17 @@ export default function MedScaleProApp() {
     Boolean(currentUser?.isAdmin);
   const isAdmin = isMasterAdmin ? true : canUserManage && managerViewMode === 'admin';
 
+  // Mantém currentUser sincronizado caso o médico edite o próprio perfil
+  const effectiveCurrentUser = useMemo(() => {
+    if (isMasterAdmin) return currentUser;
+    return loggedDoctorObj ? { ...currentUser, ...loggedDoctorObj } : currentUser;
+  }, [currentUser, loggedDoctorObj, isMasterAdmin]);
+
   const recordAction = (description: string) => {
     const actorName = isMasterAdmin
       ? 'Gestor Mestre'
-      : currentUser?.name
-      ? `${currentUser.name}${canUserManage ? ' [Perfil Gestor]' : ''}`
+      : effectiveCurrentUser?.name
+      ? `${effectiveCurrentUser.name}${canUserManage ? ' [Perfil Gestor]' : ''}`
       : 'Sistema';
     const newEntry = {
       id: Date.now(),
@@ -394,11 +400,11 @@ export default function MedScaleProApp() {
         };
       })
     );
-    recordAction(`Adicional mensal alterado na folha do médico ID ${doctorId}`);
+    recordAction(`Adicional/Bonificação alterado na folha do médico ID ${doctorId}`);
   };
 
   // ============================================================================
-  // CÁLCULO DA FOLHA DE PAGAMENTO PJ (26 A 25)
+  // CÁLCULO BASE DA FOLHA DE PAGAMENTO PJ (26 A 25)
   // ============================================================================
   const payrollReport = useMemo(() => {
     const { startStr, endStr } = competenceWindow;
@@ -677,7 +683,7 @@ export default function MedScaleProApp() {
     );
   }
 
-  // Menu de navegação: "Vagas Extras" removido do login do médico plantonista
+  // Menu com a aba unificada "Gestão à Vista, Governança & Comunicados" para Gestor e Médicos
   const navItems = isAdmin
     ? [
         { id: 'dashboard', label: 'Painel Geral', icon: LayoutDashboard },
@@ -690,8 +696,12 @@ export default function MedScaleProApp() {
         { id: 'remuneration', label: 'Tabela de Remuneração', icon: Sliders },
         { id: 'vacations', label: 'Férias & Licenças', icon: Umbrella },
         { id: 'courses', label: 'Cursos (ACLS/ATLS)', icon: GraduationCap },
-        { id: 'occurrences', label: 'Ocorrências', icon: ShieldAlert },
-        { id: 'announcements', label: 'Comunicados', icon: ClipboardList },
+        {
+          id: 'announcements',
+          label: 'Gestão à Vista, Governança & Comunicados',
+          icon: ClipboardList
+        },
+        { id: 'occurrences', label: 'Ocorrências Gerais', icon: ShieldAlert },
         { id: 'audit', label: 'Auditoria', icon: History },
         { id: 'settings', label: 'Configurações', icon: Sliders }
       ]
@@ -702,7 +712,11 @@ export default function MedScaleProApp() {
         { id: 'payroll', label: 'Meu Extrato PJ', icon: DollarSign },
         { id: 'vacations', label: 'Minhas Férias', icon: Umbrella },
         { id: 'courses', label: 'Meus Certificados', icon: GraduationCap },
-        { id: 'announcements', label: 'Comunicados', icon: ClipboardList },
+        {
+          id: 'announcements',
+          label: 'Gestão à Vista & Comunicados',
+          icon: ClipboardList
+        },
         { id: 'profile', label: 'Meu Cadastro PJ', icon: UserCheck }
       ];
 
@@ -788,14 +802,14 @@ export default function MedScaleProApp() {
                   setCurrentView(item.id);
                   setMobileMenuOpen(false);
                 }}
-                className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-all ${
+                className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-all text-left ${
                   active
                     ? 'bg-blue-600 text-white shadow-sm'
                     : 'text-slate-300 hover:bg-slate-800'
                 }`}
               >
-                <Icon size={16} />
-                <span>{item.label}</span>
+                <Icon size={16} className="shrink-0" />
+                <span className="leading-tight">{item.label}</span>
               </button>
             );
           })}
@@ -808,7 +822,7 @@ export default function MedScaleProApp() {
               className={isMasterAdmin ? 'text-amber-400' : 'text-blue-400'}
             />
             <div className="truncate">
-              <strong className="block truncate">{currentUser.name}</strong>
+              <strong className="block truncate">{effectiveCurrentUser?.name}</strong>
               <span className="text-[10px] text-slate-400">
                 {isMasterAdmin
                   ? 'Login Mestre (Gestor)'
@@ -846,7 +860,7 @@ export default function MedScaleProApp() {
             setConfig={setConfig}
             isAdmin={isAdmin}
             isMasterAdmin={isMasterAdmin}
-            currentUser={currentUser}
+            currentUser={effectiveCurrentUser}
             doctors={doctors}
             setDoctors={setDoctors}
             activeDoctors={activeDoctors}
@@ -902,7 +916,8 @@ export default function MedScaleProApp() {
             setConfig={setConfig}
             isAdmin={isAdmin}
             isMasterAdmin={isMasterAdmin}
-            currentUser={currentUser}
+            currentUser={effectiveCurrentUser}
+            setCurrentUser={setCurrentUser}
             doctors={doctors}
             setDoctors={setDoctors}
             activeDoctors={activeDoctors}
@@ -917,6 +932,7 @@ export default function MedScaleProApp() {
             courses={courses}
             setCourses={setCourses}
             occurrences={occurrences}
+            setOccurrences={setOccurrences}
             competenceMonth={competenceMonth}
             setCompetenceMonth={setCompetenceMonth}
             competenceWindow={competenceWindow}
@@ -946,11 +962,12 @@ export default function MedScaleProApp() {
 
         <GovernanceAndModals
           currentView={currentView}
+          setCurrentView={setCurrentView}
           config={config}
           setConfig={setConfig}
           isAdmin={isAdmin}
           isMasterAdmin={isMasterAdmin}
-          currentUser={currentUser}
+          currentUser={effectiveCurrentUser}
           doctors={doctors}
           setDoctors={setDoctors}
           shifts={shifts}
