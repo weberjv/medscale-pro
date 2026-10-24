@@ -5,8 +5,112 @@ import {
   Users, DollarSign, Sliders, Plus, Trash2, Edit3, CheckCircle,
   UserCheck, Award, Briefcase, Download, ShieldCheck, Stethoscope,
   RotateCcw, Clock, Layers, Table, FileSpreadsheet, ChevronDown,
-  ChevronUp, FileText, Printer, History, ShieldAlert, Percent, Save
+  ChevronUp, FileText, Printer, History, ShieldAlert, Percent, Save, Palette
 } from 'lucide-react';
+
+export const FUNCTION_COLOR_PALETTE: Record<
+  string,
+  {
+    id: string;
+    label: string;
+    hex: string;
+    softBgHex: string;
+    borderHex: string;
+    textHex: string;
+    badgeClass: string;
+    cardClass: string;
+    dotClass: string;
+  }
+> = {
+  blue: {
+    id: 'blue',
+    label: 'Azul Royal',
+    hex: '#2563eb',
+    softBgHex: '#eff6ff',
+    borderHex: '#93c5fd',
+    textHex: '#1e3a8a',
+    badgeClass: 'bg-blue-600 text-white',
+    cardClass: 'bg-blue-50/70 border-blue-300 text-blue-950',
+    dotClass: 'bg-blue-600'
+  },
+  emerald: {
+    id: 'emerald',
+    label: 'Verde Esmeralda',
+    hex: '#059669',
+    softBgHex: '#ecfdf5',
+    borderHex: '#6ee7b7',
+    textHex: '#064e3b',
+    badgeClass: 'bg-emerald-600 text-white',
+    cardClass: 'bg-emerald-50/70 border-emerald-300 text-emerald-950',
+    dotClass: 'bg-emerald-600'
+  },
+  purple: {
+    id: 'purple',
+    label: 'Roxo / Índigo',
+    hex: '#7c3aed',
+    softBgHex: '#f5f3ff',
+    borderHex: '#c4b5fd',
+    textHex: '#4c1d95',
+    badgeClass: 'bg-purple-600 text-white',
+    cardClass: 'bg-purple-50/70 border-purple-300 text-purple-950',
+    dotClass: 'bg-purple-600'
+  },
+  amber: {
+    id: 'amber',
+    label: 'Âmbar / Ouro',
+    hex: '#d97706',
+    softBgHex: '#fffbeb',
+    borderHex: '#fcd34d',
+    textHex: '#78350f',
+    badgeClass: 'bg-amber-500 text-slate-950',
+    cardClass: 'bg-amber-50/70 border-amber-300 text-amber-950',
+    dotClass: 'bg-amber-500'
+  },
+  rose: {
+    id: 'rose',
+    label: 'Coral / Vermelho',
+    hex: '#e11d48',
+    softBgHex: '#fff1f2',
+    borderHex: '#fda4af',
+    textHex: '#881337',
+    badgeClass: 'bg-rose-600 text-white',
+    cardClass: 'bg-rose-50/70 border-rose-300 text-rose-950',
+    dotClass: 'bg-rose-600'
+  },
+  cyan: {
+    id: 'cyan',
+    label: 'Ciano / Turquesa',
+    hex: '#0891b2',
+    softBgHex: '#ecfeff',
+    borderHex: '#67e8f9',
+    textHex: '#164e63',
+    badgeClass: 'bg-cyan-600 text-white',
+    cardClass: 'bg-cyan-50/70 border-cyan-300 text-cyan-950',
+    dotClass: 'bg-cyan-600'
+  },
+  pink: {
+    id: 'pink',
+    label: 'Rosa / Magenta',
+    hex: '#db2777',
+    softBgHex: '#fdf2f8',
+    borderHex: '#f9a8d4',
+    textHex: '#831843',
+    badgeClass: 'bg-pink-600 text-white',
+    cardClass: 'bg-pink-50/70 border-pink-300 text-pink-950',
+    dotClass: 'bg-pink-600'
+  },
+  slate: {
+    id: 'slate',
+    label: 'Cinza Executivo',
+    hex: '#475569',
+    softBgHex: '#f8fafc',
+    borderHex: '#cbd5e1',
+    textHex: '#0f172a',
+    badgeClass: 'bg-slate-700 text-white',
+    cardClass: 'bg-slate-100 border-slate-300 text-slate-900',
+    dotClass: 'bg-slate-700'
+  }
+};
 
 export default function StaffAndFinanceViews(props: any) {
   const {
@@ -120,6 +224,16 @@ export default function StaffAndFinanceViews(props: any) {
       ? dynamicCategories
       : ['Plantonista', 'Médico Rotina/Sênior', 'Chefe de Plantão'];
 
+  const getFunctionColorInfo = (fnName: string, indexFallback: number = 0) => {
+    const fnObj = functionRatesObj[fnName] || {};
+    const keys = Object.keys(FUNCTION_COLOR_PALETTE);
+    const defaultKey = keys[indexFallback % keys.length] || 'blue';
+    const chosenKey = fnObj.colorTheme && FUNCTION_COLOR_PALETTE[fnObj.colorTheme]
+      ? fnObj.colorTheme
+      : defaultKey;
+    return FUNCTION_COLOR_PALETTE[chosenKey] || FUNCTION_COLOR_PALETTE.blue;
+  };
+
   // Estados locais para a aba de Corpo Clínico
   const [searchTerm, setSearchTerm] = useState<string>('');
   const [specialtyFilter, setSpecialtyFilter] = useState<string>('Todas');
@@ -135,11 +249,12 @@ export default function StaffAndFinanceViews(props: any) {
     Record<number, { date: string; severity: string; title: string; description: string }>
   >({});
 
-  // Estados locais para a aba de Tabela de Remuneração
+  // Estados locais para a aba de Tabela de Remuneração (Agora com colorTheme)
   const [newSpecialtyName, setNewSpecialtyName] = useState<string>('');
   const [newFunctionForm, setNewFunctionForm] = useState({
     name: '',
     description: '',
+    colorTheme: 'blue',
     requiresSchedule: true,
     applyLeveling: true,
     fixedRate12h: 1500,
@@ -148,7 +263,7 @@ export default function StaffAndFinanceViews(props: any) {
     monthlyFixedValue: 5000
   });
 
-  // Estado para o Catálogo Avançado de Adicionais & Bonificações (Com % e Regra de Aplicação)
+  // Estado para o Catálogo Avançado de Adicionais & Bonificações
   const [newAdditionalForm, setNewAdditionalForm] = useState({
     name: '',
     incidence: 'shift' as 'shift' | 'monthly',
@@ -213,7 +328,7 @@ export default function StaffAndFinanceViews(props: any) {
     const d = new Date(`${dateStr}T12:00:00`);
     if (isNaN(d.getTime())) return false;
     const day = d.getDay();
-    return day === 0 || day === 6; // Domingo (0) ou Sábado (6)
+    return day === 0 || day === 6;
   };
 
   const getFunctionEffectiveRates = (fnName: string, levelNum: number) => {
@@ -222,7 +337,6 @@ export default function StaffAndFinanceViews(props: any) {
     const applyLeveling = fnObj.applyLeveling !== false;
 
     if (!applyLeveling) {
-      // Sem nivelamento: valores fixos diretos da função (diferenciando Dia de Semana e Fim de Semana)
       const fixed12hRef = Number(fnObj.fixed ?? 1500);
       const extraWeekday12hRef = Number(fnObj.extraWeekday ?? fnObj.extra ?? 1650);
       const extraWeekend12hRef = Number(
@@ -239,7 +353,6 @@ export default function StaffAndFinanceViews(props: any) {
       };
     }
 
-    // Com nivelamento (Nível 1 a 4)
     const lvlKey = `level${Math.min(4, Math.max(1, Number(levelNum || 1)))}` as
       | 'level1'
       | 'level2'
@@ -313,7 +426,6 @@ export default function StaffAndFinanceViews(props: any) {
     safeRecordAction(`Especialidade de ${targetDoc?.name || 'Médico'} alterada para ${newSpec}`);
   };
 
-  // Adicionar registo ao Histórico de Trabalho do Médico
   const handleAddDoctorWorkHistory = (docId: number, docName: string) => {
     if (!isAdmin) return;
     const draft = historyDraftByDoc[docId] || {
@@ -370,7 +482,6 @@ export default function StaffAndFinanceViews(props: any) {
     );
   };
 
-  // Adicionar Ocorrência Individual na Ficha do Médico
   const handleAddDoctorIndividualOccurrence = (docId: number, docName: string) => {
     if (!isAdmin) return;
     const draft = occDraftByDoc[docId] || {
@@ -631,7 +742,7 @@ export default function StaffAndFinanceViews(props: any) {
   };
 
   // ============================================================================
-  // APROVAÇÃO, EXCLUSÃO E EXPORTAÇÃO XLS DE TODA A EQUIPA (+ CURSOS + HISTÓRICO + OCORRÊNCIAS)
+  // APROVAÇÃO, EXCLUSÃO E EXPORTAÇÃO XLS DE TODA A EQUIPA
   // ============================================================================
   const handleApprovePendingDoctor = (doc: any) => {
     if (!isAdmin) return;
@@ -749,7 +860,6 @@ export default function StaffAndFinanceViews(props: any) {
     safeRecordAction('Médicos fictícios iniciais removidos definitivamente pelo gestor.');
   };
 
-  // Exportação XLS Completa (Cadastro sem senha + Cursos + Histórico de Trabalho + Férias + Ocorrências Individuais)
   const handleDownloadFullTeamXLS = () => {
     if (typeof window === 'undefined') return;
     const todayStr = new Date().toISOString().split('T')[0];
@@ -943,7 +1053,6 @@ export default function StaffAndFinanceViews(props: any) {
 
     return (
       <div className="space-y-6 text-slate-800">
-        {/* Cabeçalho */}
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
           <div>
             <h2 className="text-xl sm:text-2xl font-bold text-slate-900 flex items-center gap-2">
@@ -986,7 +1095,6 @@ export default function StaffAndFinanceViews(props: any) {
           )}
         </div>
 
-        {/* Fila de Aprovação de Novos Médicos */}
         {isAdmin && safePendingDoctors.length > 0 && (
           <div className="bg-amber-50 border-2 border-amber-200 rounded-2xl p-5 space-y-4">
             <div className="flex items-center gap-2">
@@ -1103,7 +1211,6 @@ export default function StaffAndFinanceViews(props: any) {
           </div>
         )}
 
-        {/* Barra de Busca e Filtro */}
         <div className="bg-white p-4 rounded-2xl border border-slate-200 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs">
           <input
             type="text"
@@ -1130,7 +1237,6 @@ export default function StaffAndFinanceViews(props: any) {
           </div>
         </div>
 
-        {/* Grade de Cartões do Corpo Clínico Ativo */}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {filteredActiveDocs.map((doc: any) => {
             const docShiftsCount = safeShifts.filter(
@@ -1219,7 +1325,6 @@ export default function StaffAndFinanceViews(props: any) {
                     )}
                   </div>
 
-                  {/* Controles Diretos Exclusivos do Gestor: Nível (1 a 4) e Especialidade */}
                   <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-[10px] font-extrabold uppercase text-slate-500 mb-1">
@@ -1275,7 +1380,6 @@ export default function StaffAndFinanceViews(props: any) {
                     </div>
                   </div>
 
-                  {/* PAINEL EXPANSÍVEL: FICHA COMPLETA + HISTÓRICO DE TRABALHO + OCORRÊNCIAS INDIVIDUAIS */}
                   <div className="border border-slate-200 rounded-xl overflow-hidden">
                     <button
                       type="button"
@@ -1296,7 +1400,6 @@ export default function StaffAndFinanceViews(props: any) {
 
                     {isFichaOpen && (
                       <div className="p-4 bg-white space-y-4 text-[11px] border-t border-slate-200">
-                        {/* 1. Dados Cadastrais */}
                         <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
                           <div>
                             <span className="text-slate-400 font-bold block">CPF:</span>
@@ -1338,14 +1441,11 @@ export default function StaffAndFinanceViews(props: any) {
                           </div>
                         </div>
 
-                        {/* 2. Histórico de Trabalho do Plantonista (Exclusivo Gestor para adicionar) */}
                         <div className="pt-3 border-t border-slate-200 space-y-2">
-                          <div className="flex items-center justify-between">
-                            <strong className="text-indigo-950 uppercase flex items-center gap-1">
-                              <History size={13} className="text-indigo-600" />
-                              Histórico de Trabalho (Início de Função, Mudança de Carga Horária, Férias Passadas)
-                            </strong>
-                          </div>
+                          <strong className="text-indigo-950 uppercase flex items-center gap-1">
+                            <History size={13} className="text-indigo-600" />
+                            Histórico de Trabalho (Início de Função, Mudança de Carga Horária, Férias Passadas)
+                          </strong>
 
                           {workHistoryList.length === 0 ? (
                             <p className="text-slate-400 italic">
@@ -1417,7 +1517,6 @@ export default function StaffAndFinanceViews(props: any) {
                                     }))
                                   }
                                   className="border rounded-lg px-2 py-1 bg-white font-bold"
-                                  title="Data inicial do marco"
                                 />
                                 <input
                                   type="date"
@@ -1429,13 +1528,12 @@ export default function StaffAndFinanceViews(props: any) {
                                     }))
                                   }
                                   className="border rounded-lg px-2 py-1 bg-white"
-                                  title="Data final (opcional, ex: fim das férias passadas)"
                                 />
                               </div>
                               <div className="flex gap-2">
                                 <input
                                   type="text"
-                                  placeholder="Detalhes (ex: Assumiu 24h semanais como Plantonista Fixo / Férias gozadas)..."
+                                  placeholder="Detalhes (ex: Assumiu 24h semanais / Férias gozadas)..."
                                   value={whDraft.details}
                                   onChange={e =>
                                     setHistoryDraftByDoc(prev => ({
@@ -1457,7 +1555,6 @@ export default function StaffAndFinanceViews(props: any) {
                           )}
                         </div>
 
-                        {/* 3. Ocorrências Individuais deste Plantonista */}
                         {isAdmin && (
                           <div className="pt-3 border-t border-slate-200 space-y-2">
                             <strong className="text-rose-950 uppercase flex items-center gap-1">
@@ -1575,7 +1672,6 @@ export default function StaffAndFinanceViews(props: any) {
                           </div>
                         )}
 
-                        {/* 4. Certificados Registados */}
                         <div className="pt-2 border-t border-slate-100">
                           <span className="text-slate-400 font-bold block mb-1">
                             Certificados / Cursos Registados ({docCoursesList.length}):
@@ -1611,20 +1707,23 @@ export default function StaffAndFinanceViews(props: any) {
                     )}
                   </div>
 
-                  {/* Funções Habilitadas */}
+                  {/* Funções Habilitadas (Com cor da função) */}
                   <div className="flex flex-wrap items-center gap-1.5 pt-1">
                     <span className="text-[11px] font-bold text-slate-500 mr-1">Funções:</span>
                     {(Array.isArray(doc.allowedFunctions) && doc.allowedFunctions.length > 0
                       ? doc.allowedFunctions
                       : [doc.role || 'Plantonista']
-                    ).map((fn: string) => (
-                      <span
-                        key={fn}
-                        className="px-2.5 py-0.5 rounded-full bg-indigo-50 text-indigo-800 font-bold border border-indigo-200 text-[11px]"
-                      >
-                        {fn}
-                      </span>
-                    ))}
+                    ).map((fn: string, fIdx: number) => {
+                      const cInfo = getFunctionColorInfo(fn, fIdx);
+                      return (
+                        <span
+                          key={fn}
+                          className={`px-2.5 py-0.5 rounded-full font-bold text-[11px] ${cInfo.badgeClass}`}
+                        >
+                          {fn}
+                        </span>
+                      );
+                    })}
                     <span className="px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-800 font-bold text-[11px]">
                       {doc.contractType || 'Fixo Mensal'}
                     </span>
@@ -1649,7 +1748,7 @@ export default function StaffAndFinanceViews(props: any) {
   }
 
   // ============================================================================
-  // 2. ABA: MEU CADASTRO PJ / PERFIL (LOGIN DO MÉDICO COM EDIÇÃO PRÓPRIA APÓS APROVAÇÃO)
+  // 2. ABA: MEU CADASTRO PJ / PERFIL (LOGIN DO MÉDICO COM EDIÇÃO PRÓPRIA)
   // ============================================================================
   if (currentView === 'profile') {
     const myDoc =
@@ -1952,8 +2051,8 @@ export default function StaffAndFinanceViews(props: any) {
   }
 
   // ============================================================================
-  // 3. ABA: TABELA DE REMUNERAÇÃO (OPÇÃO "APLICAR NIVELAMENTO", DIA DE SEMANA VS FDS,
-  //         E ADICIONAIS/BONIFICAÇÕES COM % E ESCOLHA DE INCIDÊNCIA)
+  // 3. ABA: TABELA DE REMUNERAÇÃO (OPÇÃO "APLICAR NIVELAMENTO", CORES POR FUNÇÃO,
+  //         DIA DE SEMANA VS FDS E ADICIONAIS/BONIFICAÇÕES COM % E INCIDÊNCIA)
   // ============================================================================
   if (currentView === 'rates') {
     const functionNames = Object.keys(functionRatesObj);
@@ -2068,6 +2167,7 @@ export default function StaffAndFinanceViews(props: any) {
             description:
               newFunctionForm.description.trim() ||
               `${nameTrim} — Atuação médica na unidade`,
+            colorTheme: newFunctionForm.colorTheme || 'blue',
             requiresSchedule: Boolean(newFunctionForm.requiresSchedule),
             applyLeveling: Boolean(newFunctionForm.applyLeveling),
             fixed: f12,
@@ -2112,6 +2212,7 @@ export default function StaffAndFinanceViews(props: any) {
       setNewFunctionForm({
         name: '',
         description: '',
+        colorTheme: 'blue',
         requiresSchedule: true,
         applyLeveling: true,
         fixedRate12h: 1500,
@@ -2120,8 +2221,8 @@ export default function StaffAndFinanceViews(props: any) {
         monthlyFixedValue: 5000
       });
       safeRecordAction(
-        `Nova função adicionada na Tabela de Remuneração: ${nameTrim} (${
-          newFunctionForm.applyLeveling ? 'Com Nivelamento' : 'Valor Fixo Semana/FDS'
+        `Nova função adicionada na Tabela de Remuneração: ${nameTrim} (Cor: ${
+          FUNCTION_COLOR_PALETTE[newFunctionForm.colorTheme]?.label || 'Azul'
         })`
       );
     };
@@ -2185,10 +2286,10 @@ export default function StaffAndFinanceViews(props: any) {
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
           <h2 className="text-xl sm:text-2xl font-bold text-slate-900 flex items-center gap-2">
             <Sliders className="text-blue-600" size={24} />
-            Tabela de Remuneração, Opção de Nivelamento, Adicionais & Bonificações
+            Tabela de Remuneração, Cores de Função na Escala, Nivelamento & Bonificações
           </h2>
           <p className="text-xs text-slate-500 mt-1">
-            Escolha por função se deseja <strong>aplicar nivelamento (Níveis 1 a 4)</strong> ou manter valores fixos com diferenciação entre <strong>Dia de Semana e Final de Semana</strong> (mantendo sempre o pagamento proporcional por fração de plantão de 12h).
+            Atribua <strong>cores exclusivas a cada função</strong> (refletidas na Escala Semanal, no Heatmap 24h e nos PDFs), escolha quando aplicar nivelamento (Níveis 1 a 4) e configure adicionais percentuais ou fixos.
           </p>
         </div>
 
@@ -2245,18 +2346,19 @@ export default function StaffAndFinanceViews(props: any) {
           )}
         </div>
 
-        {/* BLOCO 2: CARTÕES DE FUNÇÕES COM OPÇÃO "( ) APLICAR NIVELAMENTO" */}
+        {/* BLOCO 2: CARTÕES DE FUNÇÕES COM COR VISUAL + OPÇÃO "( ) APLICAR NIVELAMENTO" */}
         <div className="space-y-4">
           <h3 className="text-base font-extrabold text-slate-900 uppercase px-1 flex items-center gap-2">
             <Briefcase size={18} className="text-blue-600" />
-            Funções Médicas — Nivelamento Opcional & Diferenciação Dia de Semana vs. Fim de Semana (Ref. 12h)
+            Funções Médicas — Cores na Escala/Heatmap, Nivelamento Opcional & Dia de Semana vs. FDS
           </h3>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            {functionNames.map(fnName => {
+            {functionNames.map((fnName, fnIdx) => {
               const fnObj = functionRatesObj[fnName] || {};
               const requiresSchedule = fnObj.requiresSchedule !== false;
               const applyLeveling = fnObj.applyLeveling !== false;
+              const colorInfo = getFunctionColorInfo(fnName, fnIdx);
 
               const levels = fnObj.levels || {
                 level1: {
@@ -2288,24 +2390,84 @@ export default function StaffAndFinanceViews(props: any) {
               return (
                 <div
                   key={fnName}
+                  style={{ borderTop: `5px solid ${colorInfo.hex}` }}
                   className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4 text-xs flex flex-col justify-between"
                 >
                   <div className="space-y-4">
                     <div className="flex items-start justify-between gap-2 border-b border-slate-100 pb-3">
-                      <div className="space-y-1.5">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <h4 className="text-base font-black text-slate-900">{fnName}</h4>
-                          <span
-                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
-                              requiresSchedule
-                                ? 'bg-blue-100 text-blue-800'
-                                : 'bg-purple-100 text-purple-800'
-                            }`}
-                          >
-                            {requiresSchedule
-                              ? 'Com Escala (Proporcional Ref. 12h)'
-                              : 'Cargo Fixo Mensal (Sem Escala)'}
+                      <div className="space-y-2 w-full">
+                        <div className="flex items-center justify-between gap-2 flex-wrap">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span
+                              style={{ backgroundColor: colorInfo.hex }}
+                              className="px-3 py-1 rounded-lg text-white font-black text-xs shadow-xs"
+                            >
+                              {fnName}
+                            </span>
+                            <span
+                              className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
+                                requiresSchedule
+                                  ? 'bg-blue-100 text-blue-800'
+                                  : 'bg-purple-100 text-purple-800'
+                              }`}
+                            >
+                              {requiresSchedule
+                                ? 'Com Escala (Proporcional Ref. 12h)'
+                                : 'Cargo Fixo Mensal (Sem Escala)'}
+                            </span>
+                          </div>
+
+                          {isAdmin && (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteFunction(fnName)}
+                              className="text-slate-400 hover:text-red-600 p-1"
+                              title="Excluir função"
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          )}
+                        </div>
+
+                        {/* SELETOR DE COR DA FUNÇÃO (PARA ESCALA, HEATMAP E PDFs) */}
+                        <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                          <span className="font-extrabold text-slate-700 text-[11px] flex items-center gap-1.5">
+                            <Palette size={14} style={{ color: colorInfo.hex }} />
+                            Cor na Escala, Heatmap & PDF:
                           </span>
+
+                          {isAdmin ? (
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              {Object.values(FUNCTION_COLOR_PALETTE).map(pal => {
+                                const isSelected = colorInfo.id === pal.id;
+                                return (
+                                  <button
+                                    key={pal.id}
+                                    type="button"
+                                    onClick={() =>
+                                      handleUpdateFunctionField(fnName, 'colorTheme', pal.id)
+                                    }
+                                    style={{ backgroundColor: pal.hex }}
+                                    className={`w-6 h-6 rounded-full transition-all flex items-center justify-center text-white font-black text-[10px] ${
+                                      isSelected
+                                        ? 'ring-2 ring-offset-2 ring-slate-900 scale-110'
+                                        : 'opacity-75 hover:opacity-100'
+                                    }`}
+                                    title={pal.label}
+                                  >
+                                    {isSelected ? '✓' : ''}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          ) : (
+                            <span
+                              style={{ backgroundColor: colorInfo.hex }}
+                              className="px-2.5 py-0.5 rounded text-white font-bold text-[10px]"
+                            >
+                              {colorInfo.label}
+                            </span>
+                          )}
                         </div>
 
                         {/* CHECKBOX: ( ) APLICAR NIVELAMENTO */}
@@ -2322,17 +2484,6 @@ export default function StaffAndFinanceViews(props: any) {
                           <span>Aplicar nivelamento (Níveis 1 a 4) nesta função</span>
                         </label>
                       </div>
-
-                      {isAdmin && (
-                        <button
-                          type="button"
-                          onClick={() => handleDeleteFunction(fnName)}
-                          className="text-slate-400 hover:text-red-600 p-1"
-                          title="Excluir função"
-                        >
-                          <Trash2 size={15} />
-                        </button>
-                      )}
                     </div>
 
                     {/* Caixa Descritiva */}
@@ -2354,7 +2505,7 @@ export default function StaffAndFinanceViews(props: any) {
                       )}
                     </div>
 
-                    {/* MODO A: SEM NIVELAMENTO (VALORES FIXOS COM DIFERENCIAÇÃO DIA DE SEMANA VS FIM DE SEMANA) */}
+                    {/* MODO A: SEM NIVELAMENTO */}
                     {!applyLeveling ? (
                       <div className="p-4 rounded-2xl bg-emerald-50/50 border-2 border-emerald-200 space-y-3">
                         <div className="flex items-center justify-between">
@@ -2572,7 +2723,7 @@ export default function StaffAndFinanceViews(props: any) {
             })}
           </div>
 
-          {/* Formulário para Criar Nova Função na Tabela (Com Checkbox "Aplicar Nivelamento") */}
+          {/* Formulário para Criar Nova Função na Tabela (Com Seletor de Cor + Checkbox "Aplicar Nivelamento") */}
           {isAdmin && (
             <form
               onSubmit={handleAddNewFunction}
@@ -2599,7 +2750,7 @@ export default function StaffAndFinanceViews(props: any) {
                 </label>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-5 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-6 gap-3">
                 <div className="sm:col-span-2">
                   <label className="block font-bold mb-1">Nome Curto da Função *</label>
                   <input
@@ -2615,6 +2766,26 @@ export default function StaffAndFinanceViews(props: any) {
                 </div>
 
                 <div>
+                  <label className="block font-bold mb-1">Cor na Escala & Heatmap</label>
+                  <select
+                    value={newFunctionForm.colorTheme}
+                    onChange={e =>
+                      setNewFunctionForm({
+                        ...newFunctionForm,
+                        colorTheme: e.target.value
+                      })
+                    }
+                    className="w-full border rounded-lg px-2.5 py-2 bg-white font-extrabold"
+                  >
+                    {Object.values(FUNCTION_COLOR_PALETTE).map(pal => (
+                      <option key={pal.id} value={pal.id}>
+                        🎨 {pal.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
                   <label className="block font-bold mb-1">Tipo de Alocação</label>
                   <select
                     value={newFunctionForm.requiresSchedule ? 'sim' : 'nao'}
@@ -2624,7 +2795,7 @@ export default function StaffAndFinanceViews(props: any) {
                         requiresSchedule: e.target.value === 'sim'
                       })
                     }
-                    className="w-full border rounded-lg px-3 py-2 bg-white font-bold"
+                    className="w-full border rounded-lg px-2.5 py-2 bg-white font-bold"
                   >
                     <option value="sim">Com Escala (12h / Fração)</option>
                     <option value="nao">Sem Escala (Fixo Mensal)</option>
@@ -2651,7 +2822,7 @@ export default function StaffAndFinanceViews(props: any) {
                     </div>
                     <div>
                       <label className="block font-bold mb-1">
-                        Extra 12h Dia Semana / FDS
+                        Extra 12h Semana / FDS
                       </label>
                       <div className="grid grid-cols-2 gap-1">
                         <input
@@ -2728,8 +2899,7 @@ export default function StaffAndFinanceViews(props: any) {
           )}
         </div>
 
-        {/* BLOCO 3: CATÁLOGO DETALHADO DE ADICIONAIS & BONIFICAÇÕES
-            (COM VALOR FIXO R$ OU PERCENTUAL % E ESCOLHA DE APLICAÇÃO NA FOLHA FINAL OU SOBRE FUNÇÃO) */}
+        {/* BLOCO 3: CATÁLOGO DETALHADO DE ADICIONAIS & BONIFICAÇÕES */}
         <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5 text-xs">
           <div>
             <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
@@ -3022,7 +3192,6 @@ export default function StaffAndFinanceViews(props: any) {
 
   // ============================================================================
   // 4. ABA: FOLHA PJ 26 A 25 + AUDITORIA DE CARGA HORÁRIA POR FUNÇÃO
-  //         (INTEGRADA COM OPÇÃO DE NIVELAMENTO, EXTRA SEMANA VS FDS E BONIFICAÇÃO %)
   // ============================================================================
   const windowShifts = safeShifts.filter((s: any) => {
     if (!s?.date) return false;
@@ -3150,10 +3319,8 @@ export default function StaffAndFinanceViews(props: any) {
       Object.keys(autoExtraHoursByFn)[0] ||
       defaultFn;
 
-    // Subtotal financeiro acumulado por cada função (para bonificações que incidem sobre função específica)
     const remunerationByFunctionMap: Record<string, number> = {};
 
-    // 1. Cálculo das Cargas Fixas Acumuladas (Proporcional: Valor Base 12h * (Horas / 12) * Unidades)
     let fixedQuotasFinancialTotal = 0;
     const evaluatedQuotas = activeFixedQuotas.map(q => {
       const { fixed12hRef, applyLeveling } = getFunctionEffectiveRates(
@@ -3174,7 +3341,6 @@ export default function StaffAndFinanceViews(props: any) {
       };
     });
 
-    // 2. Cálculo das Horas Extras (Diferenciando Dia de Semana e Final de Semana, proporcional a 12h)
     const { extraWeekday12hRef, extraWeekend12hRef } = getFunctionEffectiveRates(
       activeExtraFunction,
       docLevel
@@ -3190,7 +3356,6 @@ export default function StaffAndFinanceViews(props: any) {
 
     const baseSubtotalBeforeBonuses = fixedQuotasFinancialTotal + extraFinancialTotal;
 
-    // 3. Cálculo de Adicionais por Plantão + Bonificações/Adicionais da Folha (Fixo R$ ou Percentual %)
     let shiftLevelAdditionalsTotal = 0;
     entityWindowShifts.forEach((s: any) => {
       const hrs = getShiftHours(s);
@@ -3219,7 +3384,6 @@ export default function StaffAndFinanceViews(props: any) {
       });
     });
 
-    // Bonificações mensais selecionadas para este médico na folha
     const selectedBonusIds: string[] = Array.isArray(customDoc.selectedBonusIds)
       ? customDoc.selectedBonusIds
       : Array.isArray(docObj?.monthlyAdditionals)
@@ -3237,7 +3401,6 @@ export default function StaffAndFinanceViews(props: any) {
           const fnSub = remunerationByFunctionMap[targetFn] || 0;
           payrollBonusesTotal += (fnSub * pct) / 100;
         } else {
-          // Aplica sobre o valor final da folha (Fixed + Extra + Shift Additionals)
           payrollBonusesTotal +=
             ((baseSubtotalBeforeBonuses + shiftLevelAdditionalsTotal) * pct) / 100;
         }
@@ -3595,7 +3758,6 @@ export default function StaffAndFinanceViews(props: any) {
         </div>
       </div>
 
-      {/* TABELA 1: COMPOSIÇÃO DE PAGAMENTO PJ */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
         <table className="w-full text-left border-collapse text-xs">
           <thead>
@@ -3652,7 +3814,6 @@ export default function StaffAndFinanceViews(props: any) {
                     </div>
                   </td>
 
-                  {/* Cargas Fixas */}
                   <td className="py-4 px-3 min-w-[310px] space-y-2">
                     {row.evaluatedQuotas.map((q: any, qIdx: number) => (
                       <div
@@ -3756,7 +3917,6 @@ export default function StaffAndFinanceViews(props: any) {
                     </div>
                   </td>
 
-                  {/* Horas Extras: Dia de Semana vs Final de Semana */}
                   <td className="py-4 px-3 min-w-[270px] space-y-2">
                     <div className="p-2.5 rounded-xl bg-emerald-50/60 border border-emerald-200 space-y-2">
                       {isAdmin ? (
@@ -3824,7 +3984,6 @@ export default function StaffAndFinanceViews(props: any) {
                     </div>
                   </td>
 
-                  {/* Adicionais e Bonificações (Com ativação rápida pelo Gestor) */}
                   <td className="py-4 px-3 min-w-[220px] space-y-1.5">
                     <div className="font-extrabold text-indigo-800">
                       + R${' '}
@@ -3846,11 +4005,6 @@ export default function StaffAndFinanceViews(props: any) {
                                   ? 'bg-amber-500 text-slate-950 border-amber-600'
                                   : 'bg-white text-slate-600 border-slate-300'
                               }`}
-                              title={
-                                bon.applicationTarget === 'specific_function'
-                                  ? `Aplica sobre ${bon.targetFunctionName}`
-                                  : 'Aplica sobre valor final da folha'
-                              }
                             >
                               {active ? '✓ ' : '+ '}
                               {bon.name}{' '}
@@ -3864,7 +4018,6 @@ export default function StaffAndFinanceViews(props: any) {
                     )}
                   </td>
 
-                  {/* Total Líquido */}
                   <td className="py-4 px-4 text-right whitespace-nowrap">
                     <span className="text-base font-black text-emerald-700 block">
                       R${' '}
@@ -3883,7 +4036,6 @@ export default function StaffAndFinanceViews(props: any) {
         </table>
       </div>
 
-      {/* TABELA 2: PLANILHA DE AUDITORIA DE CARGA HORÁRIA EM COLUNAS DEDICADAS POR FUNÇÃO */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
         <div className="p-4 border-b border-slate-100">
           <h3 className="text-sm font-black text-slate-900 uppercase flex items-center gap-2">
@@ -3897,14 +4049,21 @@ export default function StaffAndFinanceViews(props: any) {
             <tr className="bg-slate-800 text-white uppercase text-[10px]">
               <th className="py-3 px-4">Médico / Plantonista</th>
               <th className="py-3 px-3 text-center">Total Horas na Escala</th>
-              {allFunctionNames.map(fn => (
-                <th key={fn} className="py-3 px-3 text-center border-l border-slate-700">
-                  {fn}
-                  <span className="block text-[9px] text-slate-300 font-normal">
-                    (Horas Fixas | Horas Extras)
-                  </span>
-                </th>
-              ))}
+              {allFunctionNames.map((fn, idx) => {
+                const cInfo = getFunctionColorInfo(fn, idx);
+                return (
+                  <th
+                    key={fn}
+                    style={{ borderTop: `3px solid ${cInfo.hex}` }}
+                    className="py-3 px-3 text-center border-l border-slate-700"
+                  >
+                    {fn}
+                    <span className="block text-[9px] text-slate-300 font-normal">
+                      (Horas Fixas | Horas Extras)
+                    </span>
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200">
