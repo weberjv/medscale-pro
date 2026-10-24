@@ -67,33 +67,6 @@ export default function ScheduleAndMapViews(props: any) {
     ? config.shiftAdditionals.filter((a: any) => a?.incidence !== 'monthly')
     : [];
 
-  // Resolve a paleta de cor atribuída à função na Tabela de Remuneração
-  const getFunctionColorInfo = (fnName?: string) => {
-    const cleanName = fnName || allFunctionNames[0] || 'Plantonista';
-    const fnIndex = Math.max(0, allFunctionNames.indexOf(cleanName));
-    const fnObj = functionRatesObj[cleanName] || {};
-    const paletteKeys = Object.keys(FUNCTION_COLOR_PALETTE || {});
-    const defaultKey = paletteKeys[fnIndex % Math.max(1, paletteKeys.length)] || 'blue';
-    const themeKey =
-      fnObj.colorTheme && FUNCTION_COLOR_PALETTE?.[fnObj.colorTheme]
-        ? fnObj.colorTheme
-        : defaultKey;
-
-    return (
-      FUNCTION_COLOR_PALETTE?.[themeKey] || {
-        id: 'blue',
-        label: 'Azul Royal',
-        hex: '#2563eb',
-        softBgHex: '#eff6ff',
-        borderHex: '#93c5fd',
-        textHex: '#1e3a8a',
-        badgeClass: 'bg-blue-600 text-white',
-        cardClass: 'bg-blue-50/70 border-blue-300 text-blue-950',
-        dotClass: 'bg-blue-600'
-      }
-    );
-  };
-
   const resolveDoctor = (id: any) => {
     if (typeof getDoctorById === 'function') {
       const found = getDoctorById(id);
@@ -119,7 +92,7 @@ export default function ScheduleAndMapViews(props: any) {
         name: String(s.manualDoctorName).trim(),
         crm: s.manualDoctorCrm || 'Alocação Manual',
         specialty: 'Alocação Manual',
-        role: s.category || 'Plantonista',
+        role: s.category || allFunctionNames[0] || 'Plantonista',
         remunerationLevel: Number(s.manualDoctorLevel || 1),
         isManual: true
       };
@@ -133,10 +106,113 @@ export default function ScheduleAndMapViews(props: any) {
       name: 'Médico',
       crm: '—',
       specialty: 'Clínica Médica',
-      role: s?.category || 'Plantonista',
+      role: s?.category || allFunctionNames[0] || 'Plantonista',
       remunerationLevel: 1,
       isManual: false
     };
+  };
+
+  // ============================================================================
+  // RESOLUÇÃO EXATA DO NOME DA FUNÇÃO E DA COR DEFINIDA PELO GESTOR
+  // (SEM CORTAR NOMES COM HÍFEN COMO "Plantão - Clínica Médica")
+  // ============================================================================
+  const resolveExactFunctionName = (s: any, docObj?: any): string => {
+    const rawCat = String(s?.category || '').trim();
+    const doc = docObj || resolveShiftDoctorInfo(s);
+
+    // 1. Correspondência exata na Tabela de Remuneração
+    if (rawCat && functionRatesObj[rawCat]) {
+      return rawCat;
+    }
+
+    // 2. Correspondência ignorando maiúsculas/minúsculas ou espaços extras
+    if (rawCat) {
+      const exactKeyCI = allFunctionNames.find(
+        fn => fn.trim().toLowerCase() === rawCat.toLowerCase()
+      );
+      if (exactKeyCI) return exactKeyCI;
+    }
+
+    // 3. Se o turno foi salvo com nome curto/truncado (ex: "Plantão" ou "Supervisão Médica"),
+    //    verifica se a função principal ou funções permitidas do médico correspondem a esse prefixo
+    const docRoles: string[] = [
+      doc?.role,
+      ...(Array.isArray(doc?.allowedFunctions) ? doc.allowedFunctions : [])
+    ].filter(Boolean);
+
+    if (rawCat) {
+      const roleMatchingPrefix = docRoles.find(
+        r =>
+          functionRatesObj[r] &&
+          r.toLowerCase().startsWith(rawCat.toLowerCase())
+      );
+      if (roleMatchingPrefix) return roleMatchingPrefix;
+
+      // Ou se o sufixo da função bate com a especialidade do médico (ex: "Plantão" + "Cardiologia" -> "Plantão - Cardiologia")
+      if (doc?.specialty) {
+        const specMatch = allFunctionNames.find(
+          fn =>
+            fn.toLowerCase().startsWith(rawCat.toLowerCase()) &&
+            fn.toLowerCase().includes(String(doc.specialty).trim().toLowerCase())
+        );
+        if (specMatch) return specMatch;
+      }
+
+      // Ou qualquer função cadastrada que comece pelo texto de rawCat
+      const prefixKey = allFunctionNames.find(fn =>
+        fn.toLowerCase().startsWith(rawCat.toLowerCase())
+      );
+      if (prefixKey) return prefixKey;
+    }
+
+    // 4. Caso o turno não tenha categoria válida, usa a função do médico cadastrada na tabela
+    const validDocRole = docRoles.find(r => functionRatesObj[r]);
+    if (validDocRole) return validDocRole;
+
+    return rawCat || doc?.role || allFunctionNames[0] || 'Plantonista';
+  };
+
+  const getFunctionColorInfo = (fnNameInput?: string) => {
+    const rawName = String(fnNameInput || '').trim();
+
+    // Procura a chave correspondente em functionRatesObj sem truncar hífens
+    let matchedKey = '';
+    if (rawName && functionRatesObj[rawName]) {
+      matchedKey = rawName;
+    } else if (rawName) {
+      matchedKey =
+        allFunctionNames.find(
+          fn => fn.trim().toLowerCase() === rawName.toLowerCase()
+        ) ||
+        allFunctionNames.find(fn =>
+          fn.trim().toLowerCase().startsWith(rawName.toLowerCase())
+        ) ||
+        '';
+    }
+
+    const effectiveKey = matchedKey || rawName || allFunctionNames[0] || 'Plantonista';
+    const fnIndex = Math.max(0, allFunctionNames.indexOf(effectiveKey));
+    const fnObj = functionRatesObj[effectiveKey] || {};
+    const paletteKeys = Object.keys(FUNCTION_COLOR_PALETTE || {});
+    const defaultKey = paletteKeys[fnIndex % Math.max(1, paletteKeys.length)] || 'blue';
+    const themeKey =
+      fnObj.colorTheme && FUNCTION_COLOR_PALETTE?.[fnObj.colorTheme]
+        ? fnObj.colorTheme
+        : defaultKey;
+
+    return (
+      FUNCTION_COLOR_PALETTE?.[themeKey] || {
+        id: 'blue',
+        label: 'Azul Royal',
+        hex: '#2563eb',
+        softBgHex: '#eff6ff',
+        borderHex: '#93c5fd',
+        textHex: '#1e3a8a',
+        badgeClass: 'bg-blue-600 text-white',
+        cardClass: 'bg-blue-50/70 border-blue-300 text-blue-950',
+        dotClass: 'bg-blue-600'
+      }
+    );
   };
 
   // Verifica se um plantão específico resulta de uma Troca ou Passagem homologada naquele dia
@@ -203,13 +279,14 @@ export default function ScheduleAndMapViews(props: any) {
     date: defaultRefDate,
     startTime: '07:00',
     endTime: '19:00',
-    category: 'Plantonista',
+    category: allFunctionNames[0] || 'Plantonista',
     shiftType: 'Fixo'
   });
 
   const handleOpenEditShiftModal = (shiftItem: any) => {
     if (!isAdmin || !shiftItem) return;
     const isMan = Boolean(shiftItem.isManualUnregisteredDoctor);
+    const resolvedFn = resolveExactFunctionName(shiftItem);
     setEditingShiftObj(shiftItem);
     setEditShiftForm({
       allocationMode: isMan ? 'manual' : 'registered',
@@ -220,7 +297,7 @@ export default function ScheduleAndMapViews(props: any) {
       date: shiftItem.date || selectedDate,
       startTime: shiftItem.startTime || '07:00',
       endTime: shiftItem.endTime || '19:00',
-      category: shiftItem.category || allFunctionNames[0] || 'Plantonista',
+      category: resolvedFn,
       shiftType: shiftItem.shiftType || shiftItem.modality || 'Fixo'
     });
   };
@@ -277,7 +354,7 @@ export default function ScheduleAndMapViews(props: any) {
       ? editShiftForm.manualDoctorName.trim()
       : resolveDoctor(editShiftForm.doctorId)?.name || 'Médico';
     safeRecordAction(
-      `Plantão editado pelo gestor: ${docLabel} (${editShiftForm.startTime}-${editShiftForm.endTime}) em ${formatBrDate(
+      `Plantão editado pelo gestor: ${docLabel} (${editShiftForm.startTime}-${editShiftForm.endTime} • ${editShiftForm.category}) em ${formatBrDate(
         editShiftForm.date
       )}`
     );
@@ -336,7 +413,7 @@ export default function ScheduleAndMapViews(props: any) {
   };
 
   // Ordenação inteligente: respeita a ordem manual (displayOrder) definida pelo gestor;
-  // caso ainda não haja ordem manual, ordena por horário de chegada (startTime)
+  // caso não haja displayOrder diferenciado, ordena por horário de chegada (startTime)
   const sortShiftsByManagerOrArrival = (list: any[]) => {
     return [...list].sort((a, b) => {
       const hasOrderA = typeof a?.displayOrder === 'number';
@@ -344,8 +421,6 @@ export default function ScheduleAndMapViews(props: any) {
       if (hasOrderA && hasOrderB && a.displayOrder !== b.displayOrder) {
         return a.displayOrder - b.displayOrder;
       }
-      if (hasOrderA && !hasOrderB) return -1;
-      if (!hasOrderA && hasOrderB) return 1;
 
       const stA = String(a?.startTime || '07:00');
       const stB = String(b?.startTime || '07:00');
@@ -449,7 +524,7 @@ export default function ScheduleAndMapViews(props: any) {
   };
 
   // ============================================================================
-  // GERADOR PDF 1: HEATMAP VISUAL DO DIA (NOMES/HORÁRIOS COMPACTOS + CORES DA FUNÇÃO)
+  // GERADOR PDF 1: HEATMAP VISUAL DO DIA (NOMES/HORÁRIOS COMPACTOS + CORES EXATAS DA FUNÇÃO)
   // ============================================================================
   const handleDownloadDailyHeatmapPDF = () => {
     if (typeof window === 'undefined') return;
@@ -471,13 +546,12 @@ export default function ScheduleAndMapViews(props: any) {
       dayShiftsCovered.filter(s => isShiftActiveInCycleHour(s, cIdx)).length
     );
 
-    // Legenda de cores das funções para o topo do PDF
     const legendHtml = allFunctionNames
       .map(fn => {
         const cInfo = getFunctionColorInfo(fn);
         return `
           <span style="display:inline-flex;align-items:center;gap:4px;margin-right:10px;font-size:8.5px;font-weight:700;color:#1e293b;">
-            <span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${cInfo.hex};-webkit-print-color-adjust:exact;print-color-adjust:exact;"></span>
+            <span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${cInfo.hex} !important;-webkit-print-color-adjust:exact;print-color-adjust:exact;"></span>
             ${fn}
           </span>
         `;
@@ -490,7 +564,7 @@ export default function ScheduleAndMapViews(props: any) {
         : dayShiftsCovered
             .map(s => {
               const doc = resolveShiftDoctorInfo(s);
-              const fnName = String(s.category || doc?.role || 'Plantonista').split(' - ')[0];
+              const fnName = resolveExactFunctionName(s, doc);
               const colorInfo = getFunctionColorInfo(fnName);
               const hasSwap = isShiftInvolvedInApprovedSwap(s);
 
@@ -507,14 +581,14 @@ export default function ScheduleAndMapViews(props: any) {
 
               return `
                 <tr>
-                  <td style="padding:3px 4px;border:1px solid #cbd5e1;font-weight:800;font-size:7.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:${colorInfo.softBgHex} !important;color:${colorInfo.textHex};border-left:3.5px solid ${colorInfo.hex};-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;">
+                  <td style="padding:2.5px 4px;border:1px solid #cbd5e1;font-weight:800;font-size:7.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;background:${colorInfo.softBgHex} !important;color:${colorInfo.textHex};border-left:4px solid ${colorInfo.hex};-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;">
                     ${s.startTime || '07:00'}-${s.endTime || '19:00'}
                   </td>
-                  <td style="padding:3px 5px;border:1px solid #cbd5e1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:145px;">
-                    <div style="font-weight:800;font-size:8px;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.15;">
+                  <td style="padding:2.5px 5px;border:1px solid #cbd5e1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:155px;background:${colorInfo.softBgHex} !important;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;">
+                    <div style="font-weight:800;font-size:7.8px;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.15;">
                       ${doc?.name || 'Médico'} ${hasSwap ? '🔄' : ''}
                     </div>
-                    <div style="font-weight:700;color:${colorInfo.hex};font-size:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.1;">
+                    <div style="font-weight:800;color:${colorInfo.hex};font-size:6.8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.1;">
                       ${fnName}
                     </div>
                   </td>
@@ -543,7 +617,8 @@ export default function ScheduleAndMapViews(props: any) {
         ? handoverShifts07h
             .map(s => {
               const d = resolveShiftDoctorInfo(s);
-              return `${d?.name || 'Médico'} (${String(s.category || 'Plantonista').split(' - ')[0]})`;
+              const fn = resolveExactFunctionName(s, d);
+              return `${d?.name || 'Médico'} (${fn})`;
             })
             .join(' • ')
         : 'Sem registo de entrada às 07:00 do dia seguinte.';
@@ -585,8 +660,8 @@ export default function ScheduleAndMapViews(props: any) {
         <table>
           <thead>
             <tr style="background:#0f172a !important;color:#ffffff;font-size:8px;">
-              <th style="width:62px;padding:4px 3px;border:1px solid #334155;">Horário</th>
-              <th style="width:145px;padding:4px 5px;border:1px solid #334155;text-align:left;">Médico / Função</th>
+              <th style="width:60px;padding:4px 3px;border:1px solid #334155;">Horário</th>
+              <th style="width:155px;padding:4px 5px;border:1px solid #334155;text-align:left;">Médico / Função</th>
               ${heatmapHours
                 .map(
                   h =>
@@ -635,7 +710,7 @@ export default function ScheduleAndMapViews(props: any) {
 
   // ============================================================================
   // GERADOR PDF 2: ESCALA OFICIAL EM 8 PÁGINAS
-  // (ORDEM DO GESTOR + CORES POR FUNÇÃO + SEM CRM NA DIÁRIA + EMOJI 🔄 JUNTO À FUNÇÃO)
+  // (ORDEM DO GESTOR + CORES EXATAS POR FUNÇÃO + SEM CRM NA DIÁRIA + EMOJI 🔄 JUNTO À FUNÇÃO)
   // ============================================================================
   const handleDownloadScale8PagesPDF = () => {
     if (typeof window === 'undefined') return;
@@ -652,14 +727,14 @@ export default function ScheduleAndMapViews(props: any) {
         const cInfo = getFunctionColorInfo(fn);
         return `
           <span style="display:inline-flex;align-items:center;gap:4px;margin-right:10px;font-size:8.5px;font-weight:700;color:#1e293b;">
-            <span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${cInfo.hex};-webkit-print-color-adjust:exact;print-color-adjust:exact;"></span>
+            <span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:${cInfo.hex} !important;-webkit-print-color-adjust:exact;print-color-adjust:exact;"></span>
             ${fn}
           </span>
         `;
       })
       .join('');
 
-    // PÁGINA 1: Grade Semanal respeitando a ordem do gestor e a cor da função
+    // PÁGINA 1: Grade Semanal respeitando a ordem do gestor e a cor exata da função
     const weeklyColumnsHtml = weekDays
       .map(wd => {
         const coveredDayShifts = sortShiftsByManagerOrArrival(
@@ -672,13 +747,13 @@ export default function ScheduleAndMapViews(props: any) {
             : coveredDayShifts
                 .map(s => {
                   const doc = resolveShiftDoctorInfo(s);
-                  const fnName = String(s.category || doc?.role || 'Plantonista').split(' - ')[0];
+                  const fnName = resolveExactFunctionName(s, doc);
                   const colorInfo = getFunctionColorInfo(fnName);
                   const hasSwap = isShiftInvolvedInApprovedSwap(s);
 
                   return `
-                    <div style="padding:2.5px 4px;margin-bottom:2.5px;border:1px solid ${colorInfo.borderHex};border-left:3.5px solid ${colorInfo.hex};background:${colorInfo.softBgHex} !important;color:${colorInfo.textHex};border-radius:3px;font-size:8px;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;">
-                      <strong>${s.startTime || '07:00'}-${s.endTime || '19:00'}</strong> - ${
+                    <div style="padding:2.5px 4px;margin-bottom:2.5px;border:1px solid ${colorInfo.borderHex};border-left:4.5px solid ${colorInfo.hex};background:${colorInfo.softBgHex} !important;color:${colorInfo.textHex};border-radius:3px;font-size:7.8px;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;">
+                      <strong style="color:${colorInfo.hex};">${s.startTime || '07:00'}-${s.endTime || '19:00'}</strong> - ${
                     doc?.name || 'Médico'
                   } ${hasSwap ? '🔄' : ''}
                     </div>
@@ -697,7 +772,7 @@ export default function ScheduleAndMapViews(props: any) {
       })
       .join('');
 
-    // PÁGINAS 2 A 8: Detalhamento Diário (Sem CRM, com cores da função e emoji 🔄 junto à função nas trocas)
+    // PÁGINAS 2 A 8: Detalhamento Diário (Sem CRM, com cores exatas da função e emoji 🔄 junto à função nas trocas)
     const dailyPagesHtml = weekDays
       .map(wd => {
         const coveredDayShifts = sortShiftsByManagerOrArrival(
@@ -711,10 +786,8 @@ export default function ScheduleAndMapViews(props: any) {
             : coveredDayShifts
                 .map(s => {
                   const doc = resolveShiftDoctorInfo(s);
-                  const shortFunctionName = String(
-                    s?.category || doc?.role || 'Plantonista'
-                  ).split(' - ')[0];
-                  const colorInfo = getFunctionColorInfo(shortFunctionName);
+                  const exactFunctionName = resolveExactFunctionName(s, doc);
+                  const colorInfo = getFunctionColorInfo(exactFunctionName);
                   const hasSwap = isShiftInvolvedInApprovedSwap(s);
 
                   const isNightShift = String(s?.startTime || '') >= '19:00';
@@ -733,19 +806,19 @@ export default function ScheduleAndMapViews(props: any) {
                   return `
                     ${dividerRow}
                     <tr style="background:${colorInfo.softBgHex} !important;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;">
-                      <td style="padding:6px 10px;border:1px solid #cbd5e1;border-left:5px solid ${colorInfo.hex};font-weight:800;width:155px;color:#0f172a;">
+                      <td style="padding:5.5px 10px;border:1px solid #cbd5e1;border-left:5px solid ${colorInfo.hex};font-weight:800;width:150px;color:#0f172a;">
                         ${s.startTime || '07:00'} às ${s.endTime || '19:00'}
                       </td>
-                      <td style="padding:6px 10px;border:1px solid #cbd5e1;font-weight:800;color:#0f172a;">
+                      <td style="padding:5.5px 10px;border:1px solid #cbd5e1;font-weight:800;color:#0f172a;">
                         ${doc?.name || 'Médico'}
                       </td>
-                      <td style="padding:6px 10px;border:1px solid #cbd5e1;font-weight:800;width:240px;">
-                        <span style="display:inline-block;padding:2px 8px;border-radius:4px;background:${colorInfo.hex} !important;color:#ffffff;font-size:10px;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;">
-                          ${shortFunctionName}
+                      <td style="padding:5.5px 10px;border:1px solid #cbd5e1;font-weight:800;width:270px;">
+                        <span style="display:inline-block;padding:2.5px 8px;border-radius:4px;background:${colorInfo.hex} !important;color:#ffffff;font-size:9.5px;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;">
+                          ${exactFunctionName}
                         </span>
                         ${
                           hasSwap
-                            ? `<span style="margin-left:6px;font-size:11px;font-weight:900;color:#b45309;">🔄 (Em Troca/Substituição)</span>`
+                            ? `<span style="margin-left:6px;font-size:10.5px;font-weight:900;color:#b45309;">🔄</span>`
                             : ''
                         }
                       </td>
@@ -1079,7 +1152,7 @@ export default function ScheduleAndMapViews(props: any) {
       date: selectedShift.date,
       startTime: selectedShift.startTime || '07:00',
       endTime: selectedShift.endTime || '19:00',
-      category: selectedShift.category || 'Plantonista',
+      category: resolveExactFunctionName(selectedShift),
       requesterId: Number(selectedShift.doctorId),
       type: swapForm.type,
       isPartialByTimeRange: Boolean(swapForm.isPartialByTimeRange),
@@ -1261,7 +1334,6 @@ export default function ScheduleAndMapViews(props: any) {
 
   // ============================================================================
   // 1. VIEW: MEU PAINEL / DASHBOARD
-  // (COM OCULTAÇÃO DAS 4 CAIXAS GERENCIAIS NO LOGIN DO MÉDICO)
   // ============================================================================
   if (currentView === 'dashboard') {
     const pendingSwapsCount = safeSwaps.filter(
@@ -1334,7 +1406,7 @@ export default function ScheduleAndMapViews(props: any) {
           </div>
         </div>
 
-        {/* AS 4 CAIXAS GERENCIAIS: EXIBIDAS APENAS PARA O GESTOR (OCULTAS NO LOGIN DO MÉDICO) */}
+        {/* AS 4 CAIXAS GERENCIAIS: EXIBIDAS APENAS PARA O GESTOR */}
         {isAdmin && (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
             <div
@@ -1420,16 +1492,25 @@ export default function ScheduleAndMapViews(props: any) {
             ) : (
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
                 {myUpcomingShifts.slice(0, 6).map((s: any) => {
-                  const cInfo = getFunctionColorInfo(s.category);
+                  const fn = resolveExactFunctionName(s);
+                  const cInfo = getFunctionColorInfo(fn);
                   return (
                     <div
                       key={s.id}
-                      style={{ borderLeft: `4px solid ${cInfo.hex}` }}
-                      className="p-3 rounded-xl bg-slate-50 border border-slate-200 flex items-center justify-between"
+                      style={{
+                        borderLeft: `4.5px solid ${cInfo.hex}`,
+                        backgroundColor: cInfo.softBgHex
+                      }}
+                      className="p-3 rounded-xl border border-slate-200 flex items-center justify-between"
                     >
                       <div>
                         <strong className="text-slate-900 block">{formatBrDate(s.date)}</strong>
-                        <span className="text-slate-500">{s.category || 'Plantonista'}</span>
+                        <span
+                          style={{ color: cInfo.textHex }}
+                          className="font-bold text-[11px]"
+                        >
+                          {fn}
+                        </span>
                       </div>
                       <span
                         style={{ backgroundColor: cInfo.hex }}
@@ -1553,10 +1634,11 @@ export default function ScheduleAndMapViews(props: any) {
               >
                 {myEligibleShifts.map((s: any) => {
                   const d = resolveShiftDoctorInfo(s);
+                  const fn = resolveExactFunctionName(s, d);
                   return (
                     <option key={s.id} value={s.id}>
                       {formatBrDate(s.date)} • {s.startTime || '07:00'} às{' '}
-                      {s.endTime || '19:00'} — {d?.name || 'Médico'} ({s.category || 'Plantonista'})
+                      {s.endTime || '19:00'} — {d?.name || 'Médico'} ({fn})
                     </option>
                   );
                 })}
@@ -1747,6 +1829,7 @@ export default function ScheduleAndMapViews(props: any) {
             const isPendingAnalysis =
               sw.status === 'Pendente' || sw.status === 'Em Revisão Solicitada';
             const isApproved = sw.status === 'Aprovado';
+            const cInfo = getFunctionColorInfo(sw.category);
 
             return (
               <div
@@ -1764,7 +1847,10 @@ export default function ScheduleAndMapViews(props: any) {
                     <span className="px-2.5 py-1 rounded-lg bg-slate-900 text-white font-extrabold">
                       {formatBrDate(sw.date)}
                     </span>
-                    <span className="px-2.5 py-1 rounded-lg bg-blue-50 text-blue-900 font-bold">
+                    <span
+                      style={{ backgroundColor: cInfo.hex }}
+                      className="px-2.5 py-1 rounded-lg text-white font-bold"
+                    >
                       {sw.category || 'Plantonista'}
                     </span>
                     <span
@@ -2018,7 +2104,10 @@ export default function ScheduleAndMapViews(props: any) {
   // 3. VIEW: ESCALA OFICIAL SEMANAL & MATRIZ HEATMAP 24H (SCHEDULE / HEATMAP)
   // ============================================================================
   const filteredShifts = safeShifts.filter((s: any) => {
-    if (filterCategory !== 'Todas' && s?.category !== filterCategory) return false;
+    const exactFn = resolveExactFunctionName(s);
+    if (filterCategory !== 'Todas' && exactFn !== filterCategory && s?.category !== filterCategory) {
+      return false;
+    }
     if (onlyMyShifts && Number(s?.doctorId) !== Number(currentUser?.id)) return false;
     return true;
   });
@@ -2047,7 +2136,7 @@ export default function ScheduleAndMapViews(props: any) {
               Escala Semanal (Seg-Dom) & Matriz Heatmap Assistencial 24h
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              Ordem personalizável pelo gestor (▲/▼) • Cores por função da Tabela de Remuneração • Semana de{' '}
+              Ordem personalizável pelo gestor (▲/▼) • Cores vivas por função da Tabela de Remuneração • Semana de{' '}
               <strong>{formatBrDate(weekDays[0].date)}</strong> a{' '}
               <strong>{formatBrDate(weekDays[6].date)}</strong>
             </p>
@@ -2414,7 +2503,7 @@ export default function ScheduleAndMapViews(props: any) {
         </form>
       )}
 
-      {/* BLOCO 1: GRADE SEMANAL (COM SUBIR ▲ / DESCER ▼, EDIÇÃO ✏️ E CORES DA FUNÇÃO) */}
+      {/* BLOCO 1: GRADE SEMANAL (COM SUBIR ▲ / DESCER ▼, EDIÇÃO ✏️ E CORES EXATAS DA FUNÇÃO) */}
       {(displayMode === 'both' || displayMode === 'weekly') && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
           <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -2464,7 +2553,7 @@ export default function ScheduleAndMapViews(props: any) {
                     ) : (
                       dayList.map((s: any, idxInDay: number) => {
                         const doc = resolveShiftDoctorInfo(s);
-                        const fnName = String(s.category || 'Plantonista').split(' - ')[0];
+                        const fnName = resolveExactFunctionName(s, doc);
                         const colorInfo = getFunctionColorInfo(fnName);
                         const hasSwap = isShiftInvolvedInApprovedSwap(s);
 
@@ -2472,10 +2561,11 @@ export default function ScheduleAndMapViews(props: any) {
                           <div
                             key={s.id}
                             style={{
-                              borderLeft: `4.5px solid ${colorInfo.hex}`,
+                              borderColor: colorInfo.borderHex,
+                              borderLeft: `5px solid ${colorInfo.hex}`,
                               backgroundColor: colorInfo.softBgHex
                             }}
-                            className="p-2.5 rounded-xl border border-slate-200 shadow-xs space-y-1.5 transition-all"
+                            className="p-2.5 rounded-xl border shadow-xs space-y-1.5 transition-all"
                           >
                             <div className="flex items-center justify-between gap-1">
                               <span
@@ -2486,7 +2576,7 @@ export default function ScheduleAndMapViews(props: any) {
                               </span>
 
                               {isAdmin && (
-                                <div className="flex items-center gap-0.5 bg-white/90 px-1 py-0.5 rounded-md border border-slate-200">
+                                <div className="flex items-center gap-0.5 bg-white/95 px-1 py-0.5 rounded-md border border-slate-200">
                                   <button
                                     type="button"
                                     disabled={idxInDay === 0}
@@ -2541,10 +2631,11 @@ export default function ScheduleAndMapViews(props: any) {
                               {doc?.name || 'Médico'} {hasSwap ? '🔄' : ''}
                             </strong>
 
-                            <div className="flex items-center justify-between text-[10px] gap-1">
+                            <div className="flex items-center justify-between text-[10px] gap-1 pt-0.5">
                               <span
-                                style={{ color: colorInfo.textHex }}
-                                className="truncate font-extrabold"
+                                style={{ backgroundColor: colorInfo.hex }}
+                                className="px-1.5 py-0.5 rounded text-white font-extrabold truncate"
+                                title={fnName}
                               >
                                 {fnName}
                               </span>
@@ -2568,7 +2659,7 @@ export default function ScheduleAndMapViews(props: any) {
         </div>
       )}
 
-      {/* BLOCO 2: MATRIZ HEATMAP VISUAL ASSISTENCIAL 24H (COM CORES DAS FUNÇÕES E FONTE COMPACTA) */}
+      {/* BLOCO 2: MATRIZ HEATMAP VISUAL ASSISTENCIAL 24H (COM CORES EXATAS DAS FUNÇÕES) */}
       {(displayMode === 'both' || displayMode === 'heatmap' || currentView === 'heatmap') && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
           <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
@@ -2578,7 +2669,7 @@ export default function ScheduleAndMapViews(props: any) {
                 2. Matriz Heatmap Visual Assistencial 24h — Dia {formatBrDate(selectedDate)} (07h às 06h + Passagem 07h)
               </h3>
               <p className="text-[11px] text-slate-500">
-                Ordem sincronizada com a escala do gestor • Faixas horárias preenchidas com as cores de cada função da Tabela de Remuneração.
+                Ordem sincronizada com a escala do gestor • Faixas horárias preenchidas com as cores exatas de cada função da Tabela de Remuneração.
               </p>
             </div>
 
@@ -2595,7 +2686,7 @@ export default function ScheduleAndMapViews(props: any) {
             <thead>
               <tr className="bg-slate-900 text-white text-[10px] uppercase">
                 <th className="py-2.5 px-2.5 w-24">Turno</th>
-                <th className="py-2.5 px-3 w-48">Médico / Função</th>
+                <th className="py-2.5 px-3 w-52">Médico / Função</th>
                 {heatmapHours.map(h => (
                   <th
                     key={h}
@@ -2625,7 +2716,7 @@ export default function ScheduleAndMapViews(props: any) {
               ) : (
                 selectedDayCoveredShifts.map((s: any) => {
                   const doc = resolveShiftDoctorInfo(s);
-                  const fnName = String(s.category || 'Plantonista').split(' - ')[0];
+                  const fnName = resolveExactFunctionName(s, doc);
                   const colorInfo = getFunctionColorInfo(fnName);
                   const hasSwap = isShiftInvolvedInApprovedSwap(s);
 
@@ -2633,7 +2724,7 @@ export default function ScheduleAndMapViews(props: any) {
                     <tr key={s.id} className="hover:bg-slate-50">
                       <td
                         style={{
-                          borderLeft: `4px solid ${colorInfo.hex}`,
+                          borderLeft: `4.5px solid ${colorInfo.hex}`,
                           backgroundColor: colorInfo.softBgHex,
                           color: colorInfo.textHex
                         }}
@@ -2641,13 +2732,17 @@ export default function ScheduleAndMapViews(props: any) {
                       >
                         {s.startTime}-{s.endTime}
                       </td>
-                      <td className="py-1.5 px-2.5 truncate">
+                      <td
+                        style={{ backgroundColor: colorInfo.softBgHex }}
+                        className="py-1.5 px-2.5 truncate"
+                      >
                         <strong className="text-slate-900 block leading-tight text-[11px] truncate">
                           {doc?.name || 'Médico'} {hasSwap ? '🔄' : ''}
                         </strong>
                         <span
                           style={{ color: colorInfo.hex }}
                           className="text-[10px] font-extrabold block truncate"
+                          title={fnName}
                         >
                           {fnName}
                         </span>
@@ -2720,14 +2815,19 @@ export default function ScheduleAndMapViews(props: any) {
             ) : (
               nextDayHandover07h.map((hs: any) => {
                 const hd = resolveShiftDoctorInfo(hs);
-                const cInfo = getFunctionColorInfo(hs.category);
+                const fn = resolveExactFunctionName(hs, hd);
+                const cInfo = getFunctionColorInfo(fn);
                 return (
                   <span
                     key={hs.id}
-                    style={{ backgroundColor: cInfo.softBgHex, color: cInfo.textHex, borderColor: cInfo.borderHex }}
+                    style={{
+                      backgroundColor: cInfo.softBgHex,
+                      color: cInfo.textHex,
+                      borderColor: cInfo.borderHex
+                    }}
                     className="px-2.5 py-0.5 rounded-full border font-bold"
                   >
-                    {hd?.name || 'Médico'} ({hs.category || 'Plantonista'})
+                    {hd?.name || 'Médico'} ({fn})
                   </span>
                 );
               })
@@ -2751,16 +2851,20 @@ export default function ScheduleAndMapViews(props: any) {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {sortShiftsByManagerOrArrival(filteredShifts).map((s: any) => {
               const doc = resolveShiftDoctorInfo(s);
+              const fnName = resolveExactFunctionName(s, doc);
               const shiftAdds: string[] = Array.isArray(s.additionals)
                 ? s.additionals
                 : [];
-              const cInfo = getFunctionColorInfo(s.category);
+              const cInfo = getFunctionColorInfo(fnName);
 
               return (
                 <div
                   key={s.id}
-                  style={{ borderLeft: `5px solid ${cInfo.hex}` }}
-                  className="p-4 rounded-2xl border border-slate-200 bg-slate-50/50 space-y-2.5"
+                  style={{
+                    borderLeft: `5px solid ${cInfo.hex}`,
+                    backgroundColor: cInfo.softBgHex
+                  }}
+                  className="p-4 rounded-2xl border border-slate-200 space-y-2.5"
                 >
                   <div className="flex items-center justify-between gap-2 flex-wrap">
                     <div className="flex items-center gap-2">
@@ -2778,14 +2882,14 @@ export default function ScheduleAndMapViews(props: any) {
                       <button
                         type="button"
                         onClick={() => handleOpenEditShiftModal(s)}
-                        className="px-2.5 py-1 rounded-lg bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold flex items-center gap-1"
+                        className="px-2.5 py-1 rounded-lg bg-white hover:bg-blue-50 text-blue-700 border border-blue-200 font-bold flex items-center gap-1"
                       >
                         <Edit3 size={13} /> Editar
                       </button>
                       <button
                         type="button"
                         onClick={() => handleDeleteShift(s.id)}
-                        className="text-slate-400 hover:text-red-600 p-1"
+                        className="text-slate-500 hover:text-red-600 p-1"
                       >
                         <Trash2 size={14} />
                       </button>
@@ -2794,12 +2898,12 @@ export default function ScheduleAndMapViews(props: any) {
 
                   <div className="flex items-center gap-2 flex-wrap">
                     <span
-                      style={{ backgroundColor: cInfo.softBgHex, color: cInfo.textHex }}
-                      className="px-2.5 py-0.5 rounded-full font-extrabold"
+                      style={{ backgroundColor: cInfo.hex }}
+                      className="px-2.5 py-0.5 rounded-full text-white font-extrabold"
                     >
-                      {s.category || 'Plantonista'}
+                      {fnName}
                     </span>
-                    <span className="px-2.5 py-0.5 rounded-full bg-slate-200 text-slate-800 font-bold">
+                    <span className="px-2.5 py-0.5 rounded-full bg-white border border-slate-200 text-slate-800 font-bold">
                       {doc.isManual ? 'Plantonista Alocado Manualmente' : s.shiftType || 'Fixo'}
                     </span>
                   </div>
