@@ -5,7 +5,8 @@ import {
   Users, DollarSign, Sliders, Plus, Trash2, Edit3, CheckCircle,
   UserCheck, Award, Briefcase, Download, ShieldCheck, Stethoscope,
   RotateCcw, Clock, Layers, Table, FileSpreadsheet, ChevronDown,
-  ChevronUp, FileText, Printer, History, ShieldAlert, Percent, Save, Palette
+  ChevronUp, FileText, Printer, History, ShieldAlert, Percent, Save, Palette,
+  ArrowLeftRight
 } from 'lucide-react';
 
 export const FUNCTION_COLOR_PALETTE: Record<
@@ -126,6 +127,7 @@ export default function StaffAndFinanceViews(props: any) {
     pendingDoctors = [],
     shifts = [],
     setShifts,
+    swaps = [],
     vacations = [],
     setVacations,
     courses = [],
@@ -167,20 +169,39 @@ export default function StaffAndFinanceViews(props: any) {
     if (typeof setIsDoctorModalOpen === 'function') setIsDoctorModalOpen(true);
   };
 
-  // Listas blindadas
-  const safeDoctors = Array.isArray(doctors) ? doctors : [];
-  const safeActiveDoctors =
+  // Listas blindadas e ordenadas alfabeticamente (A-Z)
+  const safeDoctors = (Array.isArray(doctors) ? [...doctors] : []).sort((a, b) =>
+    String(a?.name || '').localeCompare(String(b?.name || ''), 'pt-BR', {
+      sensitivity: 'base'
+    })
+  );
+  const safeActiveDoctors = (
     Array.isArray(activeDoctors) && activeDoctors.length > 0
-      ? activeDoctors
-      : safeDoctors.filter((d: any) => d?.status === 'Ativo');
-  const safePendingDoctors =
+      ? [...activeDoctors]
+      : safeDoctors.filter((d: any) => d?.status === 'Ativo')
+  ).sort((a, b) =>
+    String(a?.name || '').localeCompare(String(b?.name || ''), 'pt-BR', {
+      sensitivity: 'base'
+    })
+  );
+  const safePendingDoctors = (
     Array.isArray(pendingDoctors) && pendingDoctors.length > 0
-      ? pendingDoctors
-      : safeDoctors.filter((d: any) => d?.status === 'Pendente');
+      ? [...pendingDoctors]
+      : safeDoctors.filter((d: any) => d?.status === 'Pendente')
+  ).sort((a, b) =>
+    String(a?.name || '').localeCompare(String(b?.name || ''), 'pt-BR', {
+      sensitivity: 'base'
+    })
+  );
   const safeShifts = Array.isArray(shifts) ? shifts : [];
+  const safeSwaps = Array.isArray(swaps) ? swaps : [];
   const safeVacations = Array.isArray(vacations) ? vacations : [];
   const safeCourses = Array.isArray(courses) ? courses : [];
   const safePayroll = Array.isArray(payrollReport) ? payrollReport : [];
+
+  const resolveDoctorByIdLocal = (id: any) => {
+    return safeDoctors.find((d: any) => Number(d?.id) === Number(id)) || null;
+  };
 
   // Especialidades dinâmicas da Emergência
   const registeredSpecialtiesList: { id: string; name: string }[] =
@@ -228,9 +249,10 @@ export default function StaffAndFinanceViews(props: any) {
     const fnObj = functionRatesObj[fnName] || {};
     const keys = Object.keys(FUNCTION_COLOR_PALETTE);
     const defaultKey = keys[indexFallback % keys.length] || 'blue';
-    const chosenKey = fnObj.colorTheme && FUNCTION_COLOR_PALETTE[fnObj.colorTheme]
-      ? fnObj.colorTheme
-      : defaultKey;
+    const chosenKey =
+      fnObj.colorTheme && FUNCTION_COLOR_PALETTE[fnObj.colorTheme]
+        ? fnObj.colorTheme
+        : defaultKey;
     return FUNCTION_COLOR_PALETTE[chosenKey] || FUNCTION_COLOR_PALETTE.blue;
   };
 
@@ -241,7 +263,7 @@ export default function StaffAndFinanceViews(props: any) {
   const [approvalSpecialties, setApprovalSpecialties] = useState<Record<number, string>>({});
   const [expandedFichaByDocId, setExpandedFichaByDocId] = useState<Record<number, boolean>>({});
 
-  // Estados para adicionar Histórico de Trabalho e Ocorrências Individuais direto no cartão do médico
+  // Estados para adicionar Histórico de Trabalho e Ocorrências Individuais
   const [historyDraftByDoc, setHistoryDraftByDoc] = useState<
     Record<number, { type: string; date: string; endDate: string; details: string }>
   >({});
@@ -249,7 +271,7 @@ export default function StaffAndFinanceViews(props: any) {
     Record<number, { date: string; severity: string; title: string; description: string }>
   >({});
 
-  // Estados locais para a aba de Tabela de Remuneração (Agora com colorTheme)
+  // Estados locais para a aba de Tabela de Remuneração
   const [newSpecialtyName, setNewSpecialtyName] = useState<string>('');
   const [newFunctionForm, setNewFunctionForm] = useState({
     name: '',
@@ -274,7 +296,7 @@ export default function StaffAndFinanceViews(props: any) {
     percentValue: 10
   });
 
-  // Estado para Edição do Próprio Cadastro pelo Médico (na aba "Meu Cadastro PJ" / profile)
+  // Estado para Edição do Próprio Cadastro pelo Médico
   const myLoggedDoc =
     safeDoctors.find((d: any) => Number(d?.id) === Number(currentUser?.id)) || currentUser;
 
@@ -309,8 +331,67 @@ export default function StaffAndFinanceViews(props: any) {
   }, [myLoggedDoc?.id, currentView]);
 
   // ============================================================================
-  // HELPER DE CÁLCULO DE HORAS E TAXAS (COM OU SEM NIVELAMENTO + DIA DE SEMANA VS FDS)
+  // HELPER DE CÁLCULO DE HORAS, DATAS E AUDITORIA DE TROCAS DO MÉDICO
   // ============================================================================
+  const formatBrDate = (dateStr?: string) => {
+    if (!dateStr) return '—';
+    const parts = String(dateStr).split('-');
+    if (parts.length !== 3) return dateStr;
+    return `${parts[2]}/${parts[1]}/${parts[0]}`;
+  };
+
+  // Extrai todas as trocas, permutas e passagens em que o médico atuou como Solicitante ou Substituto/Permutante
+  const getDoctorSwapsAuditList = (docId: number) => {
+    return safeSwaps
+      .filter((sw: any) => {
+        if (Number(sw?.requesterId) === Number(docId)) return true;
+        if (Number(sw?.targetDoctorId) === Number(docId)) return true;
+        if (
+          Array.isArray(sw?.segments) &&
+          sw.segments.some((seg: any) => Number(seg?.targetDoctorId) === Number(docId))
+        ) {
+          return true;
+        }
+        return false;
+      })
+      .map((sw: any) => {
+        const reqDoc = resolveDoctorByIdLocal(sw.requesterId);
+        const targDoc = resolveDoctorByIdLocal(sw.targetDoctorId);
+        const isRequester = Number(sw.requesterId) === Number(docId);
+        const roleInSwap = isRequester
+          ? 'Solicitante (Titular)'
+          : 'Substituto / Permutante';
+
+        let coverageDetail = '';
+        if (sw.isPartialByTimeRange && Array.isArray(sw.segments) && sw.segments.length > 0) {
+          coverageDetail = sw.segments
+            .map((seg: any) => {
+              const sDoc = resolveDoctorByIdLocal(seg.targetDoctorId);
+              return `${seg.startTime}-${seg.endTime}: ${sDoc?.name || 'Médico'}`;
+            })
+            .join(' | ');
+        } else {
+          coverageDetail = `${targDoc?.name || 'Médico Substituto'} (${
+            sw.startTime || '07:00'
+          }-${sw.endTime || '19:00'})`;
+        }
+
+        return {
+          id: sw.id,
+          date: sw.date || sw.shiftDate || '',
+          startTime: sw.startTime || '07:00',
+          endTime: sw.endTime || '19:00',
+          category: sw.category || 'Plantonista',
+          type: sw.type || sw.movementType || 'Passagem de Plantão',
+          status: sw.status || 'Pendente',
+          roleInSwap,
+          requesterName: reqDoc?.name || 'Médico Titular',
+          substituteDetail: coverageDetail,
+          permutedInfo: sw.permutedShiftInfo || ''
+        };
+      });
+  };
+
   const getShiftHours = (s: any): number => {
     if (typeof s?.hours === 'number' && s.hours > 0) return s.hours;
     const st = String(s?.startTime || '07:00');
@@ -384,15 +465,8 @@ export default function StaffAndFinanceViews(props: any) {
     };
   };
 
-  const formatBrDate = (dateStr?: string) => {
-    if (!dateStr) return '—';
-    const parts = String(dateStr).split('-');
-    if (parts.length !== 3) return dateStr;
-    return `${parts[2]}/${parts[1]}/${parts[0]}`;
-  };
-
   // ============================================================================
-  // MANIPULAÇÃO DO CORPO CLÍNICO, HISTÓRICO DE TRABALHO, OCORRÊNCIAS INDIVIDUAIS E DOSSIÊ PDF
+  // MANIPULAÇÃO DO CORPO CLÍNICO, HISTÓRICO DE TRABALHO, OCORRÊNCIAS E DOSSIÊ PDF
   // ============================================================================
   const handleUpdateDoctorLevelInline = (docId: number, newLevel: number) => {
     if (!isAdmin) return;
@@ -542,6 +616,7 @@ export default function StaffAndFinanceViews(props: any) {
 
   // ============================================================================
   // GERADOR DE DOCUMENTO INDIVIDUAL DO PLANTONISTA (PDF / IMPRESSÃO COMPLETA)
+  // (AGORA COM HISTÓRICO DE TROCAS, PERMUTAS E PASSAGENS EXPLICITANDO SOLICITANTE E SUBSTITUTO)
   // ============================================================================
   const handleDownloadIndividualDoctorDossier = (doc: any) => {
     if (typeof window === 'undefined' || !doc) return;
@@ -553,6 +628,7 @@ export default function StaffAndFinanceViews(props: any) {
     const indOccurrencesList: any[] = Array.isArray(doc.individualOccurrences)
       ? doc.individualOccurrences
       : [];
+    const docSwapsAuditList = getDoctorSwapsAuditList(docId);
 
     const workHistoryHtml =
       workHistoryList.length === 0
@@ -571,19 +647,52 @@ export default function StaffAndFinanceViews(props: any) {
             )
             .join('');
 
+    const swapsAuditHtml =
+      docSwapsAuditList.length === 0
+        ? `<tr><td colspan="4" style="padding:8px;color:#64748b;text-align:center;">Nenhuma troca, permuta ou passagem registada para este plantonista.</td></tr>`
+        : docSwapsAuditList
+            .map(
+              sw => `
+              <tr>
+                <td style="padding:6px 8px;border:1px solid #cbd5e1;font-weight:bold;">
+                  ${formatBrDate(sw.date)} (${sw.startTime}-${sw.endTime})
+                </td>
+                <td style="padding:6px 8px;border:1px solid #cbd5e1;font-weight:bold;">
+                  ${sw.type} • ${sw.category} (${sw.status})
+                </td>
+                <td style="padding:6px 8px;border:1px solid #cbd5e1;">
+                  <strong>Solicitante:</strong> ${sw.requesterName}
+                </td>
+                <td style="padding:6px 8px;border:1px solid #cbd5e1;">
+                  <strong>Substituto/Permutante:</strong> ${sw.substituteDetail}
+                  ${sw.permutedInfo ? `<br/><em>Permuta: ${sw.permutedInfo}</em>` : ''}
+                </td>
+              </tr>
+            `
+            )
+            .join('');
+
     const vacationsHtml =
       docVacations.length === 0
         ? `<tr><td colspan="3" style="padding:8px;color:#64748b;text-align:center;">Nenhum registo de férias ou licença no sistema.</td></tr>`
         : docVacations
-            .map(
-              v => `
-              <tr>
-                <td style="padding:6px 8px;border:1px solid #cbd5e1;font-weight:bold;">${v.requestType || 'Férias'} (${v.status || 'Aprovado'})</td>
-                <td style="padding:6px 8px;border:1px solid #cbd5e1;">${formatBrDate(v.startDate)} a ${formatBrDate(v.endDate)}</td>
-                <td style="padding:6px 8px;border:1px solid #cbd5e1;">${v.reason || '—'}</td>
-              </tr>
-            `
-            )
+            .map(v => {
+              const subs = Array.isArray(v.substitutions) ? v.substitutions : [];
+              const subsText =
+                subs.length > 0
+                  ? ` | Substituído por: ` +
+                    subs
+                      .map((s: any) => `${s.substituteDoctorName} (${s.dateInfo})`)
+                      .join(', ')
+                  : '';
+              return `
+                <tr>
+                  <td style="padding:6px 8px;border:1px solid #cbd5e1;font-weight:bold;">${v.requestType || 'Férias'} (${v.status || 'Aprovado'})</td>
+                  <td style="padding:6px 8px;border:1px solid #cbd5e1;">${formatBrDate(v.startDate)} a ${formatBrDate(v.endDate)}</td>
+                  <td style="padding:6px 8px;border:1px solid #cbd5e1;">${v.reason || '—'}${subsText}</td>
+                </tr>
+              `;
+            })
             .join('');
 
     const coursesHtml =
@@ -627,19 +736,19 @@ export default function StaffAndFinanceViews(props: any) {
         <meta charset="UTF-8" />
         <title>Dossie Individual - ${doc.name}</title>
         <style>
-          @page { size: A4 portrait; margin: 12mm; }
-          body { font-family: Arial, Helvetica, sans-serif; color: #0f172a; font-size: 11px; margin: 0; padding: 0; }
+          @page { size: A4 portrait; margin: 10mm; }
+          body { font-family: Arial, Helvetica, sans-serif; color: #0f172a; font-size: 10.5px; margin: 0; padding: 0; }
           h1, h2, h3 { margin: 0; }
-          table { width: 100%; border-collapse: collapse; margin-top: 6px; margin-bottom: 14px; }
-          .section-title { background: #0f172a; color: #ffffff; padding: 6px 10px; font-weight: bold; font-size: 11px; text-transform: uppercase; border-radius: 4px; margin-top: 10px; }
-          .grid-table td { padding: 6px 8px; border: 1px solid #cbd5e1; }
+          table { width: 100%; border-collapse: collapse; margin-top: 5px; margin-bottom: 12px; }
+          .section-title { background: #0f172a; color: #ffffff; padding: 5px 10px; font-weight: bold; font-size: 10.5px; text-transform: uppercase; border-radius: 4px; margin-top: 8px; }
+          .grid-table td { padding: 5px 8px; border: 1px solid #cbd5e1; }
         </style>
       </head>
       <body>
-        <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #0f172a;padding-bottom:8px;margin-bottom:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #0f172a;padding-bottom:8px;margin-bottom:10px;">
           <div>
-            <h1 style="font-size:16px;text-transform:uppercase;">${config?.appName || 'MedScale Pro'} — ${config?.sectorUnitName || 'Emergência Adulta - HGD'}</h1>
-            <p style="margin:2px 0 0 0;color:#475569;font-size:11px;">Ficha Cadastral Completa, Histórico de Trabalho, Cursos & Ocorrências Individuais</p>
+            <h1 style="font-size:15px;text-transform:uppercase;">${config?.appName || 'MedScale Pro'} — ${config?.sectorUnitName || 'Emergência Adulta - HGD'}</h1>
+            <p style="margin:2px 0 0 0;color:#475569;font-size:10.5px;">Dossiê Individual do Plantonista: Cadastro, Histórico, Trocas/Permutas, Cursos & Ocorrências</p>
           </div>
           <div style="text-align:right;font-size:10px;color:#475569;">
             Emitido em: <strong>${formatBrDate(todayStr)}</strong>
@@ -673,9 +782,9 @@ export default function StaffAndFinanceViews(props: any) {
         <table>
           <thead>
             <tr style="background:#f1f5f9;">
-              <th style="padding:6px 8px;border:1px solid #cbd5e1;text-align:left;width:28%;">Evento / Marco</th>
-              <th style="padding:6px 8px;border:1px solid #cbd5e1;text-align:left;width:22%;">Data / Período</th>
-              <th style="padding:6px 8px;border:1px solid #cbd5e1;text-align:left;">Detalhamento</th>
+              <th style="padding:5px 8px;border:1px solid #cbd5e1;text-align:left;width:28%;">Evento / Marco</th>
+              <th style="padding:5px 8px;border:1px solid #cbd5e1;text-align:left;width:22%;">Data / Período</th>
+              <th style="padding:5px 8px;border:1px solid #cbd5e1;text-align:left;">Detalhamento</th>
             </tr>
           </thead>
           <tbody>
@@ -683,13 +792,28 @@ export default function StaffAndFinanceViews(props: any) {
           </tbody>
         </table>
 
-        <div class="section-title">3. Registos de Férias e Licenças no Sistema</div>
+        <div class="section-title">3. Histórico de Trocas, Permutas e Passagens Realizadas (Auditoria Nominal)</div>
         <table>
           <thead>
             <tr style="background:#f1f5f9;">
-              <th style="padding:6px 8px;border:1px solid #cbd5e1;text-align:left;width:28%;">Tipo / Status</th>
-              <th style="padding:6px 8px;border:1px solid #cbd5e1;text-align:left;width:22%;">Período</th>
-              <th style="padding:6px 8px;border:1px solid #cbd5e1;text-align:left;">Observações</th>
+              <th style="padding:5px 8px;border:1px solid #cbd5e1;text-align:left;width:20%;">Data / Turno</th>
+              <th style="padding:5px 8px;border:1px solid #cbd5e1;text-align:left;width:24%;">Modalidade / Função</th>
+              <th style="padding:5px 8px;border:1px solid #cbd5e1;text-align:left;width:26%;">Quem Solicitou (Titular)</th>
+              <th style="padding:5px 8px;border:1px solid #cbd5e1;text-align:left;">Quem Substituiu / Permutou</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${swapsAuditHtml}
+          </tbody>
+        </table>
+
+        <div class="section-title">4. Registos de Férias e Licenças no Sistema (e Substitutos)</div>
+        <table>
+          <thead>
+            <tr style="background:#f1f5f9;">
+              <th style="padding:5px 8px;border:1px solid #cbd5e1;text-align:left;width:28%;">Tipo / Status</th>
+              <th style="padding:5px 8px;border:1px solid #cbd5e1;text-align:left;width:22%;">Período</th>
+              <th style="padding:5px 8px;border:1px solid #cbd5e1;text-align:left;">Observações & Substitutos</th>
             </tr>
           </thead>
           <tbody>
@@ -697,13 +821,13 @@ export default function StaffAndFinanceViews(props: any) {
           </tbody>
         </table>
 
-        <div class="section-title">4. Certificações e Cursos (ACLS, ATLS, PALS, etc.)</div>
+        <div class="section-title">5. Certificações e Cursos (ACLS, ATLS, PALS, etc.)</div>
         <table>
           <thead>
             <tr style="background:#f1f5f9;">
-              <th style="padding:6px 8px;border:1px solid #cbd5e1;text-align:left;width:28%;">Curso</th>
-              <th style="padding:6px 8px;border:1px solid #cbd5e1;text-align:left;width:30%;">Situação</th>
-              <th style="padding:6px 8px;border:1px solid #cbd5e1;text-align:left;">Validade</th>
+              <th style="padding:5px 8px;border:1px solid #cbd5e1;text-align:left;width:28%;">Curso</th>
+              <th style="padding:5px 8px;border:1px solid #cbd5e1;text-align:left;width:30%;">Situação</th>
+              <th style="padding:5px 8px;border:1px solid #cbd5e1;text-align:left;">Validade</th>
             </tr>
           </thead>
           <tbody>
@@ -711,13 +835,13 @@ export default function StaffAndFinanceViews(props: any) {
           </tbody>
         </table>
 
-        <div class="section-title">5. Ocorrências Individuais Registadas</div>
+        <div class="section-title">6. Ocorrências Individuais Registadas</div>
         <table>
           <thead>
             <tr style="background:#f1f5f9;">
-              <th style="padding:6px 8px;border:1px solid #cbd5e1;text-align:left;width:18%;">Data</th>
-              <th style="padding:6px 8px;border:1px solid #cbd5e1;text-align:left;width:32%;">Classificação / Título</th>
-              <th style="padding:6px 8px;border:1px solid #cbd5e1;text-align:left;">Descrição</th>
+              <th style="padding:5px 8px;border:1px solid #cbd5e1;text-align:left;width:18%;">Data</th>
+              <th style="padding:5px 8px;border:1px solid #cbd5e1;text-align:left;width:32%;">Classificação / Título</th>
+              <th style="padding:5px 8px;border:1px solid #cbd5e1;text-align:left;">Descrição</th>
             </tr>
           </thead>
           <tbody>
@@ -742,7 +866,7 @@ export default function StaffAndFinanceViews(props: any) {
   };
 
   // ============================================================================
-  // APROVAÇÃO, EXCLUSÃO E EXPORTAÇÃO XLS DE TODA A EQUIPA
+  // APROVAÇÃO, EXCLUSÃO E EXPORTAÇÃO XLS DE TODA A EQUIPA (+ TROCAS/PERMUTAS)
   // ============================================================================
   const handleApprovePendingDoctor = (doc: any) => {
     if (!isAdmin) return;
@@ -882,6 +1006,7 @@ export default function StaffAndFinanceViews(props: any) {
         const indOccList: any[] = Array.isArray(doc?.individualOccurrences)
           ? doc.individualOccurrences
           : [];
+        const docSwapsAudit = getDoctorSwapsAuditList(docId);
 
         const allowedFns =
           Array.isArray(doc?.allowedFunctions) && doc.allowedFunctions.length > 0
@@ -900,16 +1025,33 @@ export default function StaffAndFinanceViews(props: any) {
                 )
                 .join(' | ');
 
+        const swapsAuditSummary =
+          docSwapsAudit.length === 0
+            ? 'Nenhuma troca/passagem'
+            : docSwapsAudit
+                .map(
+                  sw =>
+                    `[${formatBrDate(sw.date)} (${sw.type} - ${sw.status}): Solicitante ${
+                      sw.requesterName
+                    } -> Substituto/Permutante ${sw.substituteDetail}]`
+                )
+                .join(' | ');
+
         const vacationsSummary =
           docVacations.length === 0
             ? '—'
             : docVacations
-                .map(
-                  v =>
-                    `[${v.requestType || 'Férias'}: ${formatBrDate(v.startDate)} a ${formatBrDate(
-                      v.endDate
-                    )} (${v.status || 'Aprovado'})]`
-                )
+                .map(v => {
+                  const subs = Array.isArray(v.substitutions) ? v.substitutions : [];
+                  const subsStr =
+                    subs.length > 0
+                      ? ` | Substituto(s): ` +
+                        subs.map((s: any) => `${s.substituteDoctorName} (${s.dateInfo})`).join(', ')
+                      : '';
+                  return `[${v.requestType || 'Férias'}: ${formatBrDate(v.startDate)} a ${formatBrDate(
+                    v.endDate
+                  )} (${v.status || 'Aprovado'})${subsStr}]`;
+                })
                 .join(' | ');
 
         const indOccSummary =
@@ -975,6 +1117,7 @@ export default function StaffAndFinanceViews(props: any) {
             <td style="padding:6px;border:1px solid #cbd5e1;">${doc?.email || '—'}</td>
             <td style="padding:6px;border:1px solid #cbd5e1;">${doc?.phone || '—'}</td>
             <td style="padding:6px;border:1px solid #cbd5e1;">${workHistorySummary}</td>
+            <td style="padding:6px;border:1px solid #cbd5e1;">${swapsAuditSummary}</td>
             <td style="padding:6px;border:1px solid #cbd5e1;">${vacationsSummary}</td>
             <td style="padding:6px;border:1px solid #cbd5e1;">${indOccSummary}</td>
             ${courseCellsHtml}
@@ -992,7 +1135,7 @@ export default function StaffAndFinanceViews(props: any) {
         <table border="1" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:11px;">
           <thead>
             <tr>
-              <th style="background:#0f172a;color:#ffffff;padding:8px;">Nome Completo</th>
+              <th style="background:#0f172a;color:#ffffff;padding:8px;">Nome Completo (Ordem Alfabética)</th>
               <th style="background:#0f172a;color:#ffffff;padding:8px;">Status</th>
               <th style="background:#0f172a;color:#ffffff;padding:8px;">CRM</th>
               <th style="background:#0f172a;color:#ffffff;padding:8px;">RQE</th>
@@ -1008,7 +1151,8 @@ export default function StaffAndFinanceViews(props: any) {
               <th style="background:#0f172a;color:#ffffff;padding:8px;">E-mail</th>
               <th style="background:#0f172a;color:#ffffff;padding:8px;">Telefone / WhatsApp</th>
               <th style="background:#312e81;color:#ffffff;padding:8px;">Histórico de Trabalho (Início Função / Mudança Carga / Férias Passadas)</th>
-              <th style="background:#312e81;color:#ffffff;padding:8px;">Férias e Licenças no Sistema</th>
+              <th style="background:#065f46;color:#ffffff;padding:8px;">Histórico de Trocas, Permutas e Passagens (Solicitante / Substituto)</th>
+              <th style="background:#312e81;color:#ffffff;padding:8px;">Férias e Licenças no Sistema (e Substitutos)</th>
               <th style="background:#7f1d1d;color:#ffffff;padding:8px;">Ocorrências Individuais Registadas</th>
               ${courseHeadersHtml}
             </tr>
@@ -1027,12 +1171,12 @@ export default function StaffAndFinanceViews(props: any) {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `Corpo_Clinico_Completo_Cursos_Historico_${todayStr}.xls`);
+    link.setAttribute('download', `Corpo_Clinico_Completo_Cursos_Trocas_Historico_${todayStr}.xls`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     safeRecordAction(
-      'Planilha completa da equipa (com cursos, histórico de trabalho e ocorrências individuais) exportada (.XLS)'
+      'Planilha completa da equipa (com cursos, histórico de trabalho, trocas/permutas e ocorrências individuais) exportada (.XLS)'
     );
   };
 
@@ -1057,10 +1201,10 @@ export default function StaffAndFinanceViews(props: any) {
           <div>
             <h2 className="text-xl sm:text-2xl font-bold text-slate-900 flex items-center gap-2">
               <Users className="text-blue-600" size={24} />
-              Corpo Clínico, Histórico Profissional, Ocorrências & Vínculos PJ
+              Corpo Clínico (Ordem Alfabética), Histórico, Trocas & Vínculos PJ
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
-              Registe histórico de trabalho e ocorrências individuais por plantonista, baixe o dossiê individual em PDF ou a planilha XLS completa da equipa.
+              Consulte a ficha completa com histórico de trabalho, auditoria de trocas/permutas (quem pediu e quem substituiu) e ocorrências individuais.
             </p>
           </div>
 
@@ -1071,7 +1215,7 @@ export default function StaffAndFinanceViews(props: any) {
                 onClick={handleDownloadFullTeamXLS}
                 className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl font-bold flex items-center gap-1.5 shadow-sm"
               >
-                <FileSpreadsheet size={16} /> Baixar Planilha Equipa + Cursos + Histórico (.XLS)
+                <FileSpreadsheet size={16} /> Baixar Planilha Equipa + Cursos + Trocas (.XLS)
               </button>
 
               {hasDemoDoctorsPresent && (
@@ -1249,6 +1393,7 @@ export default function StaffAndFinanceViews(props: any) {
             const indOccList: any[] = Array.isArray(doc.individualOccurrences)
               ? doc.individualOccurrences
               : [];
+            const docSwapsAudit = getDoctorSwapsAuditList(Number(doc.id));
             const currentLevel = Number(doc.remunerationLevel || 1);
             const isFichaOpen = Boolean(expandedFichaByDocId[doc.id]);
 
@@ -1393,7 +1538,7 @@ export default function StaffAndFinanceViews(props: any) {
                     >
                       <span className="flex items-center gap-1.5">
                         <FileText size={14} className="text-blue-600" />
-                        Ficha Cadastral, Histórico de Trabalho ({workHistoryList.length}) & Ocorrências ({indOccList.length})
+                        Ficha Cadastral, Histórico ({workHistoryList.length}), Trocas ({docSwapsAudit.length}) & Ocorrências ({indOccList.length})
                       </span>
                       {isFichaOpen ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
                     </button>
@@ -1441,6 +1586,7 @@ export default function StaffAndFinanceViews(props: any) {
                           </div>
                         </div>
 
+                        {/* Histórico de Trabalho */}
                         <div className="pt-3 border-t border-slate-200 space-y-2">
                           <strong className="text-indigo-950 uppercase flex items-center gap-1">
                             <History size={13} className="text-indigo-600" />
@@ -1555,6 +1701,55 @@ export default function StaffAndFinanceViews(props: any) {
                           )}
                         </div>
 
+                        {/* NOVO BLOCO: HISTÓRICO DE TROCAS, PERMUTAS E PASSAGENS NO ARQUIVO PESSOAL DO MÉDICO */}
+                        <div className="pt-3 border-t border-slate-200 space-y-2">
+                          <strong className="text-emerald-950 uppercase flex items-center gap-1">
+                            <ArrowLeftRight size={13} className="text-emerald-600" />
+                            Histórico de Trocas, Permutas e Passagens Realizadas ({docSwapsAudit.length})
+                          </strong>
+
+                          {docSwapsAudit.length === 0 ? (
+                            <p className="text-slate-400 italic">
+                              Nenhuma troca, permuta ou passagem vinculada a este médico.
+                            </p>
+                          ) : (
+                            <div className="space-y-1.5">
+                              {docSwapsAudit.map(sw => (
+                                <div
+                                  key={sw.id}
+                                  className="p-2.5 rounded-lg bg-emerald-50/60 border border-emerald-200 space-y-1"
+                                >
+                                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                                    <span className="font-black text-slate-900">
+                                      {formatBrDate(sw.date)} ({sw.startTime}-{sw.endTime}) •{' '}
+                                      <span className="text-emerald-900">{sw.type}</span>
+                                    </span>
+                                    <span className="px-2 py-0.5 rounded bg-white border border-emerald-300 font-extrabold text-[10px] text-emerald-900">
+                                      Papel: {sw.roleInSwap} • Status: {sw.status}
+                                    </span>
+                                  </div>
+                                  <div className="text-slate-700">
+                                    <strong>Solicitante da Troca (Titular):</strong>{' '}
+                                    <span className="font-extrabold text-slate-900">
+                                      {sw.requesterName}
+                                    </span>{' '}
+                                    → <strong>Substituição / Permuta por:</strong>{' '}
+                                    <span className="font-extrabold text-blue-900">
+                                      {sw.substituteDetail}
+                                    </span>
+                                    {sw.permutedInfo && (
+                                      <span className="block text-[10px] text-indigo-800 font-bold mt-0.5">
+                                        🔁 Plantão Permutado: {sw.permutedInfo}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+
+                        {/* Ocorrências Individuais */}
                         {isAdmin && (
                           <div className="pt-3 border-t border-slate-200 space-y-2">
                             <strong className="text-rose-950 uppercase flex items-center gap-1">
@@ -1707,7 +1902,7 @@ export default function StaffAndFinanceViews(props: any) {
                     )}
                   </div>
 
-                  {/* Funções Habilitadas (Com cor da função) */}
+                  {/* Funções Habilitadas */}
                   <div className="flex flex-wrap items-center gap-1.5 pt-1">
                     <span className="text-[11px] font-bold text-slate-500 mr-1">Funções:</span>
                     {(Array.isArray(doc.allowedFunctions) && doc.allowedFunctions.length > 0
@@ -1718,7 +1913,8 @@ export default function StaffAndFinanceViews(props: any) {
                       return (
                         <span
                           key={fn}
-                          className={`px-2.5 py-0.5 rounded-full font-bold text-[11px] ${cInfo.badgeClass}`}
+                          style={{ backgroundColor: cInfo.hex }}
+                          className="px-2.5 py-0.5 rounded-full font-bold text-[11px] text-white"
                         >
                           {fn}
                         </span>
@@ -1733,7 +1929,8 @@ export default function StaffAndFinanceViews(props: any) {
                 <div className="pt-2.5 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-500">
                   <span>
                     Plantões na escala:{' '}
-                    <strong className="text-slate-800">{docShiftsCount} turno(s)</strong>
+                    <strong className="text-slate-800">{docShiftsCount} turno(s)</strong> • Trocas:{' '}
+                    <strong className="text-emerald-700">{docSwapsAudit.length}</strong>
                   </span>
                   <span>
                     Tel: <strong className="text-slate-700">{doc.phone || '—'}</strong>
@@ -1756,6 +1953,7 @@ export default function StaffAndFinanceViews(props: any) {
     const myPayroll = safePayroll.find(
       (p: any) => Number(p?.doctor?.id) === Number(myDoc?.id)
     );
+    const mySwapsAudit = getDoctorSwapsAuditList(Number(myDoc?.id));
 
     const handleSaveMyOwnProfile = (e: React.FormEvent) => {
       e.preventDefault();
@@ -2044,6 +2242,31 @@ export default function StaffAndFinanceViews(props: any) {
                 </strong>
               </div>
             </div>
+
+            {mySwapsAudit.length > 0 && (
+              <div className="pt-4 border-t border-slate-100 space-y-2">
+                <strong className="text-emerald-950 uppercase block">
+                  🔄 Meu Histórico de Trocas, Permutas e Passagens ({mySwapsAudit.length})
+                </strong>
+                <div className="space-y-1.5">
+                  {mySwapsAudit.map(sw => (
+                    <div
+                      key={sw.id}
+                      className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex flex-wrap items-center justify-between gap-2"
+                    >
+                      <span>
+                        <strong>{formatBrDate(sw.date)}</strong> ({sw.startTime}-{sw.endTime}) •{' '}
+                        {sw.type}: Solicitante <strong>{sw.requesterName}</strong> → Substituto{' '}
+                        <strong>{sw.substituteDetail}</strong>
+                      </span>
+                      <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-900 font-bold text-[10px]">
+                        {sw.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -2429,7 +2652,6 @@ export default function StaffAndFinanceViews(props: any) {
                           )}
                         </div>
 
-                        {/* SELETOR DE COR DA FUNÇÃO (PARA ESCALA, HEATMAP E PDFs) */}
                         <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex flex-wrap items-center justify-between gap-2">
                           <span className="font-extrabold text-slate-700 text-[11px] flex items-center gap-1.5">
                             <Palette size={14} style={{ color: colorInfo.hex }} />
@@ -2470,7 +2692,6 @@ export default function StaffAndFinanceViews(props: any) {
                           )}
                         </div>
 
-                        {/* CHECKBOX: ( ) APLICAR NIVELAMENTO */}
                         <label className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-blue-50 border border-blue-200 text-blue-950 font-extrabold cursor-pointer">
                           <input
                             type="checkbox"
@@ -2486,7 +2707,6 @@ export default function StaffAndFinanceViews(props: any) {
                       </div>
                     </div>
 
-                    {/* Caixa Descritiva */}
                     <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-1.5">
                       <label className="block text-[11px] font-extrabold text-slate-700 uppercase">
                         📝 Descrição / Detalhamento da Função:
@@ -2505,7 +2725,6 @@ export default function StaffAndFinanceViews(props: any) {
                       )}
                     </div>
 
-                    {/* MODO A: SEM NIVELAMENTO */}
                     {!applyLeveling ? (
                       <div className="p-4 rounded-2xl bg-emerald-50/50 border-2 border-emerald-200 space-y-3">
                         <div className="flex items-center justify-between">
@@ -2594,7 +2813,6 @@ export default function StaffAndFinanceViews(props: any) {
                         )}
                       </div>
                     ) : (
-                      /* MODO B: COM NIVELAMENTO (NÍVEIS 1 A 4) */
                       <div className="space-y-2">
                         <span className="block font-extrabold text-slate-700 uppercase text-[11px]">
                           Valores por Nível de Senioridade (Base 12h — Fração paga proporcional):
@@ -2723,7 +2941,6 @@ export default function StaffAndFinanceViews(props: any) {
             })}
           </div>
 
-          {/* Formulário para Criar Nova Função na Tabela (Com Seletor de Cor + Checkbox "Aplicar Nivelamento") */}
           {isAdmin && (
             <form
               onSubmit={handleAddNewFunction}
@@ -2756,7 +2973,7 @@ export default function StaffAndFinanceViews(props: any) {
                   <input
                     type="text"
                     required
-                    placeholder="Ex: Plantonista Sala Vermelha"
+                    placeholder="Ex: Plantão - Cardiologia"
                     value={newFunctionForm.name}
                     onChange={e =>
                       setNewFunctionForm({ ...newFunctionForm, name: e.target.value })
@@ -3485,20 +3702,22 @@ export default function StaffAndFinanceViews(props: any) {
       });
   }
 
-  const manualPayrollRows = Object.entries(manualGroupsMap).map(([mKey, grp]) => {
-    const virtualDoc = {
-      id: mKey,
-      name: `Plantonista alocado manualmente (${grp.manualName})`,
-      crm: grp.manualCrm,
-      specialty: 'Alocação Manual Gestor',
-      razaoSocial: 'Plantonista Avulso / Manual',
-      cnpj: '—',
-      remunerationLevel: grp.level,
-      role: grp.role,
-      contractType: 'Coringa / Extra'
-    };
-    return buildDetailedPayrollEntry(mKey, virtualDoc, grp.shifts, true);
-  });
+  const manualPayrollRows = Object.entries(manualGroupsMap)
+    .sort((a, b) => a[1].manualName.localeCompare(b[1].manualName, 'pt-BR'))
+    .map(([mKey, grp]) => {
+      const virtualDoc = {
+        id: mKey,
+        name: `Plantonista alocado manualmente (${grp.manualName})`,
+        crm: grp.manualCrm,
+        specialty: 'Alocação Manual Gestor',
+        razaoSocial: 'Plantonista Avulso / Manual',
+        cnpj: '—',
+        remunerationLevel: grp.level,
+        role: grp.role,
+        contractType: 'Coringa / Extra'
+      };
+      return buildDetailedPayrollEntry(mKey, virtualDoc, grp.shifts, true);
+    });
 
   const detailedPayrollRows = [...registeredPayrollRows, ...manualPayrollRows];
 
@@ -3720,7 +3939,7 @@ export default function StaffAndFinanceViews(props: any) {
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
             Janela 26 a 25: <strong>{competenceWindow?.startStr}</strong> até{' '}
-            <strong>{competenceWindow?.endStr}</strong> • Suporta funções com ou sem nivelamento, extra Semana vs. FDS e bonificações percentuais.
+            <strong>{competenceWindow?.endStr}</strong> • Listagem em ordem alfabética, suportando funções com ou sem nivelamento e bonificações.
           </p>
         </div>
 
@@ -3762,7 +3981,7 @@ export default function StaffAndFinanceViews(props: any) {
         <table className="w-full text-left border-collapse text-xs">
           <thead>
             <tr className="bg-slate-900 text-white uppercase text-[10px]">
-              <th className="py-3 px-4">Médico / Identificação</th>
+              <th className="py-3 px-4">Médico / Identificação (A-Z)</th>
               <th className="py-3 px-3">
                 Ciclo Fixo Semanal Acumulado (Ref. 12h)
               </th>
@@ -4047,7 +4266,7 @@ export default function StaffAndFinanceViews(props: any) {
         <table className="w-full text-left border-collapse text-xs">
           <thead>
             <tr className="bg-slate-800 text-white uppercase text-[10px]">
-              <th className="py-3 px-4">Médico / Plantonista</th>
+              <th className="py-3 px-4">Médico / Plantonista (A-Z)</th>
               <th className="py-3 px-3 text-center">Total Horas na Escala</th>
               {allFunctionNames.map((fn, idx) => {
                 const cInfo = getFunctionColorInfo(fn, idx);

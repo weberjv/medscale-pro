@@ -89,6 +89,7 @@ export default function MedScaleProApp() {
 
     const mergedConfig = remote.config ? { ...DEFAULT_CONFIG, ...remote.config } : DEFAULT_CONFIG;
     const isCleared = Boolean(mergedConfig?.demoDoctorsCleared);
+    const isSwapsCleared = Boolean(mergedConfig?.demoSwapsCleared);
 
     const cleanSnapshot = {
       config: mergedConfig,
@@ -111,7 +112,11 @@ export default function MedScaleProApp() {
       announcements: Array.isArray(remote.announcements)
         ? remote.announcements
         : initialAnnouncements,
-      swaps: Array.isArray(remote.swaps) ? remote.swaps : initialSwaps,
+      swaps: Array.isArray(remote.swaps)
+        ? remote.swaps
+        : isSwapsCleared || isCleared
+        ? []
+        : initialSwaps,
       vacations: Array.isArray(remote.vacations)
         ? remote.vacations
         : isCleared
@@ -171,7 +176,9 @@ export default function MedScaleProApp() {
         if (
           cloudPayload &&
           typeof cloudPayload === 'object' &&
-          (Array.isArray(cloudPayload.doctors) || cloudPayload.config?.demoDoctorsCleared)
+          (Array.isArray(cloudPayload.doctors) ||
+            cloudPayload.config?.demoDoctorsCleared ||
+            cloudPayload.config?.demoSwapsCleared)
         ) {
           applyRemotePayload(cloudPayload);
         } else {
@@ -321,7 +328,6 @@ export default function MedScaleProApp() {
     Boolean(currentUser?.isAdmin);
   const isAdmin = isMasterAdmin ? true : canUserManage && managerViewMode === 'admin';
 
-  // Mantém currentUser sincronizado caso o médico edite o próprio perfil
   const effectiveCurrentUser = useMemo(() => {
     if (isMasterAdmin) return currentUser;
     return loggedDoctorObj ? { ...currentUser, ...loggedDoctorObj } : currentUser;
@@ -352,19 +358,32 @@ export default function MedScaleProApp() {
     return config.functionRates?.[catName]?.rules || [];
   };
 
-  const activeDoctors = useMemo(
-    () => doctors.filter(d => d.status === 'Ativo' && d.participatesInSchedule !== false),
+  // Listas de médicos sempre ordenadas alfabeticamente (A-Z)
+  const sortedDoctors = useMemo(
+    () =>
+      [...doctors].sort((a, b) =>
+        String(a?.name || '').localeCompare(String(b?.name || ''), 'pt-BR', {
+          sensitivity: 'base'
+        })
+      ),
     [doctors]
+  );
+
+  const activeDoctors = useMemo(
+    () =>
+      sortedDoctors.filter(d => d.status === 'Ativo' && d.participatesInSchedule !== false),
+    [sortedDoctors]
   );
 
   const adminDoctors = useMemo(
-    () => doctors.filter(d => d.status === 'Ativo' && d.participatesInSchedule === false),
-    [doctors]
+    () =>
+      sortedDoctors.filter(d => d.status === 'Ativo' && d.participatesInSchedule === false),
+    [sortedDoctors]
   );
 
   const pendingDoctors = useMemo(
-    () => doctors.filter(d => d.status === 'Pendente'),
-    [doctors]
+    () => sortedDoctors.filter(d => d.status === 'Pendente'),
+    [sortedDoctors]
   );
 
   const competenceWindow = useMemo(
@@ -375,7 +394,7 @@ export default function MedScaleProApp() {
   const handleToggleAdditionalOnExistingShift = (shiftId: number, additionalId: string) => {
     setShifts(prev =>
       prev.map(sh => {
-        if (sh.id !== shiftId) return sh;
+        if (String(sh.id) !== String(shiftId)) return sh;
         const curr = sh.additionals || [];
         const exists = curr.includes(additionalId);
         return {
@@ -439,7 +458,7 @@ export default function MedScaleProApp() {
       return { total, details };
     };
 
-    return doctors
+    return sortedDoctors
       .filter(d => d.status === 'Ativo')
       .map(doc => {
         const docShifts = shiftsInWindow
@@ -625,7 +644,7 @@ export default function MedScaleProApp() {
         };
       });
   }, [
-    doctors,
+    sortedDoctors,
     shifts,
     swaps,
     config,
@@ -671,7 +690,7 @@ export default function MedScaleProApp() {
     return (
       <AuthScreen
         config={config}
-        doctors={doctors}
+        doctors={sortedDoctors}
         setDoctors={setDoctors}
         onLoginSuccess={(user: any) => {
           setCurrentUser(user);
@@ -683,7 +702,6 @@ export default function MedScaleProApp() {
     );
   }
 
-  // Menu com a aba unificada "Gestão à Vista, Governança & Comunicados" para Gestor e Médicos
   const navItems = isAdmin
     ? [
         { id: 'dashboard', label: 'Painel Geral', icon: LayoutDashboard },
@@ -861,7 +879,7 @@ export default function MedScaleProApp() {
             isAdmin={isAdmin}
             isMasterAdmin={isMasterAdmin}
             currentUser={effectiveCurrentUser}
-            doctors={doctors}
+            doctors={sortedDoctors}
             setDoctors={setDoctors}
             activeDoctors={activeDoctors}
             adminDoctors={adminDoctors}
@@ -918,7 +936,7 @@ export default function MedScaleProApp() {
             isMasterAdmin={isMasterAdmin}
             currentUser={effectiveCurrentUser}
             setCurrentUser={setCurrentUser}
-            doctors={doctors}
+            doctors={sortedDoctors}
             setDoctors={setDoctors}
             activeDoctors={activeDoctors}
             adminDoctors={adminDoctors}
@@ -968,7 +986,7 @@ export default function MedScaleProApp() {
           isAdmin={isAdmin}
           isMasterAdmin={isMasterAdmin}
           currentUser={effectiveCurrentUser}
-          doctors={doctors}
+          doctors={sortedDoctors}
           setDoctors={setDoctors}
           shifts={shifts}
           setShifts={setShifts}
