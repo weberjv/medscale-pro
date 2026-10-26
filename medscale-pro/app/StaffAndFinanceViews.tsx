@@ -1,12 +1,12 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   Users, DollarSign, Sliders, Plus, Trash2, Edit3, CheckCircle,
   UserCheck, Award, Briefcase, Download, ShieldCheck, Stethoscope,
   RotateCcw, Clock, Layers, Table, FileSpreadsheet, ChevronDown,
   ChevronUp, FileText, Printer, History, ShieldAlert, Percent, Save, Palette,
-  ArrowLeftRight
+  ArrowLeftRight, AlertTriangle, CheckSquare, PlusCircle, MinusCircle
 } from 'lucide-react';
 
 export const FUNCTION_COLOR_PALETTE: Record<
@@ -135,7 +135,8 @@ export default function StaffAndFinanceViews(props: any) {
     competenceMonth = '2026-10',
     setCompetenceMonth,
     competenceWindow = { startStr: '2026-09-26', endStr: '2026-10-25' },
-    payrollReport = [],
+    doctorConferenceData = {},
+    setDoctorConferenceData,
     dynamicCategories = [],
     recordAction,
     setIsDoctorModalOpen,
@@ -161,6 +162,9 @@ export default function StaffAndFinanceViews(props: any) {
   const safeSetCompetenceMonth = (val: string) => {
     if (typeof setCompetenceMonth === 'function') setCompetenceMonth(val);
   };
+  const safeSetDoctorConference = (updater: any) => {
+    if (typeof setDoctorConferenceData === 'function') setDoctorConferenceData(updater);
+  };
   const safeRecordAction = (msg: string) => {
     if (typeof recordAction === 'function') recordAction(msg);
   };
@@ -170,34 +174,43 @@ export default function StaffAndFinanceViews(props: any) {
   };
 
   // Listas blindadas e ordenadas alfabeticamente (A-Z)
-  const safeDoctors = (Array.isArray(doctors) ? [...doctors] : []).sort((a, b) =>
-    String(a?.name || '').localeCompare(String(b?.name || ''), 'pt-BR', {
-      sensitivity: 'base'
-    })
-  );
-  const safeActiveDoctors = (
-    Array.isArray(activeDoctors) && activeDoctors.length > 0
-      ? [...activeDoctors]
-      : safeDoctors.filter((d: any) => d?.status === 'Ativo')
-  ).sort((a, b) =>
-    String(a?.name || '').localeCompare(String(b?.name || ''), 'pt-BR', {
-      sensitivity: 'base'
-    })
-  );
-  const safePendingDoctors = (
-    Array.isArray(pendingDoctors) && pendingDoctors.length > 0
-      ? [...pendingDoctors]
-      : safeDoctors.filter((d: any) => d?.status === 'Pendente')
-  ).sort((a, b) =>
-    String(a?.name || '').localeCompare(String(b?.name || ''), 'pt-BR', {
-      sensitivity: 'base'
-    })
-  );
+  const safeDoctors = useMemo(() => {
+    const raw = Array.isArray(doctors) ? [...doctors] : [];
+    return raw.sort((a, b) =>
+      String(a?.name || '').localeCompare(String(b?.name || ''), 'pt-BR', {
+        sensitivity: 'base'
+      })
+    );
+  }, [doctors]);
+
+  const safeActiveDoctors = useMemo(() => {
+    const raw =
+      Array.isArray(activeDoctors) && activeDoctors.length > 0
+        ? [...activeDoctors]
+        : safeDoctors.filter((d: any) => d?.status === 'Ativo');
+    return raw.sort((a, b) =>
+      String(a?.name || '').localeCompare(String(b?.name || ''), 'pt-BR', {
+        sensitivity: 'base'
+      })
+    );
+  }, [activeDoctors, safeDoctors]);
+
+  const safePendingDoctors = useMemo(() => {
+    const raw =
+      Array.isArray(pendingDoctors) && pendingDoctors.length > 0
+        ? [...pendingDoctors]
+        : safeDoctors.filter((d: any) => d?.status === 'Pendente');
+    return raw.sort((a, b) =>
+      String(a?.name || '').localeCompare(String(b?.name || ''), 'pt-BR', {
+        sensitivity: 'base'
+      })
+    );
+  }, [pendingDoctors, safeDoctors]);
+
   const safeShifts = Array.isArray(shifts) ? shifts : [];
   const safeSwaps = Array.isArray(swaps) ? swaps : [];
   const safeVacations = Array.isArray(vacations) ? vacations : [];
   const safeCourses = Array.isArray(courses) ? courses : [];
-  const safePayroll = Array.isArray(payrollReport) ? payrollReport : [];
 
   const resolveDoctorByIdLocal = (id: any) => {
     return safeDoctors.find((d: any) => Number(d?.id) === Number(id)) || null;
@@ -217,7 +230,6 @@ export default function StaffAndFinanceViews(props: any) {
           { id: 'esp_7', name: 'Terapia Intensiva' }
         ];
 
-  // Tipos de Cursos Cadastrados
   const registeredCourseTypes: { id: string; name: string }[] =
     Array.isArray(config?.courseTypes) && config.courseTypes.length > 0
       ? config.courseTypes
@@ -236,7 +248,6 @@ export default function StaffAndFinanceViews(props: any) {
     ])
   );
 
-  // Funções cadastradas na Tabela de Remuneração
   const functionRatesObj = config?.functionRates || {};
   const allFunctionNames =
     Object.keys(functionRatesObj).length > 0
@@ -263,7 +274,7 @@ export default function StaffAndFinanceViews(props: any) {
   const [approvalSpecialties, setApprovalSpecialties] = useState<Record<number, string>>({});
   const [expandedFichaByDocId, setExpandedFichaByDocId] = useState<Record<number, boolean>>({});
 
-  // Estados para adicionar Histórico de Trabalho e Ocorrências Individuais
+  // Estados para Histórico de Trabalho e Ocorrências Individuais
   const [historyDraftByDoc, setHistoryDraftByDoc] = useState<
     Record<number, { type: string; date: string; endDate: string; details: string }>
   >({});
@@ -278,23 +289,36 @@ export default function StaffAndFinanceViews(props: any) {
     description: '',
     colorTheme: 'blue',
     requiresSchedule: true,
-    applyLeveling: true,
+    applyLeveling: false,
+    initialLevelsCount: 1,
     fixedRate12h: 1500,
     extraWeekday12h: 1650,
     extraWeekend12h: 1850,
     monthlyFixedValue: 5000
   });
 
-  // Estado para o Catálogo Avançado de Adicionais & Bonificações
+  // Estado para o Catálogo Avançado de Adicionais & Bonificações (Suporta Múltiplas Funções de Incidência)
   const [newAdditionalForm, setNewAdditionalForm] = useState({
     name: '',
     incidence: 'shift' as 'shift' | 'monthly',
     calcMode: 'fixed' as 'fixed' | 'percent',
-    applicationTarget: 'final_payroll' as 'final_payroll' | 'specific_function' | 'shift_base',
-    targetFunctionName: allFunctionNames[0] || 'Plantonista',
+    applicationTarget: 'final_payroll' as
+      | 'final_payroll'
+      | 'specific_function'
+      | 'shift_base',
+    targetFunctionNames: [allFunctionNames[0] || 'Plantonista'] as string[],
     value12h: 250,
     percentValue: 10
   });
+
+  // Estados para a Folha PJ (Ajustes manuais e expansão de discriminação diária)
+  const [adjDraftByEntity, setAdjDraftByEntity] = useState<
+    Record<string, { type: 'add' | 'subtract'; amount: string; description: string }>
+  >({});
+  const [expandedAuditDaysByEntity, setExpandedAuditDaysByEntity] = useState<
+    Record<string, boolean>
+  >({});
+  const [doctorDivergenceNoteInput, setDoctorDivergenceNoteInput] = useState<string>('');
 
   // Estado para Edição do Próprio Cadastro pelo Médico
   const myLoggedDoc =
@@ -331,7 +355,7 @@ export default function StaffAndFinanceViews(props: any) {
   }, [myLoggedDoc?.id, currentView]);
 
   // ============================================================================
-  // HELPER DE CÁLCULO DE HORAS, DATAS E AUDITORIA DE TROCAS DO MÉDICO
+  // HELPER DE CÁLCULO DE HORAS, DATAS, NÍVEIS DINÂMICOS E TAXAS POR FUNÇÃO
   // ============================================================================
   const formatBrDate = (dateStr?: string) => {
     if (!dateStr) return '—';
@@ -340,7 +364,103 @@ export default function StaffAndFinanceViews(props: any) {
     return `${parts[2]}/${parts[1]}/${parts[0]}`;
   };
 
-  // Extrai todas as trocas, permutas e passagens em que o médico atuou como Solicitante ou Substituto/Permutante
+  const getWeekdayShortLabel = (dateStr?: string) => {
+    if (!dateStr) return '';
+    const d = new Date(`${dateStr}T12:00:00`);
+    if (isNaN(d.getTime())) return '';
+    const labels = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
+    return labels[d.getDay()] || '';
+  };
+
+  const getShiftHours = (s: any): number => {
+    if (typeof s?.hours === 'number' && s.hours > 0) return s.hours;
+    const st = String(s?.startTime || '07:00');
+    const et = String(s?.endTime || '19:00');
+    const [sh, sm] = st.split(':').map(Number);
+    const [eh, em] = et.split(':').map(Number);
+    if (isNaN(sh) || isNaN(eh)) return 12;
+    let diff = eh + (em || 0) / 60 - (sh + (sm || 0) / 60);
+    if (diff <= 0) diff += 24;
+    return Math.round(diff * 100) / 100;
+  };
+
+  const isWeekendDate = (dateStr?: string): boolean => {
+    if (!dateStr) return false;
+    const d = new Date(`${dateStr}T12:00:00`);
+    if (isNaN(d.getTime())) return false;
+    const day = d.getDay();
+    return day === 0 || day === 6;
+  };
+
+  // Retorna a lista de níveis ativos configurados naquela função (ex: [1, 2] ou [1, 2, 3, 4])
+  const getActiveLevelsForFunction = (fnObj: any): number[] => {
+    if (Array.isArray(fnObj?.activeLevels) && fnObj.activeLevels.length > 0) {
+      return [...fnObj.activeLevels].map(Number).sort((a, b) => a - b);
+    }
+    if (fnObj?.levels && typeof fnObj.levels === 'object') {
+      const extracted = Object.keys(fnObj.levels)
+        .map(k => Number(k.replace('level', '')))
+        .filter(n => !isNaN(n) && n > 0)
+        .sort((a, b) => a - b);
+      if (extracted.length > 0) return extracted;
+    }
+    return [1];
+  };
+
+  const getFunctionEffectiveRates = (fnName: string, levelNum: number) => {
+    const fnObj = functionRatesObj[fnName] || functionRatesObj[allFunctionNames[0]] || {};
+    const requiresSchedule = fnObj.requiresSchedule !== false;
+    const applyLeveling = Boolean(fnObj.applyLeveling);
+
+    if (!applyLeveling) {
+      const fixed12hRef = Number(fnObj.fixed ?? 1500);
+      const extraWeekday12hRef = Number(fnObj.extraWeekday ?? fnObj.extra ?? 1650);
+      const extraWeekend12hRef = Number(
+        fnObj.extraWeekend ?? fnObj.extraWeekday ?? (fnObj.extra ? Number(fnObj.extra) + 200 : 1850)
+      );
+      const monthlyAdminRef = Number(fnObj.monthlyFixedValue ?? fnObj.mensalFixo ?? 5000);
+      return {
+        applyLeveling: false,
+        requiresSchedule,
+        fixed12hRef,
+        extraWeekday12hRef,
+        extraWeekend12hRef,
+        monthlyAdminRef
+      };
+    }
+
+    const activeLvls = getActiveLevelsForFunction(fnObj);
+    const chosenLvl = activeLvls.includes(Number(levelNum))
+      ? Number(levelNum)
+      : activeLvls[activeLvls.length - 1] || 1;
+    const lvlKey = `level${chosenLvl}`;
+    const lvlData = fnObj?.levels?.[lvlKey] || {};
+
+    const fixed12hRef = Number(lvlData.fixed ?? fnObj.fixed ?? 1500);
+    const extraWeekday12hRef = Number(
+      lvlData.extraWeekday ?? lvlData.extra ?? fnObj.extraWeekday ?? fnObj.extra ?? 1650
+    );
+    const extraWeekend12hRef = Number(
+      lvlData.extraWeekend ??
+        lvlData.extra ??
+        fnObj.extraWeekend ??
+        fnObj.extra ??
+        extraWeekday12hRef
+    );
+    const monthlyAdminRef = Number(
+      lvlData.monthlyFixedValue ?? fnObj.monthlyFixedValue ?? fnObj.mensalFixo ?? 5000
+    );
+
+    return {
+      applyLeveling: true,
+      requiresSchedule,
+      fixed12hRef,
+      extraWeekday12hRef,
+      extraWeekend12hRef,
+      monthlyAdminRef
+    };
+  };
+
   const getDoctorSwapsAuditList = (docId: number) => {
     return safeSwaps
       .filter((sw: any) => {
@@ -363,7 +483,13 @@ export default function StaffAndFinanceViews(props: any) {
           : 'Substituto / Permutante';
 
         let coverageDetail = '';
-        if (sw.isPartialByTimeRange && Array.isArray(sw.segments) && sw.segments.length > 0) {
+        if (sw.type === 'Liberação / Dispensa Gerencial' && sw.dispenseMode === 'vacant') {
+          coverageDetail = 'Dispensado pela Gestão (Sem substituto)';
+        } else if (
+          sw.isPartialByTimeRange &&
+          Array.isArray(sw.segments) &&
+          sw.segments.length > 0
+        ) {
           coverageDetail = sw.segments
             .map((seg: any) => {
               const sDoc = resolveDoctorByIdLocal(seg.targetDoctorId);
@@ -392,77 +518,718 @@ export default function StaffAndFinanceViews(props: any) {
       });
   };
 
-  const getShiftHours = (s: any): number => {
-    if (typeof s?.hours === 'number' && s.hours > 0) return s.hours;
-    const st = String(s?.startTime || '07:00');
-    const et = String(s?.endTime || '19:00');
-    const [sh, sm] = st.split(':').map(Number);
-    const [eh, em] = et.split(':').map(Number);
-    if (isNaN(sh) || isNaN(eh)) return 12;
-    let diff = eh + (em || 0) / 60 - (sh + (sm || 0) / 60);
-    if (diff <= 0) diff += 24;
-    return Math.round(diff * 100) / 100;
-  };
-
-  const isWeekendDate = (dateStr?: string): boolean => {
-    if (!dateStr) return false;
-    const d = new Date(`${dateStr}T12:00:00`);
-    if (isNaN(d.getTime())) return false;
-    const day = d.getDay();
-    return day === 0 || day === 6;
-  };
-
-  const getFunctionEffectiveRates = (fnName: string, levelNum: number) => {
-    const fnObj = functionRatesObj[fnName] || functionRatesObj[allFunctionNames[0]] || {};
-    const requiresSchedule = fnObj.requiresSchedule !== false;
-    const applyLeveling = fnObj.applyLeveling !== false;
-
-    if (!applyLeveling) {
-      const fixed12hRef = Number(fnObj.fixed ?? 1500);
-      const extraWeekday12hRef = Number(fnObj.extraWeekday ?? fnObj.extra ?? 1650);
-      const extraWeekend12hRef = Number(
-        fnObj.extraWeekend ?? fnObj.extraWeekday ?? (fnObj.extra ? Number(fnObj.extra) + 200 : 1850)
+  // ============================================================================
+  // MOTOR CENTRAL UNIFICADO DA FOLHA PJ E AUDITORIA ANALÍTICA DE CARGA HORÁRIA
+  // (USADO TANTO NA ABA "FOLHA PJ" DO GESTOR QUANTO NO "MEU EXTRATO PJ" DO MÉDICO)
+  // ============================================================================
+  const windowShifts = useMemo(() => {
+    return safeShifts.filter((s: any) => {
+      if (!s?.date || s?.isDispensedVacant) return false;
+      const hasDoc =
+        Boolean(s?.doctorId) ||
+        Boolean(s?.isManualUnregisteredDoctor && s?.manualDoctorName);
+      if (!hasDoc) return false;
+      return (
+        s.date >= (competenceWindow?.startStr || '0000-01-01') &&
+        s.date <= (competenceWindow?.endStr || '9999-12-31')
       );
-      const monthlyAdminRef = Number(fnObj.monthlyFixedValue ?? fnObj.mensalFixo ?? 5000);
-      return {
-        applyLeveling: false,
-        requiresSchedule,
-        fixed12hRef,
-        extraWeekday12hRef,
-        extraWeekend12hRef,
-        monthlyAdminRef
+    });
+  }, [safeShifts, competenceWindow]);
+
+  const monthCustomizations = config?.payrollCustomizations?.[competenceMonth] || {};
+  const allCatalogAdditionals = Array.isArray(config?.shiftAdditionals)
+    ? config.shiftAdditionals
+    : [];
+
+  const buildDetailedPayrollEntry = (
+    entityKey: string | number,
+    docObj: any,
+    entityWindowShifts: any[],
+    isManualEntry: boolean = false
+  ) => {
+    const docLevel = Number(docObj?.remunerationLevel || 1);
+    const defaultFn = docObj?.role || allFunctionNames[0] || 'Plantonista';
+    const customDoc = monthCustomizations[entityKey] || {};
+
+    // Filtra plantões que não sejam "acerto direto sem impacto na folha" para cálculo financeiro
+    const billableShifts = entityWindowShifts.filter(
+      (s: any) => s?.substituteBillingMode !== 'direct_settlement'
+    );
+
+    // 1. Auditoria Analítica de Carga Horária (Todos os plantões efetivamente trabalhados na janela)
+    const auditByFunction: Record<
+      string,
+      {
+        fixedShifts: number;
+        fixedHours: number;
+        extraShifts: number;
+        extraHours: number;
+        totalHours: number;
+      }
+    > = {};
+    allFunctionNames.forEach(fn => {
+      auditByFunction[fn] = {
+        fixedShifts: 0,
+        fixedHours: 0,
+        extraShifts: 0,
+        extraHours: 0,
+        totalHours: 0
       };
+    });
+
+    const dailyWorkedScheduleList = [...entityWindowShifts]
+      .sort((a, b) => {
+        const dComp = String(a?.date || '').localeCompare(String(b?.date || ''));
+        if (dComp !== 0) return dComp;
+        return String(a?.startTime || '07:00').localeCompare(String(b?.startTime || '07:00'));
+      })
+      .map((s: any) => {
+        const fnName = s?.category || s?.role || defaultFn;
+        const hrs = getShiftHours(s);
+        const isFixed =
+          !isManualEntry &&
+          (s?.shiftType === 'Fixo' ||
+            s?.modality === 'Fixo' ||
+            (!s?.shiftType && !s?.modality && docObj?.contractType === 'Fixo Mensal'));
+
+        if (!auditByFunction[fnName]) {
+          auditByFunction[fnName] = {
+            fixedShifts: 0,
+            fixedHours: 0,
+            extraShifts: 0,
+            extraHours: 0,
+            totalHours: 0
+          };
+        }
+
+        if (isFixed) {
+          auditByFunction[fnName].fixedShifts += 1;
+          auditByFunction[fnName].fixedHours += hrs;
+        } else {
+          auditByFunction[fnName].extraShifts += 1;
+          auditByFunction[fnName].extraHours += hrs;
+        }
+        auditByFunction[fnName].totalHours += hrs;
+
+        return {
+          id: s.id,
+          date: s.date,
+          weekday: getWeekdayShortLabel(s.date),
+          startTime: s.startTime || '07:00',
+          endTime: s.endTime || '19:00',
+          hours: hrs,
+          functionName: fnName,
+          regime: isFixed ? 'Fixo' : 'Extra / Avulso',
+          isFromSwap: Boolean(s.isFromSwap),
+          directSettlement: s?.substituteBillingMode === 'direct_settlement'
+        };
+      });
+
+    // 2. Construção automática das Funções Exercidas na Competência (Cotas Fixas, Sem Escala e Horas Extras)
+    const autoRoleEntries: {
+      id: string;
+      functionName: string;
+      billingMode: 'monthly_no_schedule' | 'fixed_quota_monthly' | 'hourly_extra';
+      units: number;
+      hoursPerUnit: number;
+      weekdayHours: number;
+      weekendHours: number;
+    }[] = [];
+
+    // 2a. Funções Sem Escala (Administrativas/Coordenação) vinculadas ao médico
+    if (!isManualEntry) {
+      const docAllowedFns: string[] = Array.from(
+        new Set([docObj?.role, ...(docObj?.allowedFunctions || [])].filter(Boolean))
+      );
+      docAllowedFns.forEach((fnName, idx) => {
+        const fnCfg = functionRatesObj[fnName];
+        if (fnCfg && fnCfg.requiresSchedule === false) {
+          autoRoleEntries.push({
+            id: `auto_nosched_${idx}`,
+            functionName: fnName,
+            billingMode: 'monthly_no_schedule',
+            units: 1,
+            hoursPerUnit: 12,
+            weekdayHours: 0,
+            weekendHours: 0
+          });
+        }
+      });
     }
 
-    const lvlKey = `level${Math.min(4, Math.max(1, Number(levelNum || 1)))}` as
-      | 'level1'
-      | 'level2'
-      | 'level3'
-      | 'level4';
-    const lvlData = fnObj?.levels?.[lvlKey] || {};
-    const fixed12hRef = Number(lvlData.fixed ?? fnObj.fixed ?? 1500);
-    const extraWeekday12hRef = Number(
-      lvlData.extraWeekday ?? lvlData.extra ?? fnObj.extraWeekday ?? fnObj.extra ?? 1650
-    );
-    const extraWeekend12hRef = Number(
-      lvlData.extraWeekend ??
-        lvlData.extra ??
-        fnObj.extraWeekend ??
-        fnObj.extra ??
-        extraWeekday12hRef
-    );
-    const monthlyAdminRef = Number(
-      lvlData.monthlyFixedValue ?? fnObj.monthlyFixedValue ?? fnObj.mensalFixo ?? 5000
+    // 2b. Cotas Fixas Mensais (4 ou 5 semanas pagam o valor integral da cota mensal por dia da semana/turno)
+    const autoWeeklyFixedSlotsMap: Record<
+      string,
+      { functionName: string; hoursPerUnit: number; occurrences: number }
+    > = {};
+
+    // 2c. Horas Trabalhadas em Plantão Extra/Avulso agrupadas por Função
+    const autoExtraByFnMap: Record<
+      string,
+      { weekdayHours: number; weekendHours: number }
+    > = {};
+
+    billableShifts.forEach((s: any) => {
+      const fnName = s?.category || s?.role || defaultFn;
+      const hrs = getShiftHours(s);
+      const isFixedShift =
+        !isManualEntry &&
+        (s?.shiftType === 'Fixo' ||
+          s?.modality === 'Fixo' ||
+          (!s?.shiftType && !s?.modality && docObj?.contractType === 'Fixo Mensal'));
+
+      if (isFixedShift) {
+        const dObj = new Date(`${s.date}T12:00:00`);
+        const dayOfWeek = isNaN(dObj.getTime()) ? 0 : dObj.getDay();
+        const slotKey = `${fnName}__${dayOfWeek}__${s.startTime || '07:00'}__${hrs}`;
+        if (!autoWeeklyFixedSlotsMap[slotKey]) {
+          autoWeeklyFixedSlotsMap[slotKey] = {
+            functionName: fnName,
+            hoursPerUnit: hrs,
+            occurrences: 0
+          };
+        }
+        autoWeeklyFixedSlotsMap[slotKey].occurrences += 1;
+      } else {
+        if (!autoExtraByFnMap[fnName]) {
+          autoExtraByFnMap[fnName] = { weekdayHours: 0, weekendHours: 0 };
+        }
+        if (isWeekendDate(s.date)) {
+          autoExtraByFnMap[fnName].weekendHours += hrs;
+        } else {
+          autoExtraByFnMap[fnName].weekdayHours += hrs;
+        }
+      }
+    });
+
+    const groupedAutoQuotas: Record<
+      string,
+      { functionName: string; hoursPerUnit: number; units: number }
+    > = {};
+    Object.values(autoWeeklyFixedSlotsMap).forEach(slot => {
+      const gKey = `${slot.functionName}__${slot.hoursPerUnit}`;
+      if (!groupedAutoQuotas[gKey]) {
+        groupedAutoQuotas[gKey] = {
+          functionName: slot.functionName,
+          hoursPerUnit: slot.hoursPerUnit,
+          units: 0
+        };
+      }
+      groupedAutoQuotas[gKey].units += 1;
+    });
+
+    Object.values(groupedAutoQuotas).forEach((q, idx) => {
+      autoRoleEntries.push({
+        id: `auto_fixed_${idx}`,
+        functionName: q.functionName,
+        billingMode: 'fixed_quota_monthly',
+        units: q.units,
+        hoursPerUnit: q.hoursPerUnit,
+        weekdayHours: 0,
+        weekendHours: 0
+      });
+    });
+
+    Object.entries(autoExtraByFnMap).forEach(([fnName, hrsObj], idx) => {
+      autoRoleEntries.push({
+        id: `auto_extra_${idx}`,
+        functionName: fnName,
+        billingMode: 'hourly_extra',
+        units: 1,
+        hoursPerUnit: 12,
+        weekdayHours: hrsObj.weekdayHours,
+        weekendHours: hrsObj.weekendHours
+      });
+    });
+
+    const hasCustomRoleEntries = Array.isArray(customDoc.roleEntries);
+    const activeRoleEntries = hasCustomRoleEntries
+      ? customDoc.roleEntries
+      : autoRoleEntries;
+
+    // Avaliação financeira de cada função exercida + mapa de remuneração por função
+    const remunerationByFunctionMap: Record<string, number> = {};
+    let functionsSubtotal = 0;
+
+    // Conta dispensas abonadas na janela para este médico
+    const abonadaDispensesCount = safeSwaps.filter(
+      (sw: any) =>
+        sw?.status === 'Aprovado' &&
+        sw?.type === 'Liberação / Dispensa Gerencial' &&
+        Number(sw?.requesterId) === Number(docObj?.id) &&
+        sw?.financialDispenseType !== 'desconto' &&
+        sw?.date >= competenceWindow.startStr &&
+        sw?.date <= competenceWindow.endStr
+    ).length;
+
+    const evaluatedRoleEntries = activeRoleEntries.map((entry: any) => {
+      const rates = getFunctionEffectiveRates(entry.functionName, docLevel);
+      let lineTotal = 0;
+
+      if (entry.billingMode === 'monthly_no_schedule') {
+        lineTotal = Number(entry.units || 1) * rates.monthlyAdminRef;
+      } else if (entry.billingMode === 'fixed_quota_monthly') {
+        const unitProp = rates.fixed12hRef * (Number(entry.hoursPerUnit || 12) / 12);
+        lineTotal = Number(entry.units || 0) * unitProp;
+      } else {
+        const wkVal = rates.extraWeekday12hRef * (Number(entry.weekdayHours || 0) / 12);
+        const fdVal = rates.extraWeekend12hRef * (Number(entry.weekendHours || 0) / 12);
+        lineTotal = wkVal + fdVal;
+      }
+
+      functionsSubtotal += lineTotal;
+      remunerationByFunctionMap[entry.functionName] =
+        (remunerationByFunctionMap[entry.functionName] || 0) + lineTotal;
+
+      const fnAudit = auditByFunction[entry.functionName] || {
+        fixedShifts: 0,
+        fixedHours: 0,
+        extraShifts: 0,
+        extraHours: 0,
+        totalHours: 0
+      };
+
+      return {
+        ...entry,
+        rates,
+        lineTotal,
+        fulfilledFixedShifts: fnAudit.fixedShifts,
+        fulfilledFixedHours: fnAudit.fixedHours,
+        fulfilledExtraHours: fnAudit.extraHours,
+        abonadaDispensesCount
+      };
+    });
+
+    // 3. Adicionais e Bonificações Acumuláveis por Quantidade de Competências (1x, 2x, 3x...)
+    const autoAdditionalCounts: Record<string, number> = {};
+    allCatalogAdditionals.forEach((add: any) => {
+      if (add.incidence === 'monthly') {
+        const docMonthly: string[] = Array.isArray(docObj?.monthlyAdditionals)
+          ? docObj.monthlyAdditionals
+          : [];
+        autoAdditionalCounts[add.id] = docMonthly.includes(add.id) ? 1 : 0;
+      } else {
+        const countInShifts = billableShifts.filter(
+          (s: any) => Array.isArray(s?.additionals) && s.additionals.includes(add.id)
+        ).length;
+        autoAdditionalCounts[add.id] = countInShifts;
+      }
+    });
+
+    const customAddCounts: Record<string, number> = customDoc.additionalCounts || {};
+    let additionalsSubtotal = 0;
+
+    const evaluatedAdditionals = allCatalogAdditionals.map((add: any) => {
+      const count =
+        customAddCounts[add.id] !== undefined
+          ? Number(customAddCounts[add.id])
+          : Number(autoAdditionalCounts[add.id] || 0);
+
+      const targetFns: string[] =
+        Array.isArray(add.targetFunctionNames) && add.targetFunctionNames.length > 0
+          ? add.targetFunctionNames
+          : add.targetFunctionName
+          ? [add.targetFunctionName]
+          : [defaultFn];
+
+      let singleCompetenceValue = 0;
+      if (add.calcMode === 'percent') {
+        const pct = Number(add.percentValue || 0);
+        if (add.applicationTarget === 'specific_function') {
+          const sumTargetFns = targetFns.reduce(
+            (acc, fn) => acc + Number(remunerationByFunctionMap[fn] || 0),
+            0
+          );
+          const fallbackBase =
+            sumTargetFns > 0
+              ? sumTargetFns
+              : getFunctionEffectiveRates(targetFns[0], docLevel).fixed12hRef;
+          singleCompetenceValue = (fallbackBase * pct) / 100;
+        } else if (add.applicationTarget === 'final_payroll') {
+          singleCompetenceValue = (functionsSubtotal * pct) / 100;
+        } else {
+          const base12h = getFunctionEffectiveRates(defaultFn, docLevel).fixed12hRef;
+          singleCompetenceValue = (base12h * pct) / 100;
+        }
+      } else {
+        singleCompetenceValue = Number(add.value12h || 0);
+      }
+
+      const totalAmount = count * singleCompetenceValue;
+      additionalsSubtotal += totalAmount;
+
+      return {
+        ...add,
+        targetFns,
+        count,
+        singleCompetenceValue,
+        totalAmount
+      };
+    });
+
+    // 4. Descontos sobre Passagens de Plantão (Incluindo Nível Inferior) e Dispensas Não Remuneradas
+    const doctorPassagensInWindow = safeSwaps.filter((sw: any) => {
+      if (sw?.status !== 'Aprovado') return false;
+      if (Number(sw?.requesterId) !== Number(docObj?.id)) return false;
+      const d = String(sw?.date || sw?.shiftDate || '');
+      if (d < competenceWindow.startStr || d > competenceWindow.endStr) return false;
+      if (
+        sw?.type === 'Liberação / Dispensa Gerencial' &&
+        sw?.financialDispenseType === 'abonada'
+      ) {
+        return false;
+      }
+      return true;
+    });
+
+    const swapDiscountConfigs = customDoc.swapDiscounts || {};
+    let totalPassagensDiscounts = 0;
+
+    const evaluatedPassagensDiscounts = doctorPassagensInWindow.map((sw: any) => {
+      const subDoc = resolveDoctorByIdLocal(sw.targetDoctorId);
+      const subLevel = Number(subDoc?.remunerationLevel || 1);
+      const isLowerLevel = subLevel < docLevel;
+      const fnName = sw.category || defaultFn;
+      const hrs = getShiftHours({ startTime: sw.startTime || '07:00', endTime: sw.endTime || '19:00' });
+
+      const titularRates = getFunctionEffectiveRates(fnName, docLevel);
+      const subRates = getFunctionEffectiveRates(fnName, subLevel);
+
+      const fullShiftValue = titularRates.fixed12hRef * (hrs / 12);
+      const subShiftValue = subRates.fixed12hRef * (hrs / 12);
+      const levelDiffValue = Math.max(0, fullShiftValue - subShiftValue);
+
+      const defaultMode =
+        sw.type === 'Liberação / Dispensa Gerencial' &&
+        sw.financialDispenseType === 'desconto'
+          ? 'full'
+          : 'none';
+
+      const cfg = swapDiscountConfigs[sw.id] || {
+        mode: defaultMode as 'none' | 'full' | 'level_diff' | 'fraction' | 'custom',
+        fractionPercent: 50,
+        customAmount: levelDiffValue > 0 ? levelDiffValue : fullShiftValue
+      };
+
+      let discountApplied = 0;
+      if (cfg.mode === 'full') {
+        discountApplied = fullShiftValue;
+      } else if (cfg.mode === 'level_diff') {
+        discountApplied = levelDiffValue > 0 ? levelDiffValue : fullShiftValue * 0.15;
+      } else if (cfg.mode === 'fraction') {
+        discountApplied = (fullShiftValue * Number(cfg.fractionPercent || 50)) / 100;
+      } else if (cfg.mode === 'custom') {
+        discountApplied = Math.max(0, Number(cfg.customAmount || 0));
+      }
+
+      totalPassagensDiscounts += discountApplied;
+
+      return {
+        swapId: sw.id,
+        date: sw.date,
+        startTime: sw.startTime || '07:00',
+        endTime: sw.endTime || '19:00',
+        hours: hrs,
+        functionName: fnName,
+        type: sw.type || 'Passagem de Plantão',
+        substituteName:
+          sw.type === 'Liberação / Dispensa Gerencial' && sw.dispenseMode === 'vacant'
+            ? 'Dispensado s/ Substituto'
+            : subDoc?.name || 'Substituto',
+        titularLevel: docLevel,
+        substituteLevel: subLevel,
+        isLowerLevel,
+        fullShiftValue,
+        levelDiffValue,
+        mode: cfg.mode,
+        fractionPercent: cfg.fractionPercent ?? 50,
+        customAmount: cfg.customAmount ?? 0,
+        discountApplied
+      };
+    });
+
+    // 5. Ajustes Manuais de Correção (+ Adicionar ou - Subtrair Valor)
+    const manualAdjustmentsList: {
+      id: string;
+      type: 'add' | 'subtract';
+      amount: number;
+      description: string;
+    }[] = Array.isArray(customDoc.manualAdjustments) ? customDoc.manualAdjustments : [];
+
+    const manualAdjustmentsNet = manualAdjustmentsList.reduce(
+      (acc, adj) =>
+        acc + (adj.type === 'subtract' ? -Number(adj.amount || 0) : Number(adj.amount || 0)),
+      0
     );
 
-    return {
-      applyLeveling: true,
-      requiresSchedule,
-      fixed12hRef,
-      extraWeekday12hRef,
-      extraWeekend12hRef,
-      monthlyAdminRef
+    const netTotalCalculated =
+      functionsSubtotal +
+      additionalsSubtotal +
+      manualAdjustmentsNet -
+      totalPassagensDiscounts;
+
+    const totalFulfilledHours = entityWindowShifts.reduce(
+      (acc: number, s: any) => acc + getShiftHours(s),
+      0
+    );
+
+    const confKey = `${competenceMonth}__${docObj?.id}`;
+    const conferenceStatus = doctorConferenceData?.[confKey] || {
+      checked: false,
+      checkedAt: '',
+      errorNote: ''
     };
+
+    return {
+      entityKey,
+      isManualEntry,
+      doctor: docObj,
+      docLevel,
+      shiftsCount: entityWindowShifts.length,
+      totalFulfilledHours,
+      dailyWorkedScheduleList,
+      evaluatedRoleEntries,
+      activeRoleEntries,
+      functionsSubtotal,
+      evaluatedAdditionals,
+      additionalsSubtotal,
+      evaluatedPassagensDiscounts,
+      totalPassagensDiscounts,
+      manualAdjustmentsList,
+      manualAdjustmentsNet,
+      netTotal: netTotalCalculated,
+      auditByFunction,
+      conferenceStatus,
+      isCustomized:
+        hasCustomRoleEntries ||
+        Object.keys(customAddCounts).length > 0 ||
+        Object.keys(swapDiscountConfigs).length > 0 ||
+        manualAdjustmentsList.length > 0
+    };
+  };
+
+  // Constrói todas as linhas para o Gestor e também a linha espelhada do próprio Médico logado
+  const allActivePayrollRows = useMemo(() => {
+    const regRows = safeActiveDoctors.map(doc => {
+      const docWindowShifts = windowShifts.filter(
+        (s: any) => !s?.isManualUnregisteredDoctor && Number(s?.doctorId) === Number(doc.id)
+      );
+      return buildDetailedPayrollEntry(Number(doc.id), doc, docWindowShifts, false);
+    });
+
+    const manualGroupsMap: Record<
+      string,
+      { manualName: string; manualCrm: string; level: number; role: string; shifts: any[] }
+    > = {};
+
+    windowShifts
+      .filter((s: any) => Boolean(s?.isManualUnregisteredDoctor && s?.manualDoctorName))
+      .forEach((s: any) => {
+        const cleanName = String(s.manualDoctorName).trim();
+        const key = `manual__${cleanName.toLowerCase()}`;
+        if (!manualGroupsMap[key]) {
+          manualGroupsMap[key] = {
+            manualName: cleanName,
+            manualCrm: s.manualDoctorCrm || 'Alocação Manual',
+            level: Number(s.manualDoctorLevel || 1),
+            role: s.category || allFunctionNames[0] || 'Plantonista',
+            shifts: []
+          };
+        }
+        manualGroupsMap[key].shifts.push(s);
+      });
+
+    const manRows = Object.entries(manualGroupsMap)
+      .sort((a, b) => a[1].manualName.localeCompare(b[1].manualName, 'pt-BR'))
+      .map(([mKey, grp]) => {
+        const virtualDoc = {
+          id: mKey,
+          name: `Plantonista alocado manualmente (${grp.manualName})`,
+          crm: grp.manualCrm,
+          specialty: 'Alocação Manual Gestor',
+          razaoSocial: 'Plantonista Avulso / Manual',
+          cnpj: '—',
+          remunerationLevel: grp.level,
+          role: grp.role,
+          contractType: 'Coringa / Extra'
+        };
+        return buildDetailedPayrollEntry(mKey, virtualDoc, grp.shifts, true);
+      });
+
+    return [...regRows, ...manRows];
+  }, [
+    safeActiveDoctors,
+    windowShifts,
+    config,
+    competenceMonth,
+    safeSwaps,
+    doctorConferenceData
+  ]);
+
+  const detailedPayrollRows = useMemo(() => {
+    if (isAdmin) return allActivePayrollRows;
+    return allActivePayrollRows.filter(
+      r => !r.isManualEntry && Number(r.doctor?.id) === Number(currentUser?.id)
+    );
+  }, [allActivePayrollRows, isAdmin, currentUser?.id]);
+
+  // ============================================================================
+  // GERADOR PDF: DOCUMENTO ANALÍTICO DE AUDITORIA DE CARGA HORÁRIA DO HOSPITAL
+  // (E ESPELHO INDIVIDUAL DE PRODUÇÃO PJ DO MÉDICO)
+  // ============================================================================
+  const handleDownloadAnalyticalWorkloadAuditPDF = (singleDoctorRow?: any) => {
+    if (typeof window === 'undefined') return;
+    const todayStr = new Date().toISOString().split('T')[0];
+    const rowsToPrint = singleDoctorRow ? [singleDoctorRow] : detailedPayrollRows;
+
+    const doctorsBlocksHtml = rowsToPrint
+      .map(row => {
+        const d = row.doctor || {};
+
+        const fnSummaryPills = allFunctionNames
+          .map(fn => {
+            const aud = row.auditByFunction[fn];
+            if (!aud || aud.totalHours <= 0) return '';
+            return `
+              <span style="display:inline-block;margin:2px 6px 2px 0;padding:3px 8px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:4px;font-size:9.5px;">
+                <strong>${fn}:</strong> ${aud.totalHours}h totais (${aud.fixedHours}h Fixas | ${aud.extraHours}h Extras)
+              </span>
+            `;
+          })
+          .filter(Boolean)
+          .join('');
+
+        const dailyRowsHtml =
+          row.dailyWorkedScheduleList.length === 0
+            ? `<tr><td colspan="5" style="padding:6px;text-align:center;color:#64748b;">Nenhum plantão registado na escala neste período.</td></tr>`
+            : row.dailyWorkedScheduleList
+                .map(
+                  (sh: any) => `
+                  <tr>
+                    <td style="padding:4px 8px;border:1px solid #cbd5e1;font-weight:bold;">
+                      ${formatBrDate(sh.date)} (${sh.weekday})
+                    </td>
+                    <td style="padding:4px 8px;border:1px solid #cbd5e1;font-weight:bold;">
+                      ${sh.startTime} às ${sh.endTime}
+                    </td>
+                    <td style="padding:4px 8px;border:1px solid #cbd5e1;text-align:center;font-weight:bold;">
+                      ${sh.hours}h
+                    </td>
+                    <td style="padding:4px 8px;border:1px solid #cbd5e1;font-weight:bold;">
+                      ${sh.functionName}
+                    </td>
+                    <td style="padding:4px 8px;border:1px solid #cbd5e1;">
+                      ${sh.regime} ${sh.isFromSwap ? '🔄 (Troca/Substituição)' : ''}
+                    </td>
+                  </tr>
+                `
+                )
+                .join('');
+
+        const financialSummaryHtml = singleDoctorRow
+          ? `
+            <div style="margin-top:6px;padding:6px 10px;background:#ecfdf5;border:1px solid #6ee7b7;border-radius:6px;font-size:10px;">
+              <strong>Resumo Financeiro PJ (${competenceMonth}):</strong>
+              Funções: R$ ${row.functionsSubtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} |
+              Adicionais: + R$ ${row.additionalsSubtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} |
+              Descontos Passagens: - R$ ${row.totalPassagensDiscounts.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} |
+              Ajustes: R$ ${row.manualAdjustmentsNet.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} →
+              <strong style="color:#065f46;font-size:11px;">Líquido Final: R$ ${row.netTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong>
+            </div>
+          `
+          : '';
+
+        return `
+          <div style="margin-bottom:14px;padding:10px;border:1px solid #94a3b8;border-radius:6px;page-break-inside:avoid;">
+            <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #cbd5e1;padding-bottom:5px;margin-bottom:6px;">
+              <div>
+                <strong style="font-size:12px;text-transform:uppercase;">${d.name}</strong>
+                <span style="color:#475569;font-size:10px;margin-left:8px;">
+                  ${d.crm || ''} • ${d.specialty || 'Clínica Médica'} • Nível ${row.docLevel}
+                </span>
+              </div>
+              <div style="background:#0f172a;color:#ffffff;padding:3px 10px;border-radius:4px;font-weight:bold;font-size:10.5px;">
+                Total Cumprido: ${row.totalFulfilledHours}h (${row.shiftsCount} plantões)
+              </div>
+            </div>
+
+            <div style="margin-bottom:6px;">
+              <strong style="font-size:9.5px;text-transform:uppercase;color:#334155;display:block;margin-bottom:2px;">
+                Carga Horária Acumulada por Função na Competência:
+              </strong>
+              ${fnSummaryPills || '<span style="color:#94a3b8;font-size:9.5px;">Sem horas alocadas por função.</span>'}
+            </div>
+
+            <table style="width:100%;border-collapse:collapse;font-size:9.5px;">
+              <thead>
+                <tr style="background:#f1f5f9;text-align:left;">
+                  <th style="padding:4px 8px;border:1px solid #cbd5e1;width:20%;">Data / Dia</th>
+                  <th style="padding:4px 8px;border:1px solid #cbd5e1;width:18%;">Horário Exercido</th>
+                  <th style="padding:4px 8px;border:1px solid #cbd5e1;width:10%;text-align:center;">Carga Horária</th>
+                  <th style="padding:4px 8px;border:1px solid #cbd5e1;width:30%;">Função Exercida</th>
+                  <th style="padding:4px 8px;border:1px solid #cbd5e1;">Modalidade / Origem</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${dailyRowsHtml}
+              </tbody>
+            </table>
+            ${financialSummaryHtml}
+          </div>
+        `;
+      })
+      .join('');
+
+    const html = `
+      <!DOCTYPE html>
+      <html lang="pt-BR">
+      <head>
+        <meta charset="UTF-8" />
+        <title>Auditoria Analitica de Carga Horaria - ${competenceMonth}</title>
+        <style>
+          @page { size: A4 portrait; margin: 10mm; }
+          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; box-sizing: border-box; }
+          body { font-family: Arial, Helvetica, sans-serif; color: #0f172a; margin: 0; padding: 0; font-size: 10px; }
+        </style>
+      </head>
+      <body>
+        <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #0f172a;padding-bottom:6px;margin-bottom:12px;">
+          <div>
+            <h1 style="margin:0;font-size:15px;text-transform:uppercase;">
+              ${config?.appName || 'MedScale Pro'} — ${config?.sectorUnitName || 'Emergência Adulta - HGD'}
+            </h1>
+            <p style="margin:2px 0 0 0;font-size:10px;color:#475569;">
+              ${
+                singleDoctorRow
+                  ? `Espelho Individual de Produção PJ & Auditoria Analítica de Carga Horária`
+                  : `Relatório Oficial de Auditoria Analítica de Carga Horária (Por Função, Dia e Horário Exercido)`
+              }
+            </p>
+          </div>
+          <div style="text-align:right;">
+            <strong style="font-size:12px;display:block;">COMPETÊNCIA: ${competenceMonth}</strong>
+            <span style="font-size:9px;color:#475569;">Janela: ${formatBrDate(competenceWindow.startStr)} a ${formatBrDate(competenceWindow.endStr)}</span>
+          </div>
+        </div>
+
+        ${doctorsBlocksHtml}
+
+        <script>
+          window.onload = function() { window.print(); };
+        </script>
+      </body>
+      </html>
+    `;
+
+    const win = window.open('', '_blank');
+    if (win) {
+      win.document.open();
+      win.document.write(html);
+      win.document.close();
+    }
+    safeRecordAction(
+      `Documento Analítico de Auditoria de Carga Horária (${competenceMonth}) emitido em PDF`
+    );
   };
 
   // ============================================================================
@@ -614,10 +1381,6 @@ export default function StaffAndFinanceViews(props: any) {
     );
   };
 
-  // ============================================================================
-  // GERADOR DE DOCUMENTO INDIVIDUAL DO PLANTONISTA (PDF / IMPRESSÃO COMPLETA)
-  // (AGORA COM HISTÓRICO DE TROCAS, PERMUTAS E PASSAGENS EXPLICITANDO SOLICITANTE E SUBSTITUTO)
-  // ============================================================================
   const handleDownloadIndividualDoctorDossier = (doc: any) => {
     if (typeof window === 'undefined' || !doc) return;
     const todayStr = new Date().toISOString().split('T')[0];
@@ -792,7 +1555,7 @@ export default function StaffAndFinanceViews(props: any) {
           </tbody>
         </table>
 
-        <div class="section-title">3. Histórico de Trocas, Permutas e Passagens Realizadas (Auditoria Nominal)</div>
+        <div class="section-title">3. Histórico de Trocas, Permutas e Passagens Realizadas</div>
         <table>
           <thead>
             <tr style="background:#f1f5f9;">
@@ -807,7 +1570,7 @@ export default function StaffAndFinanceViews(props: any) {
           </tbody>
         </table>
 
-        <div class="section-title">4. Registos de Férias e Licenças no Sistema (e Substitutos)</div>
+        <div class="section-title">4. Registos de Férias e Licenças no Sistema</div>
         <table>
           <thead>
             <tr style="background:#f1f5f9;">
@@ -821,7 +1584,7 @@ export default function StaffAndFinanceViews(props: any) {
           </tbody>
         </table>
 
-        <div class="section-title">5. Certificações e Cursos (ACLS, ATLS, PALS, etc.)</div>
+        <div class="section-title">5. Certificações e Cursos</div>
         <table>
           <thead>
             <tr style="background:#f1f5f9;">
@@ -866,7 +1629,7 @@ export default function StaffAndFinanceViews(props: any) {
   };
 
   // ============================================================================
-  // APROVAÇÃO, EXCLUSÃO E EXPORTAÇÃO XLS DE TODA A EQUIPA (+ TROCAS/PERMUTAS)
+  // APROVAÇÃO, EXCLUSÃO E EXPORTAÇÃO XLS DE TODA A EQUIPA
   // ============================================================================
   const handleApprovePendingDoctor = (doc: any) => {
     if (!isAdmin) return;
@@ -1150,10 +1913,10 @@ export default function StaffAndFinanceViews(props: any) {
               <th style="background:#0f172a;color:#ffffff;padding:8px;">CNPJ</th>
               <th style="background:#0f172a;color:#ffffff;padding:8px;">E-mail</th>
               <th style="background:#0f172a;color:#ffffff;padding:8px;">Telefone / WhatsApp</th>
-              <th style="background:#312e81;color:#ffffff;padding:8px;">Histórico de Trabalho (Início Função / Mudança Carga / Férias Passadas)</th>
-              <th style="background:#065f46;color:#ffffff;padding:8px;">Histórico de Trocas, Permutas e Passagens (Solicitante / Substituto)</th>
-              <th style="background:#312e81;color:#ffffff;padding:8px;">Férias e Licenças no Sistema (e Substitutos)</th>
-              <th style="background:#7f1d1d;color:#ffffff;padding:8px;">Ocorrências Individuais Registadas</th>
+              <th style="background:#312e81;color:#ffffff;padding:8px;">Histórico de Trabalho</th>
+              <th style="background:#065f46;color:#ffffff;padding:8px;">Histórico de Trocas, Permutas e Passagens</th>
+              <th style="background:#312e81;color:#ffffff;padding:8px;">Férias e Licenças no Sistema</th>
+              <th style="background:#7f1d1d;color:#ffffff;padding:8px;">Ocorrências Individuais</th>
               ${courseHeadersHtml}
             </tr>
           </thead>
@@ -1175,9 +1938,7 @@ export default function StaffAndFinanceViews(props: any) {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
-    safeRecordAction(
-      'Planilha completa da equipa (com cursos, histórico de trabalho, trocas/permutas e ocorrências individuais) exportada (.XLS)'
-    );
+    safeRecordAction('Planilha completa da equipa (.XLS) exportada pelo gestor');
   };
 
   // ============================================================================
@@ -1328,6 +2089,7 @@ export default function StaffAndFinanceViews(props: any) {
                           <option value={2}>Nível 2</option>
                           <option value={3}>Nível 3</option>
                           <option value={4}>Nível 4</option>
+                          <option value={5}>Nível 5</option>
                         </select>
                       </div>
 
@@ -1384,7 +2146,7 @@ export default function StaffAndFinanceViews(props: any) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {filteredActiveDocs.map((doc: any) => {
             const docShiftsCount = safeShifts.filter(
-              (s: any) => Number(s?.doctorId) === Number(doc.id)
+              (s: any) => Number(s?.doctorId) === Number(doc.id) && !s?.isDispensedVacant
             ).length;
             const docCoursesList = safeCourses.filter(
               (c: any) => Number(c?.doctorId) === Number(doc.id)
@@ -1447,7 +2209,6 @@ export default function StaffAndFinanceViews(props: any) {
                           type="button"
                           onClick={() => handleDownloadIndividualDoctorDossier(doc)}
                           className="px-2.5 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold flex items-center gap-1"
-                          title="Baixar documento individual completo deste plantonista (PDF/Impressão)"
                         >
                           <Printer size={13} /> Baixar Doc Individual
                         </button>
@@ -1462,7 +2223,6 @@ export default function StaffAndFinanceViews(props: any) {
                           type="button"
                           onClick={() => handleDeleteSingleDoctor(doc)}
                           className="p-1.5 rounded-xl bg-red-50 hover:bg-red-100 text-red-600"
-                          title="Excluir médico"
                         >
                           <Trash2 size={14} />
                         </button>
@@ -1512,10 +2272,11 @@ export default function StaffAndFinanceViews(props: any) {
                           }
                           className="w-full border-2 border-blue-300 rounded-lg px-2.5 py-1.5 bg-blue-50/50 font-black text-blue-950"
                         >
-                          <option value={1}>Nível 1</option>
-                          <option value={2}>Nível 2</option>
-                          <option value={3}>Nível 3</option>
-                          <option value={4}>Nível 4</option>
+                          {[1, 2, 3, 4, 5, 6].map(n => (
+                            <option key={n} value={n}>
+                              Nível {n}
+                            </option>
+                          ))}
                         </select>
                       ) : (
                         <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-blue-100 text-blue-900 font-black">
@@ -1590,7 +2351,7 @@ export default function StaffAndFinanceViews(props: any) {
                         <div className="pt-3 border-t border-slate-200 space-y-2">
                           <strong className="text-indigo-950 uppercase flex items-center gap-1">
                             <History size={13} className="text-indigo-600" />
-                            Histórico de Trabalho (Início de Função, Mudança de Carga Horária, Férias Passadas)
+                            Histórico de Trabalho
                           </strong>
 
                           {workHistoryList.length === 0 ? (
@@ -1679,7 +2440,7 @@ export default function StaffAndFinanceViews(props: any) {
                               <div className="flex gap-2">
                                 <input
                                   type="text"
-                                  placeholder="Detalhes (ex: Assumiu 24h semanais / Férias gozadas)..."
+                                  placeholder="Detalhes..."
                                   value={whDraft.details}
                                   onChange={e =>
                                     setHistoryDraftByDoc(prev => ({
@@ -1694,18 +2455,18 @@ export default function StaffAndFinanceViews(props: any) {
                                   onClick={() => handleAddDoctorWorkHistory(doc.id, doc.name)}
                                   className="bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1 rounded-lg font-bold shrink-0"
                                 >
-                                  + Adicionar Histórico
+                                  + Histórico
                                 </button>
                               </div>
                             </div>
                           )}
                         </div>
 
-                        {/* NOVO BLOCO: HISTÓRICO DE TROCAS, PERMUTAS E PASSAGENS NO ARQUIVO PESSOAL DO MÉDICO */}
+                        {/* Histórico de Trocas */}
                         <div className="pt-3 border-t border-slate-200 space-y-2">
                           <strong className="text-emerald-950 uppercase flex items-center gap-1">
                             <ArrowLeftRight size={13} className="text-emerald-600" />
-                            Histórico de Trocas, Permutas e Passagens Realizadas ({docSwapsAudit.length})
+                            Histórico de Trocas, Permutas e Passagens ({docSwapsAudit.length})
                           </strong>
 
                           {docSwapsAudit.length === 0 ? (
@@ -1725,23 +2486,12 @@ export default function StaffAndFinanceViews(props: any) {
                                       <span className="text-emerald-900">{sw.type}</span>
                                     </span>
                                     <span className="px-2 py-0.5 rounded bg-white border border-emerald-300 font-extrabold text-[10px] text-emerald-900">
-                                      Papel: {sw.roleInSwap} • Status: {sw.status}
+                                      {sw.roleInSwap} • {sw.status}
                                     </span>
                                   </div>
                                   <div className="text-slate-700">
-                                    <strong>Solicitante da Troca (Titular):</strong>{' '}
-                                    <span className="font-extrabold text-slate-900">
-                                      {sw.requesterName}
-                                    </span>{' '}
-                                    → <strong>Substituição / Permuta por:</strong>{' '}
-                                    <span className="font-extrabold text-blue-900">
-                                      {sw.substituteDetail}
-                                    </span>
-                                    {sw.permutedInfo && (
-                                      <span className="block text-[10px] text-indigo-800 font-bold mt-0.5">
-                                        🔁 Plantão Permutado: {sw.permutedInfo}
-                                      </span>
-                                    )}
+                                    <strong>Solicitante:</strong> {sw.requesterName} →{' '}
+                                    <strong>Substituto/Permutante:</strong> {sw.substituteDetail}
                                   </div>
                                 </div>
                               ))}
@@ -1754,42 +2504,34 @@ export default function StaffAndFinanceViews(props: any) {
                           <div className="pt-3 border-t border-slate-200 space-y-2">
                             <strong className="text-rose-950 uppercase flex items-center gap-1">
                               <ShieldAlert size={13} className="text-rose-600" />
-                              Ocorrências Individuais deste Plantonista ({indOccList.length})
+                              Ocorrências Individuais ({indOccList.length})
                             </strong>
 
-                            {indOccList.length === 0 ? (
-                              <p className="text-slate-400 italic">
-                                Nenhuma ocorrência individual registada.
-                              </p>
-                            ) : (
-                              <div className="space-y-1">
-                                {indOccList.map((oc: any) => (
-                                  <div
-                                    key={oc.id}
-                                    className="p-2 rounded-lg bg-rose-50/70 border border-rose-200 flex items-center justify-between gap-2"
-                                  >
-                                    <div>
-                                      <span className="px-1.5 py-0.5 rounded bg-rose-700 text-white font-black text-[9px] uppercase mr-1.5">
-                                        {oc.severity}
-                                      </span>
-                                      <strong className="text-slate-900">
-                                        {formatBrDate(oc.date)} — {oc.title}:
-                                      </strong>{' '}
-                                      <span className="text-slate-700">{oc.description}</span>
-                                    </div>
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        handleRemoveDoctorIndividualOccurrence(doc.id, oc.id)
-                                      }
-                                      className="text-slate-400 hover:text-red-600"
-                                    >
-                                      <Trash2 size={12} />
-                                    </button>
-                                  </div>
-                                ))}
+                            {indOccList.map((oc: any) => (
+                              <div
+                                key={oc.id}
+                                className="p-2 rounded-lg bg-rose-50/70 border border-rose-200 flex items-center justify-between gap-2"
+                              >
+                                <div>
+                                  <span className="px-1.5 py-0.5 rounded bg-rose-700 text-white font-black text-[9px] uppercase mr-1.5">
+                                    {oc.severity}
+                                  </span>
+                                  <strong>
+                                    {formatBrDate(oc.date)} — {oc.title}:
+                                  </strong>{' '}
+                                  <span>{oc.description}</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleRemoveDoctorIndividualOccurrence(doc.id, oc.id)
+                                  }
+                                  className="text-slate-400 hover:text-red-600"
+                                >
+                                  <Trash2 size={12} />
+                                </button>
                               </div>
-                            )}
+                            ))}
 
                             <div className="p-2.5 rounded-xl bg-rose-50/40 border border-rose-200 space-y-2">
                               <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
@@ -1829,7 +2571,7 @@ export default function StaffAndFinanceViews(props: any) {
                                 </select>
                                 <input
                                   type="text"
-                                  placeholder="Título curto (ex: Atraso na rendição)"
+                                  placeholder="Título..."
                                   value={occDraft.title}
                                   onChange={e =>
                                     setOccDraftByDoc(prev => ({
@@ -1843,7 +2585,7 @@ export default function StaffAndFinanceViews(props: any) {
                               <div className="flex gap-2">
                                 <input
                                   type="text"
-                                  placeholder="Descrição detalhada da ocorrência individual..."
+                                  placeholder="Descrição da ocorrência..."
                                   value={occDraft.description}
                                   onChange={e =>
                                     setOccDraftByDoc(prev => ({
@@ -1860,7 +2602,7 @@ export default function StaffAndFinanceViews(props: any) {
                                   }
                                   className="bg-rose-600 hover:bg-rose-700 text-white px-3 py-1 rounded-lg font-bold shrink-0"
                                 >
-                                  + Registar Ocorrência
+                                  + Ocorrência
                                 </button>
                               </div>
                             </div>
@@ -1871,38 +2613,31 @@ export default function StaffAndFinanceViews(props: any) {
                           <span className="text-slate-400 font-bold block mb-1">
                             Certificados / Cursos Registados ({docCoursesList.length}):
                           </span>
-                          {docCoursesList.length === 0 ? (
-                            <span className="italic text-slate-400">
-                              Nenhum curso registado para este médico.
-                            </span>
-                          ) : (
-                            <div className="flex flex-wrap gap-1.5">
-                              {docCoursesList.map((c: any) => {
-                                const exp = String(c.expirationDate || c.validUntil || '');
-                                const expired =
-                                  exp && exp < new Date().toISOString().split('T')[0];
-                                return (
-                                  <span
-                                    key={c.id}
-                                    className={`px-2 py-0.5 rounded font-bold text-[10px] ${
-                                      expired
-                                        ? 'bg-red-100 text-red-800 border border-red-200'
-                                        : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
-                                    }`}
-                                  >
-                                    {c.courseName || c.name}:{' '}
-                                    {expired ? 'Vencido' : 'Atualizado'} ({formatBrDate(exp)})
-                                  </span>
-                                );
-                              })}
-                            </div>
-                          )}
+                          <div className="flex flex-wrap gap-1.5">
+                            {docCoursesList.map((c: any) => {
+                              const exp = String(c.expirationDate || c.validUntil || '');
+                              const expired =
+                                exp && exp < new Date().toISOString().split('T')[0];
+                              return (
+                                <span
+                                  key={c.id}
+                                  className={`px-2 py-0.5 rounded font-bold text-[10px] ${
+                                    expired
+                                      ? 'bg-red-100 text-red-800 border border-red-200'
+                                      : 'bg-emerald-100 text-emerald-800 border border-emerald-200'
+                                  }`}
+                                >
+                                  {c.courseName || c.name}:{' '}
+                                  {expired ? 'Vencido' : 'Atualizado'} ({formatBrDate(exp)})
+                                </span>
+                              );
+                            })}
+                          </div>
                         </div>
                       </div>
                     )}
                   </div>
 
-                  {/* Funções Habilitadas */}
                   <div className="flex flex-wrap items-center gap-1.5 pt-1">
                     <span className="text-[11px] font-bold text-slate-500 mr-1">Funções:</span>
                     {(Array.isArray(doc.allowedFunctions) && doc.allowedFunctions.length > 0
@@ -1945,13 +2680,13 @@ export default function StaffAndFinanceViews(props: any) {
   }
 
   // ============================================================================
-  // 2. ABA: MEU CADASTRO PJ / PERFIL (LOGIN DO MÉDICO COM EDIÇÃO PRÓPRIA)
+  // 2. ABA: MEU CADASTRO PJ / PERFIL (LOGIN DO MÉDICO COM EDIÇÃO PRÓPRIA + RESUMO ESPELHADO)
   // ============================================================================
   if (currentView === 'profile') {
     const myDoc =
       safeDoctors.find((d: any) => Number(d?.id) === Number(currentUser?.id)) || currentUser;
-    const myPayroll = safePayroll.find(
-      (p: any) => Number(p?.doctor?.id) === Number(myDoc?.id)
+    const myDetailedPayroll = allActivePayrollRows.find(
+      r => !r.isManualEntry && Number(r.doctor?.id) === Number(myDoc?.id)
     );
     const mySwapsAudit = getDoctorSwapsAuditList(Number(myDoc?.id));
 
@@ -2002,7 +2737,7 @@ export default function StaffAndFinanceViews(props: any) {
     };
 
     return (
-      <div className="max-w-4xl space-y-6 text-slate-800">
+      <div className="max-w-5xl space-y-6 text-slate-800">
         <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="space-y-1">
             <span className="px-2.5 py-1 rounded-full bg-blue-50 text-blue-700 font-extrabold text-[11px] uppercase">
@@ -2232,14 +2967,18 @@ export default function StaffAndFinanceViews(props: any) {
               </div>
               <div>
                 <span className="text-slate-400 font-bold uppercase text-[10px] block">
-                  Produção na Competência ({competenceMonth})
+                  Produção Líquida ({competenceMonth}) — Espelhada c/ Folha PJ
                 </span>
                 <strong className="text-base font-black text-emerald-700">
                   R${' '}
-                  {Number(myPayroll?.netTotal || 0).toLocaleString('pt-BR', {
+                  {Number(myDetailedPayroll?.netTotal || 0).toLocaleString('pt-BR', {
                     minimumFractionDigits: 2
                   })}
                 </strong>
+                <span className="block text-[10px] text-slate-500">
+                  Carga Cumprida: {myDetailedPayroll?.totalFulfilledHours || 0}h (
+                  {myDetailedPayroll?.shiftsCount || 0} turnos)
+                </span>
               </div>
             </div>
 
@@ -2274,8 +3013,8 @@ export default function StaffAndFinanceViews(props: any) {
   }
 
   // ============================================================================
-  // 3. ABA: TABELA DE REMUNERAÇÃO (OPÇÃO "APLICAR NIVELAMENTO", CORES POR FUNÇÃO,
-  //         DIA DE SEMANA VS FDS E ADICIONAIS/BONIFICAÇÕES COM % E INCIDÊNCIA)
+  // 3. ABA: TABELA DE REMUNERAÇÃO
+  // (OPÇÃO "APLICAR NIVELAMENTO" -> INSERIR NÍVEL 1/2/3/... + ADICIONAIS MULTI-FUNÇÃO)
   // ============================================================================
   if (currentView === 'rates') {
     const functionNames = Object.keys(functionRatesObj);
@@ -2322,13 +3061,89 @@ export default function StaffAndFinanceViews(props: any) {
       if (!isAdmin) return;
       safeSetConfig((prev: any) => {
         const currFn = prev?.functionRates?.[fnName] || {};
+        const nextFn: any = {
+          ...currFn,
+          [field]: value
+        };
+        if (field === 'applyLeveling' && value === true && !Array.isArray(currFn.activeLevels)) {
+          nextFn.activeLevels = [1];
+        }
+        return {
+          ...prev,
+          functionRates: {
+            ...(prev?.functionRates || {}),
+            [fnName]: nextFn
+          }
+        };
+      });
+    };
+
+    // Inserir um novo Nível (1, 2, 3, 4, 5...) sob demanda na função
+    const handleInsertLevelInFunction = (fnName: string, levelToInsert?: number) => {
+      if (!isAdmin) return;
+      safeSetConfig((prev: any) => {
+        const currFn = prev?.functionRates?.[fnName] || {};
+        const currActive = getActiveLevelsForFunction(currFn);
+        const nextLevelNum =
+          levelToInsert && !currActive.includes(levelToInsert)
+            ? levelToInsert
+            : Math.max(0, ...currActive) + 1;
+
+        const nextActive = [...currActive, nextLevelNum].sort((a, b) => a - b);
+        const prevMax = currActive[currActive.length - 1] || 1;
+        const prevLvlData = currFn?.levels?.[`level${prevMax}`] || {
+          fixed: currFn.fixed || 1500,
+          extraWeekday: currFn.extraWeekday || currFn.extra || 1650,
+          extraWeekend: currFn.extraWeekend || 1850,
+          monthlyFixedValue: currFn.monthlyFixedValue || 5000
+        };
+
+        const nextKey = `level${nextLevelNum}`;
         return {
           ...prev,
           functionRates: {
             ...(prev?.functionRates || {}),
             [fnName]: {
               ...currFn,
-              [field]: value
+              applyLeveling: true,
+              activeLevels: nextActive,
+              levels: {
+                ...(currFn.levels || {}),
+                [nextKey]: currFn?.levels?.[nextKey] || {
+                  fixed: Number(prevLvlData.fixed || 1500) + 100,
+                  extra: Number(prevLvlData.extraWeekday || 1650) + 100,
+                  extraWeekday: Number(prevLvlData.extraWeekday || 1650) + 100,
+                  extraWeekend: Number(prevLvlData.extraWeekend || 1850) + 100,
+                  monthlyFixedValue: Number(prevLvlData.monthlyFixedValue || 5000) + 500
+                }
+              }
+            }
+          }
+        };
+      });
+      safeRecordAction(`Nível inserido na função ${fnName}`);
+    };
+
+    // Remover um nível específico da função
+    const handleRemoveLevelFromFunction = (fnName: string, levelNum: number) => {
+      if (!isAdmin) return;
+      safeSetConfig((prev: any) => {
+        const currFn = prev?.functionRates?.[fnName] || {};
+        const currActive = getActiveLevelsForFunction(currFn);
+        if (currActive.length <= 1) {
+          alert(
+            'A função com nivelamento ativo deve manter pelo menos 1 nível (ou desmarque a opção "Aplicar nivelamento").'
+          );
+          return prev;
+        }
+        const nextActive = currActive.filter(n => n !== Number(levelNum));
+        return {
+          ...prev,
+          functionRates: {
+            ...(prev?.functionRates || {}),
+            [fnName]: {
+              ...currFn,
+              activeLevels: nextActive
             }
           }
         };
@@ -2337,7 +3152,7 @@ export default function StaffAndFinanceViews(props: any) {
 
     const handleUpdateFunctionLevelValue = (
       fnName: string,
-      levelKey: 'level1' | 'level2' | 'level3' | 'level4',
+      levelKey: string,
       subField: 'fixed' | 'extraWeekday' | 'extraWeekend' | 'monthlyFixedValue',
       val: number
     ) => {
@@ -2349,7 +3164,7 @@ export default function StaffAndFinanceViews(props: any) {
           fixed: currFn.fixed || 1500,
           extra: currFn.extra || 1650,
           extraWeekday: currFn.extraWeekday || currFn.extra || 1650,
-          extraWeekend: currFn.extraWeekend || (currFn.extra ? currFn.extra + 200 : 1850),
+          extraWeekend: currFn.extraWeekend || 1850,
           monthlyFixedValue: currFn.monthlyFixedValue || 5000
         };
         return {
@@ -2382,6 +3197,21 @@ export default function StaffAndFinanceViews(props: any) {
       const eFd = Number(newFunctionForm.extraWeekend12h || 1850);
       const mFixed = Number(newFunctionForm.monthlyFixedValue || 5000);
 
+      const countLvls = newFunctionForm.applyLeveling
+        ? Math.max(1, Number(newFunctionForm.initialLevelsCount || 1))
+        : 1;
+      const activeLvlsArr = Array.from({ length: countLvls }, (_, i) => i + 1);
+      const levelsMap: Record<string, any> = {};
+      activeLvlsArr.forEach((lvlNum, idx) => {
+        levelsMap[`level${lvlNum}`] = {
+          fixed: f12 + idx * 100,
+          extra: eWk + idx * 100,
+          extraWeekday: eWk + idx * 100,
+          extraWeekend: eFd + idx * 100,
+          monthlyFixedValue: mFixed + idx * 500
+        };
+      });
+
       safeSetConfig((prev: any) => ({
         ...prev,
         functionRates: {
@@ -2393,41 +3223,13 @@ export default function StaffAndFinanceViews(props: any) {
             colorTheme: newFunctionForm.colorTheme || 'blue',
             requiresSchedule: Boolean(newFunctionForm.requiresSchedule),
             applyLeveling: Boolean(newFunctionForm.applyLeveling),
+            activeLevels: activeLvlsArr,
             fixed: f12,
             extra: eWk,
             extraWeekday: eWk,
             extraWeekend: eFd,
             monthlyFixedValue: mFixed,
-            levels: {
-              level1: {
-                fixed: f12,
-                extra: eWk,
-                extraWeekday: eWk,
-                extraWeekend: eFd,
-                monthlyFixedValue: mFixed
-              },
-              level2: {
-                fixed: f12 + 100,
-                extra: eWk + 100,
-                extraWeekday: eWk + 100,
-                extraWeekend: eFd + 100,
-                monthlyFixedValue: mFixed + 500
-              },
-              level3: {
-                fixed: f12 + 200,
-                extra: eWk + 200,
-                extraWeekday: eWk + 200,
-                extraWeekend: eFd + 200,
-                monthlyFixedValue: mFixed + 1000
-              },
-              level4: {
-                fixed: f12 + 350,
-                extra: eWk + 350,
-                extraWeekday: eWk + 350,
-                extraWeekend: eFd + 350,
-                monthlyFixedValue: mFixed + 1500
-              }
-            }
+            levels: levelsMap
           }
         }
       }));
@@ -2437,17 +3239,14 @@ export default function StaffAndFinanceViews(props: any) {
         description: '',
         colorTheme: 'blue',
         requiresSchedule: true,
-        applyLeveling: true,
+        applyLeveling: false,
+        initialLevelsCount: 1,
         fixedRate12h: 1500,
         extraWeekday12h: 1650,
         extraWeekend12h: 1850,
         monthlyFixedValue: 5000
       });
-      safeRecordAction(
-        `Nova função adicionada na Tabela de Remuneração: ${nameTrim} (Cor: ${
-          FUNCTION_COLOR_PALETTE[newFunctionForm.colorTheme]?.label || 'Azul'
-        })`
-      );
+      safeRecordAction(`Nova função adicionada na Tabela de Remuneração: ${nameTrim}`);
     };
 
     const handleDeleteFunction = (fnName: string) => {
@@ -2462,6 +3261,18 @@ export default function StaffAndFinanceViews(props: any) {
       safeRecordAction(`Função ${fnName} removida da Tabela de Remuneração`);
     };
 
+    const handleToggleTargetFnOnNewAdditional = (fnName: string) => {
+      setNewAdditionalForm(prev => {
+        const curr = prev.targetFunctionNames || [];
+        const exists = curr.includes(fnName);
+        const next = exists ? curr.filter(x => x !== fnName) : [...curr, fnName];
+        return {
+          ...prev,
+          targetFunctionNames: next.length > 0 ? next : [fnName]
+        };
+      });
+    };
+
     const handleAddAdditional = (e: React.FormEvent) => {
       e.preventDefault();
       if (!newAdditionalForm.name.trim()) return;
@@ -2471,9 +3282,13 @@ export default function StaffAndFinanceViews(props: any) {
         incidence: newAdditionalForm.incidence,
         calcMode: newAdditionalForm.calcMode,
         applicationTarget: newAdditionalForm.applicationTarget,
+        targetFunctionNames:
+          newAdditionalForm.applicationTarget === 'specific_function'
+            ? newAdditionalForm.targetFunctionNames
+            : [],
         targetFunctionName:
           newAdditionalForm.applicationTarget === 'specific_function'
-            ? newAdditionalForm.targetFunctionName
+            ? newAdditionalForm.targetFunctionNames[0] || ''
             : '',
         value12h: Number(newAdditionalForm.value12h || 0),
         percentValue: Number(newAdditionalForm.percentValue || 0)
@@ -2487,7 +3302,7 @@ export default function StaffAndFinanceViews(props: any) {
         incidence: 'shift',
         calcMode: 'fixed',
         applicationTarget: 'final_payroll',
-        targetFunctionName: allFunctionNames[0] || 'Plantonista',
+        targetFunctionNames: [allFunctionNames[0] || 'Plantonista'],
         value12h: 250,
         percentValue: 10
       });
@@ -2504,28 +3319,43 @@ export default function StaffAndFinanceViews(props: any) {
       }));
     };
 
+    const handleToggleTargetFnOnExistingAdditional = (add: any, fnName: string) => {
+      if (!isAdmin) return;
+      const currList: string[] =
+        Array.isArray(add.targetFunctionNames) && add.targetFunctionNames.length > 0
+          ? add.targetFunctionNames
+          : add.targetFunctionName
+          ? [add.targetFunctionName]
+          : [];
+      const exists = currList.includes(fnName);
+      const nextList = exists
+        ? currList.filter(x => x !== fnName)
+        : [...currList, fnName];
+      handleUpdateExistingAdditional(
+        add.id,
+        'targetFunctionNames',
+        nextList.length > 0 ? nextList : [fnName]
+      );
+    };
+
     return (
       <div className="space-y-8 text-slate-800">
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
           <h2 className="text-xl sm:text-2xl font-bold text-slate-900 flex items-center gap-2">
             <Sliders className="text-blue-600" size={24} />
-            Tabela de Remuneração, Cores de Função na Escala, Nivelamento & Bonificações
+            Tabela de Remuneração, Nivelamento Sob Demanda & Adicionais Multi-Função
           </h2>
           <p className="text-xs text-slate-500 mt-1">
-            Atribua <strong>cores exclusivas a cada função</strong> (refletidas na Escala Semanal, no Heatmap 24h e nos PDFs), escolha quando aplicar nivelamento (Níveis 1 a 4) e configure adicionais percentuais ou fixos.
+            Ao marcar <strong>(✓) Aplicar nivelamento</strong>, insira apenas os níveis que desejar para aquela função (Nível 1, 2, 3...). Configure adicionais que podem incidir sobre uma ou múltiplas funções específicas.
           </p>
         </div>
 
-        {/* BLOCO 1: GESTÃO RÁPIDA DE ESPECIALIDADES MÉDICAS DA EMERGÊNCIA */}
+        {/* BLOCO 1: ESPECIALIDADES MÉDICAS */}
         <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
-            <div>
-              <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
-                <Stethoscope className="text-indigo-600" size={20} />
-                Especialidades Médicas da Emergência
-              </h3>
-            </div>
-          </div>
+          <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2 border-b border-slate-100 pb-3">
+            <Stethoscope className="text-indigo-600" size={20} />
+            Especialidades Médicas da Emergência
+          </h3>
 
           <div className="flex flex-wrap items-center gap-2">
             {registeredSpecialtiesList.map(spec => (
@@ -2569,46 +3399,21 @@ export default function StaffAndFinanceViews(props: any) {
           )}
         </div>
 
-        {/* BLOCO 2: CARTÕES DE FUNÇÕES COM COR VISUAL + OPÇÃO "( ) APLICAR NIVELAMENTO" */}
+        {/* BLOCO 2: CARTÕES DE FUNÇÕES COM INSERÇÃO DINÂMICA DE NÍVEIS (1, 2, 3...) */}
         <div className="space-y-4">
           <h3 className="text-base font-extrabold text-slate-900 uppercase px-1 flex items-center gap-2">
             <Briefcase size={18} className="text-blue-600" />
-            Funções Médicas — Cores na Escala/Heatmap, Nivelamento Opcional & Dia de Semana vs. FDS
+            Funções Médicas — Cores, Nivelamento Sob Demanda (+ Inserir Nível 1/2/3...) & Valores
           </h3>
 
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
             {functionNames.map((fnName, fnIdx) => {
               const fnObj = functionRatesObj[fnName] || {};
               const requiresSchedule = fnObj.requiresSchedule !== false;
-              const applyLeveling = fnObj.applyLeveling !== false;
+              const applyLeveling = Boolean(fnObj.applyLeveling);
+              const activeLevels = getActiveLevelsForFunction(fnObj);
               const colorInfo = getFunctionColorInfo(fnName, fnIdx);
-
-              const levels = fnObj.levels || {
-                level1: {
-                  fixed: fnObj.fixed || 1500,
-                  extraWeekday: fnObj.extraWeekday || fnObj.extra || 1650,
-                  extraWeekend: fnObj.extraWeekend || (fnObj.extra ? fnObj.extra + 200 : 1850),
-                  monthlyFixedValue: fnObj.monthlyFixedValue || 5000
-                },
-                level2: {
-                  fixed: (fnObj.fixed || 1500) + 100,
-                  extraWeekday: (fnObj.extraWeekday || fnObj.extra || 1650) + 100,
-                  extraWeekend: (fnObj.extraWeekend || (fnObj.extra ? fnObj.extra + 200 : 1850)) + 100,
-                  monthlyFixedValue: (fnObj.monthlyFixedValue || 5000) + 500
-                },
-                level3: {
-                  fixed: (fnObj.fixed || 1500) + 200,
-                  extraWeekday: (fnObj.extraWeekday || fnObj.extra || 1650) + 200,
-                  extraWeekend: (fnObj.extraWeekend || (fnObj.extra ? fnObj.extra + 200 : 1850)) + 200,
-                  monthlyFixedValue: (fnObj.monthlyFixedValue || 5000) + 1000
-                },
-                level4: {
-                  fixed: (fnObj.fixed || 1500) + 300,
-                  extraWeekday: (fnObj.extraWeekday || fnObj.extra || 1650) + 300,
-                  extraWeekend: (fnObj.extraWeekend || (fnObj.extra ? fnObj.extra + 200 : 1850)) + 300,
-                  monthlyFixedValue: (fnObj.monthlyFixedValue || 5000) + 1500
-                }
-              };
+              const levelsObj = fnObj.levels || {};
 
               return (
                 <div
@@ -2635,8 +3440,8 @@ export default function StaffAndFinanceViews(props: any) {
                               }`}
                             >
                               {requiresSchedule
-                                ? 'Com Escala (Proporcional Ref. 12h)'
-                                : 'Cargo Fixo Mensal (Sem Escala)'}
+                                ? 'Com Escala (Cota Fixa 4/5 sem. ou Por Hora)'
+                                : 'Sem Escala (Fixo Mensal)'}
                             </span>
                           </div>
 
@@ -2652,6 +3457,7 @@ export default function StaffAndFinanceViews(props: any) {
                           )}
                         </div>
 
+                        {/* Seletor de Cor */}
                         <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex flex-wrap items-center justify-between gap-2">
                           <span className="font-extrabold text-slate-700 text-[11px] flex items-center gap-1.5">
                             <Palette size={14} style={{ color: colorInfo.hex }} />
@@ -2692,23 +3498,52 @@ export default function StaffAndFinanceViews(props: any) {
                           )}
                         </div>
 
-                        <label className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-blue-50 border border-blue-200 text-blue-950 font-extrabold cursor-pointer">
-                          <input
-                            type="checkbox"
-                            disabled={!isAdmin}
-                            checked={applyLeveling}
-                            onChange={e =>
-                              handleUpdateFunctionField(fnName, 'applyLeveling', e.target.checked)
-                            }
-                            className="w-4 h-4 accent-blue-600"
-                          />
-                          <span>Aplicar nivelamento (Níveis 1 a 4) nesta função</span>
-                        </label>
+                        {/* CHECKBOX: ( ) APLICAR NIVELAMENTO + BOTÕES DE INSERIR NÍVEL 1, 2, 3... */}
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                          <label className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-blue-50 border border-blue-200 text-blue-950 font-extrabold cursor-pointer">
+                            <input
+                              type="checkbox"
+                              disabled={!isAdmin}
+                              checked={applyLeveling}
+                              onChange={e =>
+                                handleUpdateFunctionField(
+                                  fnName,
+                                  'applyLeveling',
+                                  e.target.checked
+                                )
+                              }
+                              className="w-4 h-4 accent-blue-600"
+                            />
+                            <span>( ) Aplicar nivelamento nesta função</span>
+                          </label>
+
+                          {isAdmin && applyLeveling && (
+                            <div className="flex flex-wrap items-center gap-1">
+                              {[1, 2, 3, 4, 5].map(lvlN => {
+                                const alreadyIn = activeLevels.includes(lvlN);
+                                if (alreadyIn) return null;
+                                return (
+                                  <button
+                                    key={lvlN}
+                                    type="button"
+                                    onClick={() =>
+                                      handleInsertLevelInFunction(fnName, lvlN)
+                                    }
+                                    className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-black text-[10px] flex items-center gap-1 shadow-2xs"
+                                  >
+                                    <Plus size={11} /> Inserir Nível {lvlN}
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     </div>
 
-                    <div className="bg-slate-50 p-3.5 rounded-xl border border-slate-200 space-y-1.5">
-                      <label className="block text-[11px] font-extrabold text-slate-700 uppercase">
+                    {/* Descrição */}
+                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-1">
+                      <label className="block text-[10px] font-extrabold text-slate-700 uppercase">
                         📝 Descrição / Detalhamento da Função:
                       </label>
                       {isAdmin ? (
@@ -2718,26 +3553,25 @@ export default function StaffAndFinanceViews(props: any) {
                           onChange={e =>
                             handleUpdateFunctionField(fnName, 'description', e.target.value)
                           }
-                          className="w-full border border-slate-300 rounded-lg px-3 py-1.5 bg-white text-slate-800 font-medium"
+                          className="w-full border border-slate-300 rounded-lg px-2.5 py-1 bg-white text-slate-800 font-medium"
                         />
                       ) : (
                         <p className="text-slate-600 italic">{fnObj.description || fnName}</p>
                       )}
                     </div>
 
+                    {/* MODO A: SEM NIVELAMENTO */}
                     {!applyLeveling ? (
                       <div className="p-4 rounded-2xl bg-emerald-50/50 border-2 border-emerald-200 space-y-3">
-                        <div className="flex items-center justify-between">
-                          <span className="px-2.5 py-0.5 rounded bg-emerald-700 text-white font-black text-[10px] uppercase">
-                            Valor Fixo (Sem Nivelamento — Fração paga proporcional a 12h)
-                          </span>
-                        </div>
+                        <span className="px-2.5 py-0.5 rounded bg-emerald-700 text-white font-black text-[10px] uppercase inline-block">
+                          Valor Fixo da Função (Sem Nivelamento — Proporcional a 12h)
+                        </span>
 
                         {requiresSchedule ? (
                           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                             <div>
                               <label className="block text-[10px] font-extrabold text-slate-700 mb-1">
-                                Ciclo Fixo Semanal (Ref. 12h R$)
+                                Cota Fixa Mensal (Ref. 12h R$)
                               </label>
                               <input
                                 type="number"
@@ -2755,7 +3589,7 @@ export default function StaffAndFinanceViews(props: any) {
                             </div>
                             <div>
                               <label className="block text-[10px] font-extrabold text-blue-900 mb-1">
-                                Extra 12h — Dia de Semana (R$)
+                                Extra 12h — Dia Semana (R$)
                               </label>
                               <input
                                 type="number"
@@ -2771,7 +3605,7 @@ export default function StaffAndFinanceViews(props: any) {
                             </div>
                             <div>
                               <label className="block text-[10px] font-extrabold text-emerald-900 mb-1">
-                                Extra 12h — Final de Semana (R$)
+                                Extra 12h — Fim Semana (R$)
                               </label>
                               <input
                                 type="number"
@@ -2794,7 +3628,7 @@ export default function StaffAndFinanceViews(props: any) {
                         ) : (
                           <div>
                             <label className="block text-[10px] font-bold text-slate-600 mb-1">
-                              Valor Mensal Fixo do Cargo (R$)
+                              Valor Mensal Fixo do Cargo Sem Escala (R$)
                             </label>
                             <input
                               type="number"
@@ -2813,125 +3647,138 @@ export default function StaffAndFinanceViews(props: any) {
                         )}
                       </div>
                     ) : (
-                      <div className="space-y-2">
+                      /* MODO B: COM NIVELAMENTO (EXIBE APENAS OS NÍVEIS INSERIDOS PELO GESTOR) */
+                      <div className="space-y-2.5">
                         <span className="block font-extrabold text-slate-700 uppercase text-[11px]">
-                          Valores por Nível de Senioridade (Base 12h — Fração paga proporcional):
+                          Níveis Ativos nesta Função ({activeLevels.map(n => `Nível ${n}`).join(', ')}):
                         </span>
 
                         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                          {(['level1', 'level2', 'level3', 'level4'] as const).map(
-                            (lvlKey, idx) => {
-                              const lvlNum = idx + 1;
-                              const lvlData = levels[lvlKey] || {};
+                          {activeLevels.map(lvlNum => {
+                            const lvlKey = `level${lvlNum}`;
+                            const lvlData = levelsObj[lvlKey] || {};
 
-                              return (
-                                <div
-                                  key={lvlKey}
-                                  className="p-3 rounded-xl border border-slate-200 bg-white space-y-2"
-                                >
-                                  <span className="px-2 py-0.5 rounded bg-blue-600 text-white font-black text-[10px] uppercase inline-block">
+                            return (
+                              <div
+                                key={lvlKey}
+                                className="p-3 rounded-xl border border-blue-200 bg-blue-50/30 space-y-2"
+                              >
+                                <div className="flex items-center justify-between">
+                                  <span className="px-2.5 py-0.5 rounded bg-blue-600 text-white font-black text-[10px] uppercase">
                                     Nível {lvlNum}
                                   </span>
+                                  {isAdmin && activeLevels.length > 1 && (
+                                    <button
+                                      type="button"
+                                      onClick={() =>
+                                        handleRemoveLevelFromFunction(fnName, lvlNum)
+                                      }
+                                      className="text-slate-400 hover:text-red-600 text-[10px] font-bold flex items-center gap-0.5"
+                                      title={`Remover Nível ${lvlNum} desta função`}
+                                    >
+                                      <Trash2 size={11} /> Remover
+                                    </button>
+                                  )}
+                                </div>
 
-                                  {requiresSchedule ? (
-                                    <div className="grid grid-cols-3 gap-1.5">
-                                      <div>
-                                        <label className="block text-[9px] font-bold text-slate-500">
-                                          Ciclo Fixo 12h
-                                        </label>
-                                        <input
-                                          type="number"
-                                          disabled={!isAdmin}
-                                          value={lvlData.fixed ?? fnObj.fixed ?? 1500}
-                                          onChange={e =>
-                                            handleUpdateFunctionLevelValue(
-                                              fnName,
-                                              lvlKey,
-                                              'fixed',
-                                              Number(e.target.value)
-                                            )
-                                          }
-                                          className="w-full border rounded-lg px-1.5 py-1 font-extrabold text-slate-900"
-                                        />
-                                      </div>
-                                      <div>
-                                        <label className="block text-[9px] font-bold text-blue-700">
-                                          Extra Sem. 12h
-                                        </label>
-                                        <input
-                                          type="number"
-                                          disabled={!isAdmin}
-                                          value={
-                                            lvlData.extraWeekday ??
-                                            lvlData.extra ??
-                                            fnObj.extra ??
-                                            1650
-                                          }
-                                          onChange={e =>
-                                            handleUpdateFunctionLevelValue(
-                                              fnName,
-                                              lvlKey,
-                                              'extraWeekday',
-                                              Number(e.target.value)
-                                            )
-                                          }
-                                          className="w-full border rounded-lg px-1.5 py-1 font-extrabold text-blue-800"
-                                        />
-                                      </div>
-                                      <div>
-                                        <label className="block text-[9px] font-bold text-emerald-700">
-                                          Extra FDS 12h
-                                        </label>
-                                        <input
-                                          type="number"
-                                          disabled={!isAdmin}
-                                          value={
-                                            lvlData.extraWeekend ??
-                                            lvlData.extra ??
-                                            fnObj.extraWeekend ??
-                                            1850
-                                          }
-                                          onChange={e =>
-                                            handleUpdateFunctionLevelValue(
-                                              fnName,
-                                              lvlKey,
-                                              'extraWeekend',
-                                              Number(e.target.value)
-                                            )
-                                          }
-                                          className="w-full border rounded-lg px-1.5 py-1 font-extrabold text-emerald-700"
-                                        />
-                                      </div>
-                                    </div>
-                                  ) : (
+                                {requiresSchedule ? (
+                                  <div className="grid grid-cols-3 gap-1.5">
                                     <div>
-                                      <label className="block text-[10px] font-bold text-slate-500">
-                                        Valor Mensal Fixo (R$)
+                                      <label className="block text-[9px] font-bold text-slate-500">
+                                        Cota Fixa 12h
+                                      </label>
+                                      <input
+                                        type="number"
+                                        disabled={!isAdmin}
+                                        value={lvlData.fixed ?? fnObj.fixed ?? 1500}
+                                        onChange={e =>
+                                          handleUpdateFunctionLevelValue(
+                                            fnName,
+                                            lvlKey,
+                                            'fixed',
+                                            Number(e.target.value)
+                                          )
+                                        }
+                                        className="w-full border rounded-lg px-1.5 py-1 bg-white font-extrabold text-slate-900"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label className="block text-[9px] font-bold text-blue-700">
+                                        Extra Sem. 12h
                                       </label>
                                       <input
                                         type="number"
                                         disabled={!isAdmin}
                                         value={
-                                          lvlData.monthlyFixedValue ??
-                                          fnObj.monthlyFixedValue ??
-                                          5000
+                                          lvlData.extraWeekday ??
+                                          lvlData.extra ??
+                                          fnObj.extra ??
+                                          1650
                                         }
                                         onChange={e =>
                                           handleUpdateFunctionLevelValue(
                                             fnName,
                                             lvlKey,
-                                            'monthlyFixedValue',
+                                            'extraWeekday',
                                             Number(e.target.value)
                                           )
                                         }
-                                        className="w-full border rounded-lg px-2.5 py-1 font-extrabold text-purple-800"
+                                        className="w-full border rounded-lg px-1.5 py-1 bg-white font-extrabold text-blue-800"
                                       />
                                     </div>
-                                  )}
-                                </div>
-                              );
-                            }
-                          )}
+                                    <div>
+                                      <label className="block text-[9px] font-bold text-emerald-700">
+                                        Extra FDS 12h
+                                      </label>
+                                      <input
+                                        type="number"
+                                        disabled={!isAdmin}
+                                        value={
+                                          lvlData.extraWeekend ??
+                                          lvlData.extra ??
+                                          fnObj.extraWeekend ??
+                                          1850
+                                        }
+                                        onChange={e =>
+                                          handleUpdateFunctionLevelValue(
+                                            fnName,
+                                            lvlKey,
+                                            'extraWeekend',
+                                            Number(e.target.value)
+                                          )
+                                        }
+                                        className="w-full border rounded-lg px-1.5 py-1 bg-white font-extrabold text-emerald-700"
+                                      />
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div>
+                                    <label className="block text-[10px] font-bold text-slate-500">
+                                      Valor Mensal Fixo (R$)
+                                    </label>
+                                    <input
+                                      type="number"
+                                      disabled={!isAdmin}
+                                      value={
+                                        lvlData.monthlyFixedValue ??
+                                        fnObj.monthlyFixedValue ??
+                                        5000
+                                      }
+                                      onChange={e =>
+                                        handleUpdateFunctionLevelValue(
+                                          fnName,
+                                          lvlKey,
+                                          'monthlyFixedValue',
+                                          Number(e.target.value)
+                                        )
+                                      }
+                                      className="w-full border rounded-lg px-2.5 py-1 bg-white font-extrabold text-purple-800"
+                                    />
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
                         </div>
                       </div>
                     )}
@@ -2941,6 +3788,7 @@ export default function StaffAndFinanceViews(props: any) {
             })}
           </div>
 
+          {/* Formulário para Criar Nova Função */}
           {isAdmin && (
             <form
               onSubmit={handleAddNewFunction}
@@ -2951,25 +3799,48 @@ export default function StaffAndFinanceViews(props: any) {
                   <Plus size={16} className="text-blue-600" /> Cadastrar Nova Função / Setor na Tabela de Remuneração
                 </h4>
 
-                <label className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-blue-50 border border-blue-300 font-extrabold text-blue-950 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={newFunctionForm.applyLeveling}
-                    onChange={e =>
-                      setNewFunctionForm({
-                        ...newFunctionForm,
-                        applyLeveling: e.target.checked
-                      })
-                    }
-                    className="w-4 h-4 accent-blue-600"
-                  />
-                  <span>( ) Aplicar nivelamento (Níveis 1 a 4)</span>
-                </label>
+                <div className="flex flex-wrap items-center gap-3">
+                  <label className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-blue-50 border border-blue-300 font-extrabold text-blue-950 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={newFunctionForm.applyLeveling}
+                      onChange={e =>
+                        setNewFunctionForm({
+                          ...newFunctionForm,
+                          applyLeveling: e.target.checked
+                        })
+                      }
+                      className="w-4 h-4 accent-blue-600"
+                    />
+                    <span>( ) Aplicar nivelamento</span>
+                  </label>
+
+                  {newFunctionForm.applyLeveling && (
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-bold text-blue-900">Iniciar com quantos níveis?</span>
+                      <select
+                        value={newFunctionForm.initialLevelsCount}
+                        onChange={e =>
+                          setNewFunctionForm({
+                            ...newFunctionForm,
+                            initialLevelsCount: Number(e.target.value)
+                          })
+                        }
+                        className="border border-blue-400 rounded-lg px-2 py-1 bg-white font-black text-blue-950"
+                      >
+                        <option value={1}>Apenas Nível 1</option>
+                        <option value={2}>Níveis 1 e 2</option>
+                        <option value={3}>Níveis 1, 2 e 3</option>
+                        <option value={4}>Níveis 1, 2, 3 e 4</option>
+                      </select>
+                    </div>
+                  )}
+                </div>
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-6 gap-3">
                 <div className="sm:col-span-2">
-                  <label className="block font-bold mb-1">Nome Curto da Função *</label>
+                  <label className="block font-bold mb-1">Nome da Função *</label>
                   <input
                     type="text"
                     required
@@ -3014,7 +3885,7 @@ export default function StaffAndFinanceViews(props: any) {
                     }
                     className="w-full border rounded-lg px-2.5 py-2 bg-white font-bold"
                   >
-                    <option value="sim">Com Escala (12h / Fração)</option>
+                    <option value="sim">Com Escala (Cota Fixa ou Hora)</option>
                     <option value="nao">Sem Escala (Fixo Mensal)</option>
                   </select>
                 </div>
@@ -3023,7 +3894,7 @@ export default function StaffAndFinanceViews(props: any) {
                   <>
                     <div>
                       <label className="block font-bold mb-1">
-                        Ciclo Fixo Semanal 12h (R$)
+                        Cota Fixa Mensal 12h (R$)
                       </label>
                       <input
                         type="number"
@@ -3044,7 +3915,6 @@ export default function StaffAndFinanceViews(props: any) {
                       <div className="grid grid-cols-2 gap-1">
                         <input
                           type="number"
-                          title="Extra 12h Dia de Semana (R$)"
                           value={newFunctionForm.extraWeekday12h}
                           onChange={e =>
                             setNewFunctionForm({
@@ -3056,7 +3926,6 @@ export default function StaffAndFinanceViews(props: any) {
                         />
                         <input
                           type="number"
-                          title="Extra 12h Final de Semana (R$)"
                           value={newFunctionForm.extraWeekend12h}
                           onChange={e =>
                             setNewFunctionForm({
@@ -3091,7 +3960,7 @@ export default function StaffAndFinanceViews(props: any) {
 
               <div>
                 <label className="block font-bold mb-1">
-                  Descrição / Atribuições da Função (Caixa Aberta):
+                  Descrição / Atribuições da Função:
                 </label>
                 <input
                   type="text"
@@ -3116,26 +3985,33 @@ export default function StaffAndFinanceViews(props: any) {
           )}
         </div>
 
-        {/* BLOCO 3: CATÁLOGO DETALHADO DE ADICIONAIS & BONIFICAÇÕES */}
+        {/* BLOCO 3: CATÁLOGO DETALHADO DE ADICIONAIS & BONIFICAÇÕES (COM MULTI-FUNÇÃO) */}
         <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5 text-xs">
           <div>
             <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
               <Percent size={18} className="text-amber-600" />
-              Catálogo Detalhado de Adicionais & Bonificações (Valor Fixo R$ ou Percentual % + Regra de Incidência)
+              Catálogo de Adicionais & Bonificações (Acumuláveis por Competência + Múltiplas Funções de Incidência)
             </h3>
             <p className="text-slate-500 mt-0.5">
-              Configure adicionais por plantão ou bonificações mensais, podendo escolher entre <strong>Valor Fixo (R$)</strong> ou <strong>Percentual (%)</strong>, e definir se incide <strong>sobre o valor final da folha</strong> ou <strong>sobre uma função/remuneração específica</strong>.
+              O médico pode acumular múltiplas competências do mesmo adicional (ex: 2x Liderança, 3x Fim de Semana). Se o adicional incidir sobre funções específicas, marque abaixo uma ou várias funções!
             </p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
             {shiftAdditionalsList.map((add: any) => {
+              const targetFns: string[] =
+                Array.isArray(add.targetFunctionNames) && add.targetFunctionNames.length > 0
+                  ? add.targetFunctionNames
+                  : add.targetFunctionName
+                  ? [add.targetFunctionName]
+                  : [allFunctionNames[0] || 'Plantonista'];
+
               const targetLabel =
                 add.applicationTarget === 'specific_function'
-                  ? `Sobre a Função: ${add.targetFunctionName || allFunctionNames[0]}`
+                  ? `Incide sobre: ${targetFns.join(', ')}`
                   : add.applicationTarget === 'final_payroll'
                   ? 'Sobre o Valor Final da Folha PJ'
-                  : 'Sobre a Remuneração do Plantão (Ref. 12h)';
+                  : 'Sobre a Base do Plantão (Ref. 12h)';
 
               return (
                 <div
@@ -3150,8 +4026,8 @@ export default function StaffAndFinanceViews(props: any) {
                       <div className="flex flex-wrap items-center gap-1.5 mt-1">
                         <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-900 font-bold text-[10px]">
                           {add.incidence === 'monthly'
-                            ? 'Bonificação / Adicional na Folha Mensal'
-                            : 'Adicional por Plantão'}
+                            ? 'Bonificação Mensal'
+                            : 'Por Plantão (Acumulável 1x, 2x...)'}
                         </span>
                         <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-950 font-black text-[10px]">
                           {add.calcMode === 'percent'
@@ -3183,65 +4059,100 @@ export default function StaffAndFinanceViews(props: any) {
                   </div>
 
                   {isAdmin && (
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-2 border-t border-slate-200/80">
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-500">
-                          Modo de Cálculo
-                        </label>
-                        <select
-                          value={add.calcMode || 'fixed'}
-                          onChange={e =>
-                            handleUpdateExistingAdditional(add.id, 'calcMode', e.target.value)
-                          }
-                          className="w-full border rounded-lg px-2 py-1 bg-white font-bold"
-                        >
-                          <option value="fixed">Valor Fixo (R$)</option>
-                          <option value="percent">Percentual (%)</option>
-                        </select>
+                    <div className="space-y-2 pt-2 border-t border-slate-200/80">
+                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-500">
+                            Modo de Cálculo
+                          </label>
+                          <select
+                            value={add.calcMode || 'fixed'}
+                            onChange={e =>
+                              handleUpdateExistingAdditional(add.id, 'calcMode', e.target.value)
+                            }
+                            className="w-full border rounded-lg px-2 py-1 bg-white font-bold"
+                          >
+                            <option value="fixed">Valor Fixo (R$)</option>
+                            <option value="percent">Percentual (%)</option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-500">
+                            {add.calcMode === 'percent' ? 'Percentual (%)' : 'Valor (R$)'}
+                          </label>
+                          <input
+                            type="number"
+                            value={
+                              add.calcMode === 'percent'
+                                ? add.percentValue ?? 10
+                                : add.value12h ?? 250
+                            }
+                            onChange={e =>
+                              handleUpdateExistingAdditional(
+                                add.id,
+                                add.calcMode === 'percent' ? 'percentValue' : 'value12h',
+                                Number(e.target.value)
+                              )
+                            }
+                            className="w-full border rounded-lg px-2 py-1 bg-white font-black text-slate-900"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-500">
+                            Aplicar Sobre:
+                          </label>
+                          <select
+                            value={add.applicationTarget || 'shift_base'}
+                            onChange={e =>
+                              handleUpdateExistingAdditional(
+                                add.id,
+                                'applicationTarget',
+                                e.target.value
+                              )
+                            }
+                            className="w-full border rounded-lg px-2 py-1 bg-white font-bold"
+                          >
+                            <option value="final_payroll">Valor Final da Folha</option>
+                            <option value="specific_function">Função(ões) Específica(s)</option>
+                            <option value="shift_base">Base do Plantão (12h)</option>
+                          </select>
+                        </div>
                       </div>
 
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-500">
-                          {add.calcMode === 'percent' ? 'Percentual (%)' : 'Valor (R$)'}
-                        </label>
-                        <input
-                          type="number"
-                          value={
-                            add.calcMode === 'percent'
-                              ? add.percentValue ?? 10
-                              : add.value12h ?? 250
-                          }
-                          onChange={e =>
-                            handleUpdateExistingAdditional(
-                              add.id,
-                              add.calcMode === 'percent' ? 'percentValue' : 'value12h',
-                              Number(e.target.value)
-                            )
-                          }
-                          className="w-full border rounded-lg px-2 py-1 bg-white font-black text-slate-900"
-                        />
-                      </div>
-
-                      <div>
-                        <label className="block text-[10px] font-bold text-slate-500">
-                          Aplicar Sobre:
-                        </label>
-                        <select
-                          value={add.applicationTarget || 'shift_base'}
-                          onChange={e =>
-                            handleUpdateExistingAdditional(
-                              add.id,
-                              'applicationTarget',
-                              e.target.value
-                            )
-                          }
-                          className="w-full border rounded-lg px-2 py-1 bg-white font-bold"
-                        >
-                          <option value="final_payroll">Valor Final da Folha</option>
-                          <option value="specific_function">Função Específica</option>
-                          <option value="shift_base">Base do Plantão (12h)</option>
-                        </select>
-                      </div>
+                      {add.applicationTarget === 'specific_function' && (
+                        <div className="p-2.5 rounded-xl bg-white border border-indigo-200 space-y-1.5">
+                          <span className="block text-[10px] font-extrabold text-indigo-900 uppercase">
+                            Selecione sobre qual(is) função(ões) este adicional incide:
+                          </span>
+                          <div className="flex flex-wrap gap-1.5">
+                            {allFunctionNames.map(fn => {
+                              const checked = targetFns.includes(fn);
+                              return (
+                                <label
+                                  key={fn}
+                                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[10px] font-bold cursor-pointer ${
+                                    checked
+                                      ? 'bg-indigo-600 text-white border-indigo-700'
+                                      : 'bg-slate-50 text-slate-700 border-slate-300'
+                                  }`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={checked}
+                                    onChange={() =>
+                                      handleToggleTargetFnOnExistingAdditional(add, fn)
+                                    }
+                                    className="hidden"
+                                  />
+                                  <span>{checked ? '✓ ' : '+ '}{fn}</span>
+                                </label>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
@@ -3256,7 +4167,7 @@ export default function StaffAndFinanceViews(props: any) {
             >
               <h4 className="font-extrabold text-amber-950 uppercase text-xs flex items-center gap-1.5">
                 <Plus size={15} className="text-amber-700" />
-                Cadastrar Novo Adicional ou Bonificação (Com Opção Percentual % e Base de Aplicação)
+                Cadastrar Novo Adicional ou Bonificação
               </h4>
 
               <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 items-end">
@@ -3267,7 +4178,7 @@ export default function StaffAndFinanceViews(props: any) {
                   <input
                     type="text"
                     required
-                    placeholder="Ex: Bonificação Meta Assistencial / Adicional Chefia"
+                    placeholder="Ex: Adicional de Liderança / Adicional FDS"
                     value={newAdditionalForm.name}
                     onChange={e =>
                       setNewAdditionalForm({ ...newAdditionalForm, name: e.target.value })
@@ -3288,8 +4199,8 @@ export default function StaffAndFinanceViews(props: any) {
                     }
                     className="w-full border rounded-xl px-3 py-2 bg-white font-bold"
                   >
-                    <option value="shift">Por Plantão</option>
-                    <option value="monthly">Na Folha Mensal (Bonificação)</option>
+                    <option value="shift">Por Plantão (Acumulável)</option>
+                    <option value="monthly">Na Folha Mensal</option>
                   </select>
                 </div>
 
@@ -3314,7 +4225,7 @@ export default function StaffAndFinanceViews(props: any) {
                   <label className="block font-bold mb-1">
                     {newAdditionalForm.calcMode === 'percent'
                       ? 'Percentual (%)'
-                      : 'Valor em R$'}
+                      : 'Valor 1 Competência (R$)'}
                   </label>
                   <input
                     type="number"
@@ -3337,7 +4248,7 @@ export default function StaffAndFinanceViews(props: any) {
                 </div>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-end pt-1">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-start pt-1">
                 <div>
                   <label className="block font-bold mb-1">
                     Onde Aplicar esta Bonificação / Adicional?
@@ -3359,7 +4270,7 @@ export default function StaffAndFinanceViews(props: any) {
                       Aplicar sobre o Valor Final da Folha
                     </option>
                     <option value="specific_function">
-                      Aplicar sobre uma Função / Remuneração Específica
+                      Aplicar sobre Uma ou Mais Funções Específicas
                     </option>
                     <option value="shift_base">
                       Aplicar sobre o Plantão Individual (Base 12h)
@@ -3368,31 +4279,39 @@ export default function StaffAndFinanceViews(props: any) {
                 </div>
 
                 {newAdditionalForm.applicationTarget === 'specific_function' ? (
-                  <div>
-                    <label className="block font-bold mb-1">
-                      Selecione a Função Base do Cálculo:
+                  <div className="sm:col-span-2 p-3 rounded-xl bg-white border border-indigo-200 space-y-1.5">
+                    <label className="block font-extrabold text-indigo-950 text-[11px]">
+                      Marque uma ou mais funções sobre as quais este adicional incidirá:
                     </label>
-                    <select
-                      value={newAdditionalForm.targetFunctionName}
-                      onChange={e =>
-                        setNewAdditionalForm({
-                          ...newAdditionalForm,
-                          targetFunctionName: e.target.value
-                        })
-                      }
-                      className="w-full border rounded-xl px-3 py-2 bg-white font-bold"
-                    >
-                      {allFunctionNames.map(fn => (
-                        <option key={fn} value={fn}>
-                          {fn}
-                        </option>
-                      ))}
-                    </select>
+                    <div className="flex flex-wrap gap-1.5">
+                      {allFunctionNames.map(fn => {
+                        const checked = (
+                          newAdditionalForm.targetFunctionNames || []
+                        ).includes(fn);
+                        return (
+                          <button
+                            key={fn}
+                            type="button"
+                            onClick={() => handleToggleTargetFnOnNewAdditional(fn)}
+                            className={`px-3 py-1 rounded-lg border font-bold text-[11px] transition-all ${
+                              checked
+                                ? 'bg-indigo-600 text-white border-indigo-700'
+                                : 'bg-slate-50 text-slate-700 border-slate-300'
+                            }`}
+                          >
+                            {checked ? '✓ ' : '+ '}
+                            {fn}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 ) : (
-                  <div />
+                  <div className="sm:col-span-2" />
                 )}
+              </div>
 
+              <div className="flex justify-end">
                 <button
                   type="submit"
                   className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl px-5 py-2.5 font-bold"
@@ -3408,325 +4327,17 @@ export default function StaffAndFinanceViews(props: any) {
   }
 
   // ============================================================================
-  // 4. ABA: FOLHA PJ 26 A 25 + AUDITORIA DE CARGA HORÁRIA POR FUNÇÃO
+  // 4. ABA: FOLHA PJ 26 A 25 + AUDITORIA ANALÍTICA DE CARGA HORÁRIA + EXTRATO DO MÉDICO
   // ============================================================================
-  const windowShifts = safeShifts.filter((s: any) => {
-    if (!s?.date) return false;
-    const hasDoc = Boolean(s?.doctorId) || Boolean(s?.isManualUnregisteredDoctor && s?.manualDoctorName);
-    if (!hasDoc) return false;
-    return (
-      s.date >= (competenceWindow?.startStr || '0000-01-01') &&
-      s.date <= (competenceWindow?.endStr || '9999-12-31')
-    );
-  });
-
-  const monthCustomizations = config?.payrollCustomizations?.[competenceMonth] || {};
-  const allCatalogAdditionals = Array.isArray(config?.shiftAdditionals)
-    ? config.shiftAdditionals
-    : [];
-
-  const buildDetailedPayrollEntry = (
-    entityKey: string | number,
-    docObj: any,
-    entityWindowShifts: any[],
-    isManualEntry: boolean = false
-  ) => {
-    const docLevel = Number(docObj?.remunerationLevel || 1);
-    const defaultFn = docObj?.role || allFunctionNames[0] || 'Plantonista';
-
-    const auditByFunction: Record<
-      string,
-      { fixedShifts: number; fixedHours: number; extraShifts: number; extraHours: number }
-    > = {};
-    allFunctionNames.forEach(fn => {
-      auditByFunction[fn] = { fixedShifts: 0, fixedHours: 0, extraShifts: 0, extraHours: 0 };
-    });
-
-    const autoWeeklyFixedSlotsMap: Record<
-      string,
-      { functionName: string; hoursPerUnit: number; occurrences: number }
-    > = {};
-
-    let autoExtraWeekdayHours = 0;
-    let autoExtraWeekendHours = 0;
-    const autoExtraHoursByFn: Record<string, number> = {};
-
-    entityWindowShifts.forEach((s: any) => {
-      const fnName = s?.category || s?.role || defaultFn;
-      const hrs = getShiftHours(s);
-      if (!auditByFunction[fnName]) {
-        auditByFunction[fnName] = { fixedShifts: 0, fixedHours: 0, extraShifts: 0, extraHours: 0 };
-      }
-
-      const isFixedShift =
-        !isManualEntry &&
-        (s?.shiftType === 'Fixo' ||
-          s?.modality === 'Fixo' ||
-          (!s?.shiftType && !s?.modality && docObj?.contractType === 'Fixo Mensal'));
-
-      if (isFixedShift) {
-        auditByFunction[fnName].fixedShifts += 1;
-        auditByFunction[fnName].fixedHours += hrs;
-
-        const dObj = new Date(`${s.date}T12:00:00`);
-        const dayOfWeek = isNaN(dObj.getTime()) ? 0 : dObj.getDay();
-        const slotKey = `${fnName}__${dayOfWeek}__${s.startTime || '07:00'}__${hrs}`;
-        if (!autoWeeklyFixedSlotsMap[slotKey]) {
-          autoWeeklyFixedSlotsMap[slotKey] = {
-            functionName: fnName,
-            hoursPerUnit: hrs,
-            occurrences: 0
-          };
-        }
-        autoWeeklyFixedSlotsMap[slotKey].occurrences += 1;
-      } else {
-        auditByFunction[fnName].extraShifts += 1;
-        auditByFunction[fnName].extraHours += hrs;
-        if (isWeekendDate(s.date)) {
-          autoExtraWeekendHours += hrs;
-        } else {
-          autoExtraWeekdayHours += hrs;
-        }
-        autoExtraHoursByFn[fnName] = (autoExtraHoursByFn[fnName] || 0) + hrs;
-      }
-    });
-
-    const groupedAutoQuotas: Record<
-      string,
-      { id: string; units: number; hoursPerUnit: number; functionName: string }
-    > = {};
-    Object.values(autoWeeklyFixedSlotsMap).forEach((slot, idx) => {
-      const gKey = `${slot.functionName}__${slot.hoursPerUnit}`;
-      if (!groupedAutoQuotas[gKey]) {
-        groupedAutoQuotas[gKey] = {
-          id: `auto_q_${idx}`,
-          units: 0,
-          hoursPerUnit: slot.hoursPerUnit,
-          functionName: slot.functionName
-        };
-      }
-      groupedAutoQuotas[gKey].units += 1;
-    });
-
-    const autoFixedQuotasList = Object.values(groupedAutoQuotas);
-    const customDoc = monthCustomizations[entityKey] || {};
-    const hasCustomQuotas = Array.isArray(customDoc.fixedQuotas);
-    const hasCustomExtraWeekday =
-      customDoc.extraWeekdayHours !== undefined && customDoc.extraWeekdayHours !== null;
-    const hasCustomExtraWeekend =
-      customDoc.extraWeekendHours !== undefined && customDoc.extraWeekendHours !== null;
-
-    const activeFixedQuotas: {
-      id: string;
-      units: number;
-      hoursPerUnit: number;
-      functionName: string;
-    }[] = hasCustomQuotas ? customDoc.fixedQuotas : autoFixedQuotasList;
-
-    const activeExtraWeekdayHours: number = hasCustomExtraWeekday
-      ? Number(customDoc.extraWeekdayHours)
-      : autoExtraWeekdayHours;
-
-    const activeExtraWeekendHours: number = hasCustomExtraWeekend
-      ? Number(customDoc.extraWeekendHours)
-      : autoExtraWeekendHours;
-
-    const activeExtraFunction: string =
-      customDoc.extraFunction ||
-      Object.keys(autoExtraHoursByFn)[0] ||
-      defaultFn;
-
-    const remunerationByFunctionMap: Record<string, number> = {};
-
-    let fixedQuotasFinancialTotal = 0;
-    const evaluatedQuotas = activeFixedQuotas.map(q => {
-      const { fixed12hRef, applyLeveling } = getFunctionEffectiveRates(
-        q.functionName,
-        docLevel
-      );
-      const unitProportionalValue = fixed12hRef * (Number(q.hoursPerUnit || 12) / 12);
-      const lineTotal = Number(q.units || 0) * unitProportionalValue;
-      fixedQuotasFinancialTotal += lineTotal;
-      remunerationByFunctionMap[q.functionName] =
-        (remunerationByFunctionMap[q.functionName] || 0) + lineTotal;
-      return {
-        ...q,
-        fixed12hRef,
-        applyLeveling,
-        unitProportionalValue,
-        lineTotal
-      };
-    });
-
-    const { extraWeekday12hRef, extraWeekend12hRef } = getFunctionEffectiveRates(
-      activeExtraFunction,
-      docLevel
-    );
-    const extraWeekdayTotal =
-      extraWeekday12hRef * (Number(activeExtraWeekdayHours || 0) / 12);
-    const extraWeekendTotal =
-      extraWeekend12hRef * (Number(activeExtraWeekendHours || 0) / 12);
-    const extraFinancialTotal = extraWeekdayTotal + extraWeekendTotal;
-
-    remunerationByFunctionMap[activeExtraFunction] =
-      (remunerationByFunctionMap[activeExtraFunction] || 0) + extraFinancialTotal;
-
-    const baseSubtotalBeforeBonuses = fixedQuotasFinancialTotal + extraFinancialTotal;
-
-    let shiftLevelAdditionalsTotal = 0;
-    entityWindowShifts.forEach((s: any) => {
-      const hrs = getShiftHours(s);
-      const fnName = s?.category || defaultFn;
-      const { fixed12hRef } = getFunctionEffectiveRates(fnName, docLevel);
-      const shiftPropRef = fixed12hRef * (hrs / 12);
-      const sAdds: string[] = Array.isArray(s?.additionals) ? s.additionals : [];
-
-      sAdds.forEach(addId => {
-        const addObj = allCatalogAdditionals.find((a: any) => a.id === addId);
-        if (!addObj) return;
-        if (addObj.calcMode === 'percent') {
-          const pct = Number(addObj.percentValue || 0);
-          if (addObj.applicationTarget === 'specific_function') {
-            const targetFn = addObj.targetFunctionName || fnName;
-            const fnBase = remunerationByFunctionMap[targetFn] || shiftPropRef;
-            shiftLevelAdditionalsTotal += (fnBase * pct) / 100;
-          } else if (addObj.applicationTarget === 'final_payroll') {
-            shiftLevelAdditionalsTotal += (baseSubtotalBeforeBonuses * pct) / 100;
-          } else {
-            shiftLevelAdditionalsTotal += (shiftPropRef * pct) / 100;
-          }
-        } else {
-          shiftLevelAdditionalsTotal += Number(addObj.value12h || 0) * (hrs / 12);
-        }
-      });
-    });
-
-    const selectedBonusIds: string[] = Array.isArray(customDoc.selectedBonusIds)
-      ? customDoc.selectedBonusIds
-      : Array.isArray(docObj?.monthlyAdditionals)
-      ? docObj.monthlyAdditionals
-      : [];
-
-    let payrollBonusesTotal = 0;
-    selectedBonusIds.forEach(bId => {
-      const addObj = allCatalogAdditionals.find((a: any) => a.id === bId);
-      if (!addObj) return;
-      if (addObj.calcMode === 'percent') {
-        const pct = Number(addObj.percentValue || 0);
-        if (addObj.applicationTarget === 'specific_function') {
-          const targetFn = addObj.targetFunctionName || defaultFn;
-          const fnSub = remunerationByFunctionMap[targetFn] || 0;
-          payrollBonusesTotal += (fnSub * pct) / 100;
-        } else {
-          payrollBonusesTotal +=
-            ((baseSubtotalBeforeBonuses + shiftLevelAdditionalsTotal) * pct) / 100;
-        }
-      } else {
-        payrollBonusesTotal += Number(addObj.value12h || 0);
-      }
-    });
-
-    const additionsTotal =
-      shiftLevelAdditionalsTotal +
-      payrollBonusesTotal +
-      Number(docObj?.fixedMonthlyAdditional || 0);
-
-    const netTotalCalculated = baseSubtotalBeforeBonuses + additionsTotal;
-
-    const totalFulfilledHours = entityWindowShifts.reduce(
-      (acc: number, s: any) => acc + getShiftHours(s),
-      0
-    );
-
-    return {
-      entityKey,
-      isManualEntry,
-      doctor: docObj,
-      docLevel,
-      shiftsCount: entityWindowShifts.length,
-      totalFulfilledHours,
-      evaluatedQuotas,
-      activeFixedQuotas,
-      fixedQuotasFinancialTotal,
-      activeExtraWeekdayHours,
-      activeExtraWeekendHours,
-      activeExtraHours: activeExtraWeekdayHours + activeExtraWeekendHours,
-      activeExtraFunction,
-      extraWeekday12hRef,
-      extraWeekend12hRef,
-      extraFinancialTotal,
-      selectedBonusIds,
-      additionsTotal,
-      netTotal: netTotalCalculated,
-      auditByFunction,
-      isCustomized:
-        hasCustomQuotas ||
-        hasCustomExtraWeekday ||
-        hasCustomExtraWeekend ||
-        Array.isArray(customDoc.selectedBonusIds)
-    };
-  };
-
-  const targetDoctorsForPayroll = isAdmin
-    ? safeActiveDoctors
-    : safeActiveDoctors.filter((d: any) => Number(d?.id) === Number(currentUser?.id));
-
-  const registeredPayrollRows = targetDoctorsForPayroll.map(doc => {
-    const docWindowShifts = windowShifts.filter(
-      (s: any) => !s?.isManualUnregisteredDoctor && Number(s?.doctorId) === Number(doc.id)
-    );
-    return buildDetailedPayrollEntry(Number(doc.id), doc, docWindowShifts, false);
-  });
-
-  const manualGroupsMap: Record<
-    string,
-    { manualName: string; manualCrm: string; level: number; role: string; shifts: any[] }
-  > = {};
-
-  if (isAdmin) {
-    windowShifts
-      .filter((s: any) => Boolean(s?.isManualUnregisteredDoctor && s?.manualDoctorName))
-      .forEach((s: any) => {
-        const cleanName = String(s.manualDoctorName).trim();
-        const key = `manual__${cleanName.toLowerCase()}`;
-        if (!manualGroupsMap[key]) {
-          manualGroupsMap[key] = {
-            manualName: cleanName,
-            manualCrm: s.manualDoctorCrm || 'Alocação Manual',
-            level: Number(s.manualDoctorLevel || 1),
-            role: s.category || allFunctionNames[0] || 'Plantonista',
-            shifts: []
-          };
-        }
-        manualGroupsMap[key].shifts.push(s);
-      });
-  }
-
-  const manualPayrollRows = Object.entries(manualGroupsMap)
-    .sort((a, b) => a[1].manualName.localeCompare(b[1].manualName, 'pt-BR'))
-    .map(([mKey, grp]) => {
-      const virtualDoc = {
-        id: mKey,
-        name: `Plantonista alocado manualmente (${grp.manualName})`,
-        crm: grp.manualCrm,
-        specialty: 'Alocação Manual Gestor',
-        razaoSocial: 'Plantonista Avulso / Manual',
-        cnpj: '—',
-        remunerationLevel: grp.level,
-        role: grp.role,
-        contractType: 'Coringa / Extra'
-      };
-      return buildDetailedPayrollEntry(mKey, virtualDoc, grp.shifts, true);
-    });
-
-  const detailedPayrollRows = [...registeredPayrollRows, ...manualPayrollRows];
-
   const totalNet = detailedPayrollRows.reduce(
     (acc, item) => acc + Number(item.netTotal || 0),
     0
   );
 
-  const updateDoctorPayrollCustom = (entityKey: string | number, updater: (curr: any) => any) => {
+  const updateDoctorPayrollCustom = (
+    entityKey: string | number,
+    updater: (curr: any) => any
+  ) => {
     if (!isAdmin) return;
     safeSetConfig((prev: any) => {
       const allCustom = prev?.payrollCustomizations || {};
@@ -3746,94 +4357,135 @@ export default function StaffAndFinanceViews(props: any) {
     });
   };
 
-  const handleAddFixedQuotaRow = (docRow: any) => {
-    const currentQuotas = [...docRow.activeFixedQuotas];
-    currentQuotas.push({
-      id: `q_${Date.now()}`,
+  // Manipuladores de Funções Exercidas na linha do médico na Folha PJ
+  const handleAddRoleEntryToPayrollRow = (docRow: any) => {
+    const currEntries = [...docRow.activeRoleEntries];
+    currEntries.push({
+      id: `re_${Date.now()}`,
+      functionName: docRow.doctor.role || allFunctionNames[0] || 'Plantonista',
+      billingMode: 'fixed_quota_monthly',
       units: 1,
       hoursPerUnit: 12,
-      functionName: docRow.doctor.role || allFunctionNames[0] || 'Plantonista'
+      weekdayHours: 12,
+      weekendHours: 0
     });
     updateDoctorPayrollCustom(docRow.entityKey, curr => ({
       ...curr,
-      fixedQuotas: currentQuotas
+      roleEntries: currEntries
     }));
   };
 
-  const handleUpdateFixedQuotaRow = (
+  const handleUpdateRoleEntryInPayrollRow = (
     docRow: any,
-    quotaIndex: number,
-    field: 'units' | 'hoursPerUnit' | 'functionName',
+    entryIdx: number,
+    field: string,
     value: any
   ) => {
-    const currentQuotas = docRow.activeFixedQuotas.map((q: any, idx: number) =>
-      idx === quotaIndex ? { ...q, [field]: value } : q
+    const currEntries = docRow.activeRoleEntries.map((item: any, idx: number) =>
+      idx === entryIdx ? { ...item, [field]: value } : item
     );
     updateDoctorPayrollCustom(docRow.entityKey, curr => ({
       ...curr,
-      fixedQuotas: currentQuotas
+      roleEntries: currEntries
     }));
   };
 
-  const handleRemoveFixedQuotaRow = (docRow: any, quotaIndex: number) => {
-    const currentQuotas = docRow.activeFixedQuotas.filter(
-      (_: any, idx: number) => idx !== quotaIndex
+  const handleRemoveRoleEntryFromPayrollRow = (docRow: any, entryIdx: number) => {
+    const currEntries = docRow.activeRoleEntries.filter(
+      (_: any, idx: number) => idx !== entryIdx
     );
     updateDoctorPayrollCustom(docRow.entityKey, curr => ({
       ...curr,
-      fixedQuotas: currentQuotas
+      roleEntries: currEntries
     }));
   };
 
-  const handleUpdateExtraWeekdayHours = (docRow: any, newHours: number) => {
+  // Manipulador de Multiplicador / Competências Acumuladas de Adicionais (0x, 1x, 2x, 3x...)
+  const handleUpdateAdditionalCountOnRow = (
+    docRow: any,
+    addId: string,
+    newCount: number
+  ) => {
     updateDoctorPayrollCustom(docRow.entityKey, curr => ({
       ...curr,
-      extraWeekdayHours: Math.max(0, newHours),
-      extraWeekendHours:
-        curr.extraWeekendHours !== undefined
-          ? curr.extraWeekendHours
-          : docRow.activeExtraWeekendHours,
-      extraFunction: curr.extraFunction || docRow.activeExtraFunction
+      additionalCounts: {
+        ...(curr.additionalCounts || {}),
+        [addId]: Math.max(0, Number(newCount))
+      }
     }));
   };
 
-  const handleUpdateExtraWeekendHours = (docRow: any, newHours: number) => {
-    updateDoctorPayrollCustom(docRow.entityKey, curr => ({
-      ...curr,
-      extraWeekdayHours:
-        curr.extraWeekdayHours !== undefined
-          ? curr.extraWeekdayHours
-          : docRow.activeExtraWeekdayHours,
-      extraWeekendHours: Math.max(0, newHours),
-      extraFunction: curr.extraFunction || docRow.activeExtraFunction
-    }));
+  // Manipulador de Desconto sobre Passagem de Plantão (Sem desconto, Integral, Dif. Nível, Fração %, Parcial R$)
+  const handleUpdateSwapDiscountOnRow = (
+    docRow: any,
+    swapId: any,
+    field: 'mode' | 'fractionPercent' | 'customAmount',
+    val: any
+  ) => {
+    updateDoctorPayrollCustom(docRow.entityKey, curr => {
+      const currDiscounts = curr.swapDiscounts || {};
+      const currSwapCfg = currDiscounts[swapId] || {
+        mode: 'none',
+        fractionPercent: 50,
+        customAmount: 0
+      };
+      return {
+        ...curr,
+        swapDiscounts: {
+          ...currDiscounts,
+          [swapId]: {
+            ...currSwapCfg,
+            [field]: val
+          }
+        }
+      };
+    });
   };
 
-  const handleUpdateExtraFunction = (docRow: any, newFn: string) => {
+  // Manipuladores de Ajuste Manual (+ Adicionar ou - Subtrair Valor)
+  const handleAddManualAdjustmentOnRow = (docRow: any) => {
+    const draft = adjDraftByEntity[String(docRow.entityKey)] || {
+      type: 'add',
+      amount: '',
+      description: ''
+    };
+    const numVal = Number(draft.amount);
+    if (!numVal || numVal <= 0) {
+      alert('Informe um valor válido em R$ para o ajuste.');
+      return;
+    }
+
+    const newAdj = {
+      id: `adj_${Date.now()}`,
+      type: draft.type,
+      amount: numVal,
+      description:
+        draft.description.trim() ||
+        (draft.type === 'add' ? 'Ajuste positivo (+)' : 'Ajuste negativo (-)')
+    };
+
     updateDoctorPayrollCustom(docRow.entityKey, curr => ({
       ...curr,
-      extraWeekdayHours:
-        curr.extraWeekdayHours !== undefined
-          ? curr.extraWeekdayHours
-          : docRow.activeExtraWeekdayHours,
-      extraWeekendHours:
-        curr.extraWeekendHours !== undefined
-          ? curr.extraWeekendHours
-          : docRow.activeExtraWeekendHours,
-      extraFunction: newFn
+      manualAdjustments: [...(curr.manualAdjustments || []), newAdj]
     }));
+
+    setAdjDraftByEntity(prev => ({
+      ...prev,
+      [String(docRow.entityKey)]: { type: 'add', amount: '', description: '' }
+    }));
+    safeRecordAction(
+      `Ajuste manual (${newAdj.type === 'add' ? '+' : '-'} R$ ${numVal}) aplicado na folha de ${
+        docRow.doctor.name
+      }`
+    );
   };
 
-  const handleTogglePayrollBonusOnRow = (docRow: any, bonusId: string) => {
-    const currIds: string[] = docRow.selectedBonusIds || [];
-    const exists = currIds.includes(bonusId);
-    const nextIds = exists
-      ? currIds.filter(id => id !== bonusId)
-      : [...currIds, bonusId];
-
+  const handleRemoveManualAdjustmentOnRow = (docRow: any, adjId: string) => {
     updateDoctorPayrollCustom(docRow.entityKey, curr => ({
       ...curr,
-      selectedBonusIds: nextIds
+      manualAdjustments: (curr.manualAdjustments || []).filter(
+        (a: any) => a.id !== adjId
+      )
     }));
   };
 
@@ -3854,48 +4506,113 @@ export default function StaffAndFinanceViews(props: any) {
     safeRecordAction(`Cálculo da Folha PJ de ${docName} restaurado para leitura automática`);
   };
 
+  // Conferência pelo próprio Médico (De Acordo / Apontar Divergência)
+  const handleDoctorConfirmPayroll = (docId: number) => {
+    const confKey = `${competenceMonth}__${docId}`;
+    safeSetDoctorConference((prev: any) => ({
+      ...(prev || {}),
+      [confKey]: {
+        checked: true,
+        checkedAt: new Date().toLocaleString('pt-BR'),
+        errorNote: ''
+      }
+    }));
+    safeRecordAction(
+      `Médico ${currentUser?.name || docId} confirmou estar DE ACORDO com o extrato PJ (${competenceMonth})`
+    );
+  };
+
+  const handleDoctorReportDivergence = (docId: number) => {
+    if (!doctorDivergenceNoteInput.trim()) {
+      alert('Descreva a divergência encontrada para que o gestor possa revisar.');
+      return;
+    }
+    const confKey = `${competenceMonth}__${docId}`;
+    safeSetDoctorConference((prev: any) => ({
+      ...(prev || {}),
+      [confKey]: {
+        checked: false,
+        checkedAt: new Date().toLocaleString('pt-BR'),
+        errorNote: doctorDivergenceNoteInput.trim()
+      }
+    }));
+    setDoctorDivergenceNoteInput('');
+    safeRecordAction(
+      `Médico ${currentUser?.name || docId} apontou divergência no extrato PJ (${competenceMonth})`
+    );
+  };
+
+  // Exportação CSV/Excel Completa da Folha PJ + Auditoria Analítica por Função e Dias
   const handleExportPayrollAndAuditCSV = () => {
     if (typeof window === 'undefined') return;
 
     const fnHeaders: string[] = [];
     allFunctionNames.forEach(fn => {
-      fnHeaders.push(`${fn} - Horas Fixas Escala`);
-      fnHeaders.push(`${fn} - Horas Extras Escala`);
+      fnHeaders.push(`${fn} - Horas Fixas`);
+      fnHeaders.push(`${fn} - Horas Extras`);
+      fnHeaders.push(`${fn} - Total Horas`);
     });
 
     const header = [
       'Medico / Identificacao',
       'CRM',
-      'Especialidade / Origem',
+      'Especialidade',
       'Nivel Senioridade',
       'Razao Social PJ',
       'CNPJ',
-      'Cargas Fixas Acumuladas (Unidades)',
-      'Valor Total Cargas Fixas (R$)',
-      'Horas Extras Dia de Semana (h)',
-      'Horas Extras Fim de Semana (h)',
-      'Funcao Ref. Hora Extra',
-      'Valor Total Horas Extras (R$)',
-      'Adicionais e Bonificacoes (R$)',
+      'Funcoes Exercidas na Competencia',
+      'Subtotal Funcoes (R$)',
+      'Adicionais Acumulados (Competencias)',
+      'Subtotal Adicionais (R$)',
+      'Descontos de Passagens (R$)',
+      'Ajustes Manuais (+/- R$)',
       'Liquido Total PJ (R$)',
       'Total Horas Cumpridas na Escala',
+      'Discriminacao de Dias e Horarios Exercidos',
       ...fnHeaders
     ];
 
     const rows = detailedPayrollRows.map(item => {
       const d = item.doctor || {};
-      const quotasDesc =
-        item.evaluatedQuotas.length > 0
-          ? item.evaluatedQuotas
-              .map(q => `${q.units}x Carga Fixa ${q.hoursPerUnit}h (${q.functionName})`)
+      const rolesDesc =
+        item.evaluatedRoleEntries.length > 0
+          ? item.evaluatedRoleEntries
+              .map((re: any) => {
+                if (re.billingMode === 'monthly_no_schedule') {
+                  return `${re.functionName} (Cargo Mensal s/ Escala)`;
+                }
+                if (re.billingMode === 'fixed_quota_monthly') {
+                  return `${re.units}x Cota Fixa ${re.hoursPerUnit}h ${re.functionName}`;
+                }
+                return `${re.functionName} (${re.weekdayHours}h Sem + ${re.weekendHours}h FDS)`;
+              })
               .join(' + ')
-          : '0 Cargas Fixas';
+          : 'Sem função lançada';
+
+      const addsDesc =
+        item.evaluatedAdditionals
+          .filter((a: any) => a.count > 0)
+          .map((a: any) => `${a.count}x ${a.name}`)
+          .join(' + ') || 'Nenhum adicional';
+
+      const daysDesc =
+        item.dailyWorkedScheduleList
+          .map(
+            (sh: any) =>
+              `[${formatBrDate(sh.date)} ${sh.startTime}-${sh.endTime} (${sh.hours}h) ${sh.functionName}]`
+          )
+          .join(' | ') || 'Sem turnos';
 
       const fnCols: string[] = [];
       allFunctionNames.forEach(fn => {
-        const audit = item.auditByFunction[fn] || { fixedHours: 0, extraHours: 0 };
+        const audit = item.auditByFunction[fn] || {
+          fixedHours: 0,
+          extraHours: 0,
+          totalHours: 0
+        };
         fnCols.push(String(audit.fixedHours || 0).replace('.', ','));
         fnCols.push(String(audit.extraHours || 0).replace('.', ','));
+        fnCols.push(String(audit.totalHours || 0).replace('.', ','));
       });
 
       return [
@@ -3905,15 +4622,15 @@ export default function StaffAndFinanceViews(props: any) {
         `Nivel ${item.docLevel}`,
         `"${(d.razaoSocial || '').replace(/"/g, '""')}"`,
         `"${(d.cnpj || '').replace(/"/g, '""')}"`,
-        `"${quotasDesc}"`,
-        String(item.fixedQuotasFinancialTotal.toFixed(2).replace('.', ',')),
-        String(item.activeExtraWeekdayHours).replace('.', ','),
-        String(item.activeExtraWeekendHours).replace('.', ','),
-        `"${item.activeExtraFunction}"`,
-        String(item.extraFinancialTotal.toFixed(2).replace('.', ',')),
-        String(item.additionsTotal.toFixed(2).replace('.', ',')),
+        `"${rolesDesc}"`,
+        String(item.functionsSubtotal.toFixed(2).replace('.', ',')),
+        `"${addsDesc}"`,
+        String(item.additionalsSubtotal.toFixed(2).replace('.', ',')),
+        String(item.totalPassagensDiscounts.toFixed(2).replace('.', ',')),
+        String(item.manualAdjustmentsNet.toFixed(2).replace('.', ',')),
         String(item.netTotal.toFixed(2).replace('.', ',')),
         String(item.totalFulfilledHours).replace('.', ','),
+        `"${daysDesc}"`,
         ...fnCols
       ].join(';');
     });
@@ -3923,7 +4640,7 @@ export default function StaffAndFinanceViews(props: any) {
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', `Folha_PJ_e_Auditoria_Funcoes_${competenceMonth}.csv`);
+    link.setAttribute('download', `Folha_PJ_e_Auditoria_Analitica_${competenceMonth}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -3931,15 +4648,18 @@ export default function StaffAndFinanceViews(props: any) {
 
   return (
     <div className="space-y-6 text-slate-800">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+      {/* Cabeçalho da Folha PJ / Meu Extrato PJ */}
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
         <div>
           <h2 className="text-xl sm:text-2xl font-bold text-slate-900 flex items-center gap-2">
             <DollarSign className="text-emerald-600" size={24} />
-            Folha Financeira PJ & Auditoria de Carga Horária ({competenceMonth})
+            {isAdmin
+              ? `Folha Financeira PJ & Auditoria Analítica de Carga Horária (${competenceMonth})`
+              : `Meu Extrato de Produção PJ & Carga Horária (${competenceMonth})`}
           </h2>
           <p className="text-xs text-slate-500 mt-0.5">
-            Janela 26 a 25: <strong>{competenceWindow?.startStr}</strong> até{' '}
-            <strong>{competenceWindow?.endStr}</strong> • Listagem em ordem alfabética, suportando funções com ou sem nivelamento e bonificações.
+            Janela 26 a 25: <strong>{formatBrDate(competenceWindow?.startStr)}</strong> até{' '}
+            <strong>{formatBrDate(competenceWindow?.endStr)}</strong> • Funções fixas mensais (4 ou 5 semanas), horas trabalhadas, adicionais acumuláveis, descontos de passagens e ajustes.
           </p>
         </div>
 
@@ -3950,20 +4670,41 @@ export default function StaffAndFinanceViews(props: any) {
             onChange={e => safeSetCompetenceMonth(e.target.value)}
             className="border border-slate-300 rounded-xl px-3 py-2 font-extrabold"
           />
+
           <button
             type="button"
-            onClick={handleExportPayrollAndAuditCSV}
-            className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold flex items-center gap-1.5 shadow-sm"
+            onClick={() =>
+              handleDownloadAnalyticalWorkloadAuditPDF(
+                !isAdmin ? detailedPayrollRows[0] : undefined
+              )
+            }
+            className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-xl font-bold flex items-center gap-1.5 shadow-sm"
           >
-            <Download size={14} /> Exportar Folha PJ + Auditoria por Função (CSV/Excel)
+            <Printer size={14} />
+            {isAdmin
+              ? 'Baixar Documento de Auditoria de Carga Horária (PDF)'
+              : 'Baixar Meu Espelho PJ & Horas (PDF)'}
           </button>
+
+          {isAdmin && (
+            <button
+              type="button"
+              onClick={handleExportPayrollAndAuditCSV}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold flex items-center gap-1.5 shadow-sm"
+            >
+              <Download size={14} /> Exportar Planilha Completa (CSV/Excel)
+            </button>
+          )}
         </div>
       </div>
 
+      {/* Banner Consolidado */}
       <div className="bg-emerald-900 text-white p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-md">
         <div>
           <span className="text-[11px] font-extrabold uppercase text-emerald-300">
-            Total Consolidado da Competência ({competenceMonth})
+            {isAdmin
+              ? `Total Consolidado da Folha PJ (${competenceMonth})`
+              : `Minha Produção Líquida Total na Competência (${competenceMonth})`}
           </span>
           <div className="text-2xl sm:text-3xl font-black mt-0.5">
             R$ {totalNet.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
@@ -3972,38 +4713,111 @@ export default function StaffAndFinanceViews(props: any) {
         <div className="text-xs text-emerald-200 flex items-center gap-2 max-w-md">
           <ShieldCheck size={20} className="shrink-0" />
           <span>
-            Fração de plantão paga proporcionalmente sobre 12h. Bonificações podem incidir sobre o valor final da folha ou sobre função específica.
+            Funções de cadastro fixo pagam o valor integral da cota mensal (4 ou 5 semanas). Plantões extras pagam por hora trabalhada. Todas as horas cumpridas ficam discriminadas na Auditoria abaixo.
           </span>
         </div>
       </div>
 
+      {/* PAINEL DE DUPLO CHECK / CONFERÊNCIA DO MÉDICO (VISÍVEL NO LOGIN DO MÉDICO) */}
+      {!isAdmin && detailedPayrollRows[0] && (
+        <div className="bg-white p-5 rounded-2xl border-2 border-blue-200 shadow-sm space-y-3 text-xs">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-black text-slate-900 uppercase flex items-center gap-2">
+                <CheckSquare size={17} className="text-blue-600" />
+                Conferência do Meu Extrato de Produção PJ ({competenceMonth})
+              </h3>
+              <p className="text-slate-500 mt-0.5">
+                Verifique abaixo as suas funções cadastradas, adicionais acumulados, descontos de passagens e horas trabalhadas.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              {detailedPayrollRows[0].conferenceStatus?.checked ? (
+                <span className="px-3.5 py-2 rounded-xl bg-emerald-100 text-emerald-900 font-black flex items-center gap-1.5">
+                  <CheckCircle size={15} /> Extrato Confirmado em{' '}
+                  {detailedPayrollRows[0].conferenceStatus.checkedAt}
+                </span>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => handleDoctorConfirmPayroll(Number(currentUser?.id))}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-black flex items-center gap-1.5 shadow-sm"
+                >
+                  <CheckCircle size={15} /> ✅ Confirmar Extrato PJ (De Acordo)
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-col sm:flex-row gap-2 pt-2 border-t border-slate-100">
+            <input
+              type="text"
+              placeholder="Caso identifique alguma divergência em horas, funções ou adicionais, descreva aqui para revisão do gestor..."
+              value={doctorDivergenceNoteInput}
+              onChange={e => setDoctorDivergenceNoteInput(e.target.value)}
+              className="flex-1 border border-slate-300 rounded-xl px-3 py-1.5"
+            />
+            <button
+              type="button"
+              onClick={() => handleDoctorReportDivergence(Number(currentUser?.id))}
+              className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-1.5 rounded-xl font-bold shrink-0"
+            >
+              ⚠️ Apontar Divergência ao Gestor
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* TABELA 1: COMPOSIÇÃO DETALHADA DA FOLHA PJ
+          (FUNÇÕES EXERCIDAS + ADICIONAIS ACUMULÁVEIS + DESCONTOS DE PASSAGENS + AJUSTES MANUAIS) */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
+        <div className="p-4 border-b border-slate-100 flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-black text-slate-900 uppercase flex items-center gap-2">
+              <Layers size={17} className="text-blue-600" />
+              1. Composição Financeira PJ — Funções Exercidas, Adicionais Acumuláveis, Descontos de Passagens & Ajustes
+            </h3>
+            <p className="text-[11px] text-slate-500">
+              Tudo o que o gestor configurar abaixo reflete imediatamente na aba “Meu Extrato PJ” do respetivo médico.
+            </p>
+          </div>
+        </div>
+
         <table className="w-full text-left border-collapse text-xs">
           <thead>
             <tr className="bg-slate-900 text-white uppercase text-[10px]">
-              <th className="py-3 px-4">Médico / Identificação (A-Z)</th>
+              <th className="py-3 px-4">Médico / Auditoria</th>
               <th className="py-3 px-3">
-                Ciclo Fixo Semanal Acumulado (Ref. 12h)
+                Funções Exercidas (Fixo s/ Escala, Cota Fixa 4/5 Sem. ou Por Hora)
               </th>
               <th className="py-3 px-3">
-                Horas Extras (Dia Semana vs. Fim de Semana)
+                Adicionais & Bonificações (Quantidade Acumulada 1x, 2x...)
               </th>
-              <th className="py-3 px-3">Adicionais & Bonificações</th>
-              <th className="py-3 px-4 text-right">Líquido Total PJ</th>
+              <th className="py-3 px-3">
+                Descontos Passagens & Ajustes (+/-)
+              </th>
+              <th className="py-3 px-4 text-right">Líquido Final PJ</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200">
             {detailedPayrollRows.map(row => {
               const d = row.doctor || {};
+              const adjDraft = adjDraftByEntity[String(row.entityKey)] || {
+                type: 'add',
+                amount: '',
+                description: ''
+              };
 
               return (
                 <tr
                   key={row.entityKey}
                   className={`hover:bg-slate-50/80 align-top ${
-                    row.isManualEntry ? 'bg-amber-50/40' : ''
+                    row.isManualEntry ? 'bg-amber-50/30' : ''
                   }`}
                 >
-                  <td className="py-4 px-4 space-y-1 min-w-[210px]">
+                  {/* COLUNA 1: IDENTIFICAÇÃO DO MÉDICO */}
+                  <td className="py-4 px-4 space-y-1.5 min-w-[215px]">
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <strong className="text-slate-900 text-sm font-black">
                         {d.name}
@@ -4015,10 +4829,24 @@ export default function StaffAndFinanceViews(props: any) {
                     <p className="text-slate-500 text-[11px]">
                       {d.crm} • {d.specialty || 'Clínica Médica'}
                     </p>
-                    <div className="pt-1 flex items-center gap-2">
-                      <span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 font-bold text-[10px]">
-                        Escala: {row.shiftsCount} pl. ({row.totalFulfilledHours}h)
+                    {!row.isManualEntry && (
+                      <p className="text-slate-600 font-semibold text-[10px]">
+                        PJ: {d.razaoSocial || '—'}
+                      </p>
+                    )}
+
+                    <div className="pt-1 flex flex-wrap items-center gap-1.5">
+                      <span className="px-2 py-0.5 rounded bg-slate-900 text-white font-extrabold text-[10px]">
+                        Escala: {row.shiftsCount} pl. ({row.totalFulfilledHours}h cumpridas)
                       </span>
+                      <button
+                        type="button"
+                        onClick={() => handleDownloadAnalyticalWorkloadAuditPDF(row)}
+                        className="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-[10px] flex items-center gap-1 border border-slate-300"
+                        title="Baixar espelho individual com discriminação de dias e horários"
+                      >
+                        <Printer size={10} /> Espelho PDF
+                      </button>
                       {isAdmin && row.isCustomized && (
                         <button
                           type="button"
@@ -4031,212 +4859,563 @@ export default function StaffAndFinanceViews(props: any) {
                         </button>
                       )}
                     </div>
+
+                    {row.conferenceStatus?.checked && (
+                      <div className="p-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-900 font-bold text-[10px]">
+                        ✓ Confirmado pelo médico ({row.conferenceStatus.checkedAt})
+                      </div>
+                    )}
+                    {row.conferenceStatus?.errorNote && (
+                      <div className="p-2 rounded-lg bg-rose-50 border border-rose-300 text-rose-900 font-bold text-[10px]">
+                        ⚠ Divergência apontada pelo médico: “{row.conferenceStatus.errorNote}”
+                      </div>
+                    )}
                   </td>
 
-                  <td className="py-4 px-3 min-w-[310px] space-y-2">
-                    {row.evaluatedQuotas.map((q: any, qIdx: number) => (
-                      <div
-                        key={q.id || qIdx}
-                        className="p-2 rounded-xl bg-blue-50/60 border border-blue-200 flex flex-wrap items-center justify-between gap-1.5"
-                      >
-                        {isAdmin ? (
-                          <div className="flex flex-wrap items-center gap-1">
-                            <input
-                              type="number"
-                              min={0}
-                              value={q.units}
-                              onChange={e =>
-                                handleUpdateFixedQuotaRow(
-                                  row,
-                                  qIdx,
-                                  'units',
-                                  Math.max(0, Number(e.target.value))
-                                )
-                              }
-                              className="w-11 border border-blue-300 rounded px-1 py-0.5 text-center font-black bg-white"
-                            />
-                            <span className="text-[10px] font-bold">x</span>
-                            <input
-                              type="number"
-                              min={1}
-                              max={24}
-                              value={q.hoursPerUnit}
-                              onChange={e =>
-                                handleUpdateFixedQuotaRow(
-                                  row,
-                                  qIdx,
-                                  'hoursPerUnit',
-                                  Math.max(1, Number(e.target.value))
-                                )
-                              }
-                              className="w-12 border border-blue-300 rounded px-1 py-0.5 text-center font-black bg-white"
-                            />
-                            <span className="text-[10px] font-bold">h</span>
-                            <select
-                              value={q.functionName}
-                              onChange={e =>
-                                handleUpdateFixedQuotaRow(
-                                  row,
-                                  qIdx,
-                                  'functionName',
-                                  e.target.value
-                                )
-                              }
-                              className="border border-blue-300 rounded px-1.5 py-0.5 bg-white font-bold text-[10px]"
-                            >
-                              {allFunctionNames.map(fn => (
-                                <option key={fn} value={fn}>
-                                  {fn}
-                                </option>
-                              ))}
-                            </select>
-                          </div>
-                        ) : (
-                          <span className="font-bold text-blue-950">
-                            {q.units}x {q.hoursPerUnit}h ({q.functionName})
-                          </span>
-                        )}
-
-                        <div className="flex items-center gap-1 ml-auto">
-                          <span className="font-extrabold text-blue-900">
-                            R${' '}
-                            {q.lineTotal.toLocaleString('pt-BR', {
-                              minimumFractionDigits: 2
-                            })}
-                          </span>
-                          {isAdmin && (
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveFixedQuotaRow(row, qIdx)}
-                              className="text-slate-400 hover:text-red-600"
-                            >
-                              <Trash2 size={12} />
-                            </button>
-                          )}
-                        </div>
+                  {/* COLUNA 2: FUNÇÕES EXERCIDAS (FIXO S/ ESCALA, COTA FIXA 4/5 SEMANAS OU POR HORA TRABALHADA) */}
+                  <td className="py-4 px-3 min-w-[360px] space-y-2">
+                    {row.evaluatedRoleEntries.length === 0 ? (
+                      <div className="text-slate-400 italic text-[11px]">
+                        Nenhuma função remunerada lançada nesta competência.
                       </div>
-                    ))}
+                    ) : (
+                      <div className="space-y-2">
+                        {row.evaluatedRoleEntries.map((re: any, reIdx: number) => {
+                          const cInfo = getFunctionColorInfo(re.functionName);
+                          return (
+                            <div
+                              key={re.id || reIdx}
+                              style={{ borderLeft: `4px solid ${cInfo.hex}` }}
+                              className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2"
+                            >
+                              {isAdmin ? (
+                                <div className="flex flex-wrap items-center justify-between gap-1.5">
+                                  <select
+                                    value={re.functionName}
+                                    onChange={e =>
+                                      handleUpdateRoleEntryInPayrollRow(
+                                        row,
+                                        reIdx,
+                                        'functionName',
+                                        e.target.value
+                                      )
+                                    }
+                                    className="border border-slate-300 rounded-lg px-2 py-1 bg-white font-black text-slate-900 text-[11px]"
+                                  >
+                                    {allFunctionNames.map(fn => (
+                                      <option key={fn} value={fn}>
+                                        {fn}
+                                      </option>
+                                    ))}
+                                  </select>
+
+                                  <select
+                                    value={re.billingMode}
+                                    onChange={e =>
+                                      handleUpdateRoleEntryInPayrollRow(
+                                        row,
+                                        reIdx,
+                                        'billingMode',
+                                        e.target.value
+                                      )
+                                    }
+                                    className="border border-blue-300 rounded-lg px-2 py-1 bg-blue-50 font-extrabold text-blue-950 text-[10px]"
+                                  >
+                                    <option value="fixed_quota_monthly">
+                                      Cota Fixa Mensal (4 ou 5 sem.)
+                                    </option>
+                                    <option value="hourly_extra">
+                                      Por Hora Trabalhada (Extra/Avulso)
+                                    </option>
+                                    <option value="monthly_no_schedule">
+                                      Cargo Fixo Mensal (Sem Escala)
+                                    </option>
+                                  </select>
+
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleRemoveRoleEntryFromPayrollRow(row, reIdx)
+                                    }
+                                    className="text-slate-400 hover:text-red-600 p-0.5"
+                                    title="Remover função"
+                                  >
+                                    <Trash2 size={13} />
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="flex items-center justify-between">
+                                  <strong className="text-slate-900 font-black">
+                                    {re.functionName}
+                                  </strong>
+                                  <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-900 font-bold text-[10px]">
+                                    {re.billingMode === 'fixed_quota_monthly'
+                                      ? 'Cota Fixa Mensal (4/5 sem.)'
+                                      : re.billingMode === 'monthly_no_schedule'
+                                      ? 'Cargo Fixo Mensal'
+                                      : 'Por Hora Trabalhada'}
+                                  </span>
+                                </div>
+                              )}
+
+                              {/* Campos conforme a modalidade da função */}
+                              {re.billingMode === 'fixed_quota_monthly' && (
+                                <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                                  {isAdmin ? (
+                                    <div className="flex items-center gap-1">
+                                      <input
+                                        type="number"
+                                        min={0}
+                                        value={re.units}
+                                        onChange={e =>
+                                          handleUpdateRoleEntryInPayrollRow(
+                                            row,
+                                            reIdx,
+                                            'units',
+                                            Math.max(0, Number(e.target.value))
+                                          )
+                                        }
+                                        className="w-12 border rounded px-1.5 py-0.5 text-center font-black bg-white"
+                                      />
+                                      <span className="text-[10px] font-bold">
+                                        cota(s) fixa(s) de
+                                      </span>
+                                      <input
+                                        type="number"
+                                        min={1}
+                                        max={24}
+                                        value={re.hoursPerUnit}
+                                        onChange={e =>
+                                          handleUpdateRoleEntryInPayrollRow(
+                                            row,
+                                            reIdx,
+                                            'hoursPerUnit',
+                                            Math.max(1, Number(e.target.value))
+                                          )
+                                        }
+                                        className="w-12 border rounded px-1.5 py-0.5 text-center font-black bg-white"
+                                      />
+                                      <span className="text-[10px] font-bold">h/sem</span>
+                                    </div>
+                                  ) : (
+                                    <span>
+                                      {re.units}x Cota Fixa de {re.hoursPerUnit}h semanais
+                                    </span>
+                                  )}
+
+                                  <span className="font-black text-blue-900 ml-auto">
+                                    R${' '}
+                                    {re.lineTotal.toLocaleString('pt-BR', {
+                                      minimumFractionDigits: 2
+                                    })}
+                                  </span>
+                                </div>
+                              )}
+
+                              {re.billingMode === 'hourly_extra' && (
+                                <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
+                                  {isAdmin ? (
+                                    <div className="flex items-center gap-2">
+                                      <div className="flex items-center gap-1">
+                                        <span className="text-[10px] font-bold text-slate-600">
+                                          Sem(h):
+                                        </span>
+                                        <input
+                                          type="number"
+                                          min={0}
+                                          value={re.weekdayHours}
+                                          onChange={e =>
+                                            handleUpdateRoleEntryInPayrollRow(
+                                              row,
+                                              reIdx,
+                                              'weekdayHours',
+                                              Math.max(0, Number(e.target.value))
+                                            )
+                                          }
+                                          className="w-14 border border-blue-300 rounded px-1.5 py-0.5 text-center font-black bg-white"
+                                        />
+                                      </div>
+                                      <div className="flex items-center gap-1">
+                                        <span className="text-[10px] font-bold text-emerald-700">
+                                          FDS(h):
+                                        </span>
+                                        <input
+                                          type="number"
+                                          min={0}
+                                          value={re.weekendHours}
+                                          onChange={e =>
+                                            handleUpdateRoleEntryInPayrollRow(
+                                              row,
+                                              reIdx,
+                                              'weekendHours',
+                                              Math.max(0, Number(e.target.value))
+                                            )
+                                          }
+                                          className="w-14 border border-emerald-400 rounded px-1.5 py-0.5 text-center font-black bg-white"
+                                        />
+                                      </div>
+                                    </div>
+                                  ) : (
+                                    <span>
+                                      Dia Semana: {re.weekdayHours}h • Fim de Semana:{' '}
+                                      {re.weekendHours}h
+                                    </span>
+                                  )}
+
+                                  <span className="font-black text-emerald-800 ml-auto">
+                                    R${' '}
+                                    {re.lineTotal.toLocaleString('pt-BR', {
+                                      minimumFractionDigits: 2
+                                    })}
+                                  </span>
+                                </div>
+                              )}
+
+                              {re.billingMode === 'monthly_no_schedule' && (
+                                <div className="flex items-center justify-between text-[11px]">
+                                  <span className="text-purple-900 font-bold">
+                                    Cargo Fixo Mensal (Sem Escala)
+                                  </span>
+                                  <span className="font-black text-purple-900">
+                                    R${' '}
+                                    {re.lineTotal.toLocaleString('pt-BR', {
+                                      minimumFractionDigits: 2
+                                    })}
+                                  </span>
+                                </div>
+                              )}
+
+                              {/* Sinalizador de Presença Real na Escala */}
+                              {re.billingMode === 'fixed_quota_monthly' && (
+                                <div className="text-[10px] text-slate-500 flex items-center justify-between pt-1 border-t border-slate-200/70">
+                                  <span>
+                                    Auditoria escala: <strong>{re.fulfilledFixedShifts} pl. ({re.fulfilledFixedHours}h)</strong>
+                                    {re.abonadaDispensesCount > 0
+                                      ? ` + ${re.abonadaDispensesCount} dispensa(s) abonada(s)`
+                                      : ''}
+                                  </span>
+                                  <span className="text-[9px] font-bold text-blue-700">
+                                    Valor integral 4/5 sem.
+                                  </span>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
 
                     <div className="flex items-center justify-between pt-1">
                       {isAdmin && (
                         <button
                           type="button"
-                          onClick={() => handleAddFixedQuotaRow(row)}
-                          className="text-[10px] font-extrabold text-blue-700 bg-blue-50 px-2 py-1 rounded border border-blue-200"
+                          onClick={() => handleAddRoleEntryToPayrollRow(row)}
+                          className="text-[10px] font-extrabold text-blue-700 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg border border-blue-200 flex items-center gap-1"
                         >
-                          + Acumular Carga Fixa
+                          <Plus size={12} /> + Inserir Função Exercida
                         </button>
                       )}
                       <span className="text-[11px] font-extrabold text-slate-700 ml-auto">
-                        Subtotal: R${' '}
-                        {row.fixedQuotasFinancialTotal.toLocaleString('pt-BR', {
+                        Subtotal Funções: R${' '}
+                        {row.functionsSubtotal.toLocaleString('pt-BR', {
                           minimumFractionDigits: 2
                         })}
                       </span>
                     </div>
                   </td>
 
-                  <td className="py-4 px-3 min-w-[270px] space-y-2">
-                    <div className="p-2.5 rounded-xl bg-emerald-50/60 border border-emerald-200 space-y-2">
-                      {isAdmin ? (
-                        <>
-                          <div className="grid grid-cols-2 gap-2">
-                            <div>
-                              <label className="block text-[9px] font-bold text-blue-900">
-                                Horas Extra Semana:
-                              </label>
-                              <input
-                                type="number"
-                                min={0}
-                                value={row.activeExtraWeekdayHours}
-                                onChange={e =>
-                                  handleUpdateExtraWeekdayHours(row, Number(e.target.value))
-                                }
-                                className="w-full border border-blue-300 rounded px-2 py-1 font-black bg-white"
-                              />
+                  {/* COLUNA 3: ADICIONAIS ACUMULÁVEIS POR QUANTIDADE DE COMPETÊNCIAS (1x, 2x, 3x...) */}
+                  <td className="py-4 px-3 min-w-[275px] space-y-2">
+                    <div className="space-y-1.5">
+                      {row.evaluatedAdditionals.map((add: any) => {
+                        const isActive = add.count > 0;
+                        if (!isAdmin && !isActive) return null;
+
+                        return (
+                          <div
+                            key={add.id}
+                            className={`p-2 rounded-xl border flex items-center justify-between gap-2 ${
+                              isActive
+                                ? 'bg-amber-50/80 border-amber-300 text-amber-950'
+                                : 'bg-white border-slate-200 text-slate-400'
+                            }`}
+                          >
+                            <div className="min-w-0">
+                              <strong className="block text-[11px] font-extrabold truncate">
+                                {add.name}
+                              </strong>
+                              <span className="block text-[9px] text-slate-500 truncate">
+                                {add.calcMode === 'percent'
+                                  ? `${add.percentValue}% (${
+                                      add.applicationTarget === 'specific_function'
+                                        ? add.targetFns.join(', ')
+                                        : 'Folha'
+                                    })`
+                                  : `R$ ${add.value12h} / comp.`}
+                              </span>
                             </div>
-                            <div>
-                              <label className="block text-[9px] font-bold text-emerald-900">
-                                Horas Extra FDS:
-                              </label>
-                              <input
-                                type="number"
-                                min={0}
-                                value={row.activeExtraWeekendHours}
-                                onChange={e =>
-                                  handleUpdateExtraWeekendHours(row, Number(e.target.value))
-                                }
-                                className="w-full border border-emerald-400 rounded px-2 py-1 font-black bg-white"
-                              />
+
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              {isAdmin ? (
+                                <div className="flex items-center gap-1">
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    max={31}
+                                    value={add.count}
+                                    onChange={e =>
+                                      handleUpdateAdditionalCountOnRow(
+                                        row,
+                                        add.id,
+                                        Number(e.target.value)
+                                      )
+                                    }
+                                    className="w-11 border border-amber-400 rounded px-1 py-0.5 text-center font-black bg-white text-slate-900"
+                                    title="Quantidade de competências acumuladas deste adicional"
+                                  />
+                                  <span className="text-[10px] font-black">x</span>
+                                </div>
+                              ) : (
+                                <span className="px-2 py-0.5 rounded bg-amber-200 font-black text-[10px]">
+                                  {add.count}x
+                                </span>
+                              )}
+
+                              <span className="font-extrabold text-[11px] min-w-[68px] text-right">
+                                R${' '}
+                                {add.totalAmount.toLocaleString('pt-BR', {
+                                  minimumFractionDigits: 2
+                                })}
+                              </span>
                             </div>
                           </div>
-                          <select
-                            value={row.activeExtraFunction}
-                            onChange={e => handleUpdateExtraFunction(row, e.target.value)}
-                            className="w-full border border-emerald-300 rounded px-2 py-1 bg-white font-bold text-[11px]"
-                          >
-                            {allFunctionNames.map(fn => (
-                              <option key={fn} value={fn}>
-                                Função Extra: {fn}
-                              </option>
-                            ))}
-                          </select>
-                        </>
-                      ) : (
-                        <div className="font-bold text-emerald-950">
-                          Semana: {row.activeExtraWeekdayHours}h • FDS:{' '}
-                          {row.activeExtraWeekendHours}h ({row.activeExtraFunction})
-                        </div>
-                      )}
-
-                      <div className="flex items-center justify-between text-[10px] pt-1 border-t border-emerald-200/60">
-                        <span className="text-slate-500">
-                          Sem: R${row.extraWeekday12hRef} | FDS: R${row.extraWeekend12hRef}
-                        </span>
-                        <strong className="text-emerald-800 font-black">
-                          R${' '}
-                          {row.extraFinancialTotal.toLocaleString('pt-BR', {
-                            minimumFractionDigits: 2
-                          })}
-                        </strong>
-                      </div>
+                        );
+                      })}
                     </div>
-                  </td>
 
-                  <td className="py-4 px-3 min-w-[220px] space-y-1.5">
-                    <div className="font-extrabold text-indigo-800">
-                      + R${' '}
-                      {row.additionsTotal.toLocaleString('pt-BR', {
+                    <div className="text-right text-[11px] font-extrabold text-amber-900 pt-1">
+                      Subtotal Adicionais: + R${' '}
+                      {row.additionalsSubtotal.toLocaleString('pt-BR', {
                         minimumFractionDigits: 2
                       })}
                     </div>
-                    {isAdmin && allCatalogAdditionals.length > 0 && (
-                      <div className="flex flex-wrap gap-1 pt-1">
-                        {allCatalogAdditionals.map((bon: any) => {
-                          const active = (row.selectedBonusIds || []).includes(bon.id);
-                          return (
-                            <button
-                              key={bon.id}
-                              type="button"
-                              onClick={() => handleTogglePayrollBonusOnRow(row, bon.id)}
-                              className={`px-2 py-0.5 rounded text-[10px] font-bold border transition-all ${
-                                active
-                                  ? 'bg-amber-500 text-slate-950 border-amber-600'
-                                  : 'bg-white text-slate-600 border-slate-300'
-                              }`}
-                            >
-                              {active ? '✓ ' : '+ '}
-                              {bon.name}{' '}
-                              {bon.calcMode === 'percent'
-                                ? `(${bon.percentValue}%)`
-                                : `(R$${bon.value12h})`}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
                   </td>
 
+                  {/* COLUNA 4: DESCONTOS DE PASSAGENS DE PLANTÃO & AJUSTES MANUAIS (+/-) */}
+                  <td className="py-4 px-3 min-w-[310px] space-y-3">
+                    {/* Bloco A: Descontos de Passagens de Plantão */}
+                    <div className="space-y-1.5">
+                      <span className="block text-[10px] font-extrabold uppercase text-slate-500">
+                        Passagens de Plantão na Competência ({row.evaluatedPassagensDiscounts.length}):
+                      </span>
+
+                      {row.evaluatedPassagensDiscounts.length === 0 ? (
+                        <span className="text-[10px] text-slate-400 italic block">
+                          Nenhuma passagem registada pelo titular.
+                        </span>
+                      ) : (
+                        row.evaluatedPassagensDiscounts.map((pd: any) => (
+                          <div
+                            key={pd.swapId}
+                            className="p-2 rounded-xl bg-rose-50/50 border border-rose-200 space-y-1.5 text-[10px]"
+                          >
+                            <div className="flex items-center justify-between gap-1">
+                              <strong className="text-slate-900">
+                                {formatBrDate(pd.date)} ({pd.hours}h) → {pd.substituteName}
+                              </strong>
+                              {pd.isLowerLevel && (
+                                <span className="px-1.5 py-0.5 rounded bg-rose-600 text-white font-black text-[9px]">
+                                  Nível {pd.titularLevel} → Nível {pd.substituteLevel}
+                                </span>
+                              )}
+                            </div>
+
+                            {isAdmin ? (
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <select
+                                  value={pd.mode}
+                                  onChange={e =>
+                                    handleUpdateSwapDiscountOnRow(
+                                      row,
+                                      pd.swapId,
+                                      'mode',
+                                      e.target.value
+                                    )
+                                  }
+                                  className="border border-rose-300 rounded px-1.5 py-0.5 bg-white font-bold text-rose-950"
+                                >
+                                  <option value="none">Sem Desconto (R$ 0)</option>
+                                  <option value="full">
+                                    Desconto Integral (R$ {pd.fullShiftValue.toFixed(0)})
+                                  </option>
+                                  <option value="level_diff">
+                                    Dif. Nível Inferior (R$ {pd.levelDiffValue.toFixed(0)})
+                                  </option>
+                                  <option value="fraction">Fração (%)</option>
+                                  <option value="custom">Valor Parcial (R$)</option>
+                                </select>
+
+                                {pd.mode === 'fraction' && (
+                                  <div className="flex items-center gap-0.5">
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      max={100}
+                                      value={pd.fractionPercent}
+                                      onChange={e =>
+                                        handleUpdateSwapDiscountOnRow(
+                                          row,
+                                          pd.swapId,
+                                          'fractionPercent',
+                                          Number(e.target.value)
+                                        )
+                                      }
+                                      className="w-11 border rounded px-1 py-0.5 bg-white font-black text-center"
+                                    />
+                                    <span>%</span>
+                                  </div>
+                                )}
+
+                                {pd.mode === 'custom' && (
+                                  <input
+                                    type="number"
+                                    min={0}
+                                    value={pd.customAmount}
+                                    onChange={e =>
+                                      handleUpdateSwapDiscountOnRow(
+                                        row,
+                                        pd.swapId,
+                                        'customAmount',
+                                        Number(e.target.value)
+                                      )
+                                    }
+                                    className="w-16 border rounded px-1.5 py-0.5 bg-white font-black"
+                                    placeholder="R$"
+                                  />
+                                )}
+
+                                <span className="font-black text-rose-700 ml-auto">
+                                  - R${' '}
+                                  {pd.discountApplied.toLocaleString('pt-BR', {
+                                    minimumFractionDigits: 2
+                                  })}
+                                </span>
+                              </div>
+                            ) : (
+                              <div className="flex justify-between text-rose-800 font-bold">
+                                <span>
+                                  {pd.mode === 'none'
+                                    ? 'Isento de desconto'
+                                    : 'Desconto aplicado'}
+                                </span>
+                                <span>
+                                  - R${' '}
+                                  {pd.discountApplied.toLocaleString('pt-BR', {
+                                    minimumFractionDigits: 2
+                                  })}
+                                </span>
+                              </div>
+                            )}
+                          </div>
+                        ))
+                      )}
+                    </div>
+
+                    {/* Bloco B: Ajustes Manuais (+ Adicionar ou - Subtrair Valor) */}
+                    <div className="pt-2 border-t border-slate-200 space-y-1.5">
+                      <span className="block text-[10px] font-extrabold uppercase text-slate-500">
+                        Ajustes Manuais de Correção (+/-):
+                      </span>
+
+                      {row.manualAdjustmentsList.map((adj: any) => (
+                        <div
+                          key={adj.id}
+                          className={`p-1.5 rounded-lg border flex items-center justify-between gap-2 text-[10px] font-bold ${
+                            adj.type === 'subtract'
+                              ? 'bg-red-50 border-red-200 text-red-900'
+                              : 'bg-emerald-50 border-emerald-200 text-emerald-900'
+                          }`}
+                        >
+                          <span>
+                            {adj.type === 'subtract' ? '−' : '+'} R${' '}
+                            {Number(adj.amount).toLocaleString('pt-BR', {
+                              minimumFractionDigits: 2
+                            })}{' '}
+                            ({adj.description})
+                          </span>
+                          {isAdmin && (
+                            <button
+                              type="button"
+                              onClick={() => handleRemoveManualAdjustmentOnRow(row, adj.id)}
+                              className="text-slate-400 hover:text-red-600"
+                            >
+                              <Trash2 size={11} />
+                            </button>
+                          )}
+                        </div>
+                      ))}
+
+                      {isAdmin && (
+                        <div className="flex flex-wrap items-center gap-1 pt-1">
+                          <select
+                            value={adjDraft.type}
+                            onChange={e =>
+                              setAdjDraftByEntity(prev => ({
+                                ...prev,
+                                [String(row.entityKey)]: {
+                                  ...adjDraft,
+                                  type: e.target.value as 'add' | 'subtract'
+                                }
+                              }))
+                            }
+                            className="border rounded px-1.5 py-1 bg-white font-black text-[10px]"
+                          >
+                            <option value="add">+ Somar</option>
+                            <option value="subtract">- Subtrair</option>
+                          </select>
+                          <input
+                            type="number"
+                            placeholder="Valor R$"
+                            value={adjDraft.amount}
+                            onChange={e =>
+                              setAdjDraftByEntity(prev => ({
+                                ...prev,
+                                [String(row.entityKey)]: {
+                                  ...adjDraft,
+                                  amount: e.target.value
+                                }
+                              }))
+                            }
+                            className="w-20 border rounded px-2 py-1 bg-white font-bold text-[10px]"
+                          />
+                          <input
+                            type="text"
+                            placeholder="Motivo..."
+                            value={adjDraft.description}
+                            onChange={e =>
+                              setAdjDraftByEntity(prev => ({
+                                ...prev,
+                                [String(row.entityKey)]: {
+                                  ...adjDraft,
+                                  description: e.target.value
+                                }
+                              }))
+                            }
+                            className="flex-1 min-w-[90px] border rounded px-2 py-1 bg-white text-[10px]"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => handleAddManualAdjustmentOnRow(row)}
+                            className="bg-slate-900 text-white px-2.5 py-1 rounded font-bold text-[10px]"
+                          >
+                            OK
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </td>
+
+                  {/* COLUNA 5: LÍQUIDO FINAL PJ */}
                   <td className="py-4 px-4 text-right whitespace-nowrap">
                     <span className="text-base font-black text-emerald-700 block">
                       R${' '}
@@ -4244,8 +5423,8 @@ export default function StaffAndFinanceViews(props: any) {
                         minimumFractionDigits: 2
                       })}
                     </span>
-                    <span className="text-[10px] text-slate-400 font-bold uppercase">
-                      Total Competência
+                    <span className="text-[10px] text-slate-400 font-bold uppercase block">
+                      Líquido Final PJ
                     </span>
                   </td>
                 </tr>
@@ -4255,19 +5434,25 @@ export default function StaffAndFinanceViews(props: any) {
         </table>
       </div>
 
+      {/* TABELA 2: DOCUMENTO ANALÍTICO DE AUDITORIA DE CARGA HORÁRIA POR FUNÇÃO, DIA E HORÁRIO */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
-        <div className="p-4 border-b border-slate-100">
-          <h3 className="text-sm font-black text-slate-900 uppercase flex items-center gap-2">
-            <Table size={17} className="text-indigo-600" />
-            2. Planilha de Auditoria de Carga Horária por Função Cadastrada
-          </h3>
+        <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-black text-slate-900 uppercase flex items-center gap-2">
+              <Table size={17} className="text-indigo-600" />
+              2. Auditoria Analítica de Carga Horária por Função + Discriminação de Dias e Horários Exercidos
+            </h3>
+            <p className="text-[11px] text-slate-500">
+              Clique em “Ver Dias e Horários” em qualquer médico para abrir a listagem cronológica exata dos plantões cumpridos na competência, ou clique em “Baixar Documento de Auditoria (PDF)” no topo.
+            </p>
+          </div>
         </div>
 
         <table className="w-full text-left border-collapse text-xs">
           <thead>
             <tr className="bg-slate-800 text-white uppercase text-[10px]">
               <th className="py-3 px-4">Médico / Plantonista (A-Z)</th>
-              <th className="py-3 px-3 text-center">Total Horas na Escala</th>
+              <th className="py-3 px-3 text-center">Carga Total Acumulada</th>
               {allFunctionNames.map((fn, idx) => {
                 const cInfo = getFunctionColorInfo(fn, idx);
                 return (
@@ -4278,7 +5463,7 @@ export default function StaffAndFinanceViews(props: any) {
                   >
                     {fn}
                     <span className="block text-[9px] text-slate-300 font-normal">
-                      (Horas Fixas | Horas Extras)
+                      (Fixo | Extra | Total)
                     </span>
                   </th>
                 );
@@ -4288,39 +5473,128 @@ export default function StaffAndFinanceViews(props: any) {
           <tbody className="divide-y divide-slate-200">
             {detailedPayrollRows.map(row => {
               const d = row.doctor || {};
+              const isExpanded = Boolean(
+                expandedAuditDaysByEntity[String(row.entityKey)] || !isAdmin
+              );
+
               return (
-                <tr key={row.entityKey} className="hover:bg-slate-50">
-                  <td className="py-3 px-4 font-bold text-slate-900">{d.name}</td>
-                  <td className="py-3 px-3 text-center font-black text-slate-900 bg-slate-50">
-                    {row.totalFulfilledHours}h ({row.shiftsCount} turnos)
-                  </td>
-                  {allFunctionNames.map(fn => {
-                    const audit = row.auditByFunction[fn] || {
-                      fixedHours: 0,
-                      extraHours: 0
-                    };
-                    const hasAny = audit.fixedHours > 0 || audit.extraHours > 0;
-                    return (
+                <React.Fragment key={row.entityKey}>
+                  <tr className="hover:bg-slate-50">
+                    <td className="py-3 px-4 font-bold text-slate-900">
+                      <div className="flex items-center justify-between gap-2">
+                        <span>{d.name}</span>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setExpandedAuditDaysByEntity(prev => ({
+                              ...prev,
+                              [String(row.entityKey)]: !prev[String(row.entityKey)]
+                            }))
+                          }
+                          className="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-900 font-extrabold text-[10px] flex items-center gap-1 shrink-0"
+                        >
+                          <Clock size={11} />
+                          {isExpanded ? 'Ocultar Dias' : 'Ver Dias e Horários'}
+                        </button>
+                      </div>
+                    </td>
+
+                    <td className="py-3 px-3 text-center font-black text-slate-900 bg-slate-50">
+                      {row.totalFulfilledHours}h ({row.shiftsCount} pl.)
+                    </td>
+
+                    {allFunctionNames.map(fn => {
+                      const audit = row.auditByFunction[fn] || {
+                        fixedHours: 0,
+                        extraHours: 0,
+                        totalHours: 0
+                      };
+                      const hasAny = audit.totalHours > 0;
+                      return (
+                        <td
+                          key={fn}
+                          className="py-3 px-3 text-center border-l border-slate-100"
+                        >
+                          {!hasAny ? (
+                            <span className="text-slate-300">—</span>
+                          ) : (
+                            <div className="inline-flex flex-wrap items-center justify-center gap-1 font-bold text-[10px]">
+                              <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-800">
+                                Fixo: {audit.fixedHours}h
+                              </span>
+                              <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800">
+                                Extra: {audit.extraHours}h
+                              </span>
+                              <span className="px-1.5 py-0.5 rounded bg-slate-900 text-white font-black">
+                                Total: {audit.totalHours}h
+                              </span>
+                            </div>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+
+                  {/* LINHA EXPANSÍVEL: DISCRIMINAÇÃO POR DIA E HORÁRIO EXERCIDOS */}
+                  {isExpanded && (
+                    <tr className="bg-slate-50/90">
                       <td
-                        key={fn}
-                        className="py-3 px-3 text-center border-l border-slate-100"
+                        colSpan={2 + allFunctionNames.length}
+                        className="p-4 border-b border-slate-200"
                       >
-                        {!hasAny ? (
-                          <span className="text-slate-300">—</span>
-                        ) : (
-                          <div className="inline-flex items-center gap-2 font-bold">
-                            <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-800">
-                              Fixo: {audit.fixedHours}h
-                            </span>
-                            <span className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-800">
-                              Extra: {audit.extraHours}h
-                            </span>
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-between">
+                            <strong className="text-[11px] font-black text-indigo-950 uppercase">
+                              📅 Discriminação Analítica de Dias e Horários Exercidos — {d.name} ({row.dailyWorkedScheduleList.length} plantões / {row.totalFulfilledHours}h)
+                            </strong>
+                            <button
+                              type="button"
+                              onClick={() => handleDownloadAnalyticalWorkloadAuditPDF(row)}
+                              className="text-[10px] font-extrabold text-indigo-700 hover:underline flex items-center gap-1"
+                            >
+                              <Printer size={12} /> Imprimir Auditoria Individual
+                            </button>
                           </div>
-                        )}
+
+                          {row.dailyWorkedScheduleList.length === 0 ? (
+                            <p className="text-slate-400 italic text-[11px]">
+                              Nenhum turno registado na escala neste período de competência.
+                            </p>
+                          ) : (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                              {row.dailyWorkedScheduleList.map((sh: any) => {
+                                const cInfo = getFunctionColorInfo(sh.functionName);
+                                return (
+                                  <div
+                                    key={sh.id}
+                                    style={{ borderLeft: `4px solid ${cInfo.hex}` }}
+                                    className="p-2.5 rounded-xl bg-white border border-slate-200 flex items-center justify-between gap-2 text-[11px]"
+                                  >
+                                    <div>
+                                      <strong className="text-slate-900 block">
+                                        {formatBrDate(sh.date)} ({sh.weekday}) • {sh.startTime} às{' '}
+                                        {sh.endTime}
+                                      </strong>
+                                      <span
+                                        style={{ color: cInfo.hex }}
+                                        className="font-extrabold text-[10px]"
+                                      >
+                                        {sh.functionName} ({sh.regime})
+                                      </span>
+                                    </div>
+                                    <span className="px-2 py-1 rounded-lg bg-slate-900 text-white font-black text-[10px] shrink-0">
+                                      {sh.hours}h
+                                    </span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
                       </td>
-                    );
-                  })}
-                </tr>
+                    </tr>
+                  )}
+                </React.Fragment>
               );
             })}
           </tbody>
