@@ -4,7 +4,8 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   Calendar, Users, DollarSign, RefreshCw, Umbrella, GraduationCap,
   Sliders, ShieldAlert, LayoutDashboard, LogOut, Menu, X, Flame,
-  Megaphone, ClipboardList, History, UserCheck, Shield, Wifi, WifiOff
+  Megaphone, ClipboardList, History, UserCheck, Shield, Wifi, WifiOff,
+  Lightbulb, Send, CheckCircle
 } from 'lucide-react';
 import { createClient } from '@/supabase/client';
 import {
@@ -20,7 +21,6 @@ import {
   initialShifts,
   initialOpenShifts,
   initialDoctorAvailability,
-  initialOccurrences,
   initialAnnouncements,
   initialSwaps,
   initialVacations,
@@ -44,13 +44,17 @@ export default function MedScaleProApp() {
   const [currentView, setCurrentView] = useState<string>('dashboard');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  const [config, setConfig] = useState<any>(DEFAULT_CONFIG);
+  const [config, setConfig] = useState<any>({
+    ...DEFAULT_CONFIG,
+    demoOccurrencesCleared: true
+  });
   const [hourlyDemand, setHourlyDemand] = useState<any>(DEFAULT_HOURLY_DEMAND);
   const [doctors, setDoctors] = useState<any[]>(initialDoctors);
   const [shifts, setShifts] = useState<any[]>(initialShifts);
   const [openShifts, setOpenShifts] = useState<any[]>(initialOpenShifts);
   const [doctorAvailability, setDoctorAvailability] = useState<any[]>(initialDoctorAvailability);
-  const [occurrences, setOccurrences] = useState<any[]>(initialOccurrences);
+  // Ocorrências iniciam limpas (sem os registos antigos de teste)
+  const [occurrences, setOccurrences] = useState<any[]>([]);
   const [announcements, setAnnouncements] = useState<any[]>(initialAnnouncements);
   const [swaps, setSwaps] = useState<any[]>(initialSwaps);
   const [vacations, setVacations] = useState<any[]>(initialVacations);
@@ -76,6 +80,12 @@ export default function MedScaleProApp() {
     'connecting'
   );
 
+  // Estados do Ícone + Pop-up Flutuante de Sugestões no Login do Médico
+  const [isSuggestionPopupOpen, setIsSuggestionPopupOpen] = useState(false);
+  const [suggestionTitle, setSuggestionTitle] = useState('');
+  const [suggestionContent, setSuggestionContent] = useState('');
+  const [suggestionSentFeedback, setSuggestionSentFeedback] = useState('');
+
   const clientIdRef = useRef<string>('');
 
   if (!clientIdRef.current && typeof window !== 'undefined') {
@@ -84,12 +94,33 @@ export default function MedScaleProApp() {
   const isCloudReadyRef = useRef<boolean>(false);
   const lastStateSignatureRef = useRef<string>('');
 
+  // Filtra ocorrências antigas que vieram de teste (IDs 1, 2, 3 ou textos padrão de demonstração)
+  const filterOutLegacyTestOccurrences = (list: any[]) => {
+    if (!Array.isArray(list)) return [];
+    return list.filter((oc: any) => {
+      if ([1, 2, 3].includes(Number(oc?.id))) return false;
+      const desc = String(oc?.description || '').toLowerCase();
+      if (
+        desc.includes('atraso na passagem de plantão da manhã') ||
+        desc.includes('equipamento de ecg') ||
+        desc.includes('teste')
+      ) {
+        return false;
+      }
+      return true;
+    });
+  };
+
   const applyRemotePayload = (remote: any) => {
     if (!remote || typeof remote !== 'object') return;
 
-    const mergedConfig = remote.config ? { ...DEFAULT_CONFIG, ...remote.config } : DEFAULT_CONFIG;
+    const mergedConfig = remote.config
+      ? { ...DEFAULT_CONFIG, ...remote.config, demoOccurrencesCleared: true }
+      : { ...DEFAULT_CONFIG, demoOccurrencesCleared: true };
     const isCleared = Boolean(mergedConfig?.demoDoctorsCleared);
     const isSwapsCleared = Boolean(mergedConfig?.demoSwapsCleared);
+
+    const cleanedOccurrences = filterOutLegacyTestOccurrences(remote.occurrences);
 
     const cleanSnapshot = {
       config: mergedConfig,
@@ -108,7 +139,7 @@ export default function MedScaleProApp() {
       doctorAvailability: Array.isArray(remote.doctorAvailability)
         ? remote.doctorAvailability
         : initialDoctorAvailability,
-      occurrences: Array.isArray(remote.occurrences) ? remote.occurrences : initialOccurrences,
+      occurrences: cleanedOccurrences,
       announcements: Array.isArray(remote.announcements)
         ? remote.announcements
         : initialAnnouncements,
@@ -152,7 +183,6 @@ export default function MedScaleProApp() {
     setDoctorConferenceData(cleanSnapshot.doctorConferenceData);
   };
 
-  // 1. Carrega LocalStorage e conecta ao Supabase Realtime ao iniciar
   useEffect(() => {
     let localParsed: any = null;
     try {
@@ -183,13 +213,13 @@ export default function MedScaleProApp() {
           applyRemotePayload(cloudPayload);
         } else {
           const initialToUpload = localParsed || {
-            config: DEFAULT_CONFIG,
+            config: { ...DEFAULT_CONFIG, demoOccurrencesCleared: true },
             hourlyDemand: DEFAULT_HOURLY_DEMAND,
             doctors: initialDoctors,
             shifts: initialShifts,
             openShifts: initialOpenShifts,
             doctorAvailability: initialDoctorAvailability,
-            occurrences: initialOccurrences,
+            occurrences: [],
             announcements: initialAnnouncements,
             swaps: initialSwaps,
             vacations: initialVacations,
@@ -207,7 +237,7 @@ export default function MedScaleProApp() {
         isCloudReadyRef.current = true;
         setRealtimeStatus('online');
       } catch (err) {
-        console.warn('Modo local ativo (verifique tabela medscale_app_state no Supabase):', err);
+        console.warn('Modo local ativo:', err);
         isCloudReadyRef.current = true;
         setRealtimeStatus('offline');
       }
@@ -246,7 +276,6 @@ export default function MedScaleProApp() {
     };
   }, []);
 
-  // 2. Guarda automaticamente no LocalStorage e envia para a Nuvem em Tempo Real
   useEffect(() => {
     if (!isHydrated) return;
 
@@ -315,7 +344,6 @@ export default function MedScaleProApp() {
     doctorConferenceData
   ]);
 
-  // Verifica permissões reais em tempo real
   const isMasterAdmin = Boolean(currentUser?.isMasterAdmin);
   const loggedDoctorObj = useMemo(
     () => doctors.find(d => Number(d.id) === Number(currentUser?.id)),
@@ -348,6 +376,36 @@ export default function MedScaleProApp() {
     setAuditTrail(prev => [newEntry, ...prev.slice(0, 199)]);
   };
 
+  // Envio de Sugestão através do Pop-up Flutuante do Médico
+  const handleSendDoctorSuggestion = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!suggestionContent.trim()) return;
+
+    const newSuggestion = {
+      id: `sug_${Date.now()}`,
+      date: new Date().toISOString().split('T')[0],
+      timestamp: new Date().toLocaleString('pt-BR'),
+      doctorId: effectiveCurrentUser?.id || 0,
+      doctorName: effectiveCurrentUser?.name || 'Médico Plantonista',
+      title: suggestionTitle.trim() || 'Sugestão de Melhoria',
+      content: suggestionContent.trim()
+    };
+
+    setConfig((prev: any) => ({
+      ...prev,
+      doctorSuggestions: [newSuggestion, ...(Array.isArray(prev?.doctorSuggestions) ? prev.doctorSuggestions : [])]
+    }));
+
+    recordAction(`Nova sugestão enviada por ${newSuggestion.doctorName}: "${newSuggestion.title}"`);
+    setSuggestionTitle('');
+    setSuggestionContent('');
+    setSuggestionSentFeedback('A sua sugestão foi enviada com sucesso para a coordenação!');
+    setTimeout(() => {
+      setSuggestionSentFeedback('');
+      setIsSuggestionPopupOpen(false);
+    }, 2500);
+  };
+
   const getDoctorById = (id: any) => doctors.find(d => Number(d.id) === Number(id));
 
   const dynamicCategories = useMemo(() => {
@@ -358,7 +416,6 @@ export default function MedScaleProApp() {
     return config.functionRates?.[catName]?.rules || [];
   };
 
-  // Listas de médicos sempre ordenadas alfabeticamente (A-Z)
   const sortedDoctors = useMemo(
     () =>
       [...doctors].sort((a, b) =>
@@ -422,9 +479,6 @@ export default function MedScaleProApp() {
     recordAction(`Adicional/Bonificação alterado na folha do médico ID ${doctorId}`);
   };
 
-  // ============================================================================
-  // CÁLCULO BASE DA FOLHA DE PAGAMENTO PJ (26 A 25)
-  // ============================================================================
   const payrollReport = useMemo(() => {
     const { startStr, endStr } = competenceWindow;
     const shiftsInWindow = shifts.filter(s => s.date >= startStr && s.date <= endStr);
@@ -739,7 +793,7 @@ export default function MedScaleProApp() {
       ];
 
   return (
-    <div className="min-h-screen bg-slate-100 flex flex-col lg:flex-row text-slate-800">
+    <div className="min-h-screen bg-slate-100 flex flex-col lg:flex-row text-slate-800 relative">
       {/* BARRA LATERAL */}
       <aside className="w-full lg:w-64 bg-slate-900 text-white flex flex-col shrink-0">
         <div className="p-4 flex items-center justify-between border-b border-slate-800">
@@ -773,7 +827,6 @@ export default function MedScaleProApp() {
           </button>
         </div>
 
-        {/* Alternador de visão para médico com perfil de Gestor */}
         {!isMasterAdmin && canUserManage && (
           <div className="p-3 bg-slate-800 border-b border-slate-700 text-xs space-y-1.5">
             <span className="block text-[10px] uppercase font-bold text-amber-400">
@@ -861,7 +914,7 @@ export default function MedScaleProApp() {
       </aside>
 
       {/* CONTEÚDO PRINCIPAL */}
-      <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto space-y-6">
+      <main className="flex-1 p-4 sm:p-6 lg:p-8 overflow-y-auto space-y-6 pb-20">
         {syncStatusMsg && (
           <div className="p-3 bg-blue-50 border border-blue-200 text-blue-900 rounded-xl text-xs font-bold">
             {syncStatusMsg}
@@ -1007,6 +1060,93 @@ export default function MedScaleProApp() {
           editingDoctor={editingDoctor}
         />
       </main>
+
+      {/* ==========================================================================
+          ÍCONE + POP-UP FLUTUANTE DE SUGESTÕES NO LOGIN DO MÉDICO
+         ========================================================================== */}
+      {!isAdmin && (
+        <div className="fixed bottom-5 right-5 z-50 flex flex-col items-end">
+          {isSuggestionPopupOpen && (
+            <div className="mb-3 w-80 sm:w-96 bg-white rounded-3xl shadow-2xl border-2 border-blue-500 overflow-hidden text-xs text-slate-800 animate-in fade-in slide-in-from-bottom-3">
+              <div className="bg-slate-900 text-white px-4 py-3.5 flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Lightbulb size={17} className="text-amber-400" />
+                  <div>
+                    <strong className="block text-xs font-black">
+                      Caixa de Sugestões do Corpo Clínico
+                    </strong>
+                    <span className="text-[10px] text-slate-400">
+                      Envie ideias ou melhorias diretamente à gestão
+                    </span>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setIsSuggestionPopupOpen(false)}
+                  className="p-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300"
+                >
+                  <X size={15} />
+                </button>
+              </div>
+
+              <form onSubmit={handleSendDoctorSuggestion} className="p-4 space-y-3">
+                {suggestionSentFeedback ? (
+                  <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-900 font-extrabold flex items-center gap-2">
+                    <CheckCircle size={16} className="text-emerald-600 shrink-0" />
+                    <span>{suggestionSentFeedback}</span>
+                  </div>
+                ) : (
+                  <>
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">
+                        Assunto / Tema (Opcional)
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="Ex: Fluxo da Sala Vermelha / Escala / Sistema"
+                        value={suggestionTitle}
+                        onChange={e => setSuggestionTitle(e.target.value)}
+                        className="w-full border border-slate-300 rounded-xl px-3 py-1.5 font-semibold"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block font-bold text-slate-700 mb-1">
+                        A sua Sugestão *
+                      </label>
+                      <textarea
+                        rows={3}
+                        required
+                        placeholder="Escreva aqui a sua sugestão ou ideia de melhoria..."
+                        value={suggestionContent}
+                        onChange={e => setSuggestionContent(e.target.value)}
+                        className="w-full border border-slate-300 rounded-xl px-3 py-2"
+                      />
+                    </div>
+
+                    <button
+                      type="submit"
+                      className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-xl font-black flex items-center justify-center gap-1.5 shadow-md"
+                    >
+                      <Send size={14} /> Enviar Sugestão à Gestão
+                    </button>
+                  </>
+                )}
+              </form>
+            </div>
+          )}
+
+          <button
+            type="button"
+            onClick={() => setIsSuggestionPopupOpen(!isSuggestionPopupOpen)}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-3 rounded-full shadow-xl flex items-center gap-2 font-black text-xs border-2 border-white transition-transform hover:scale-105"
+            title="Enviar sugestão para a coordenação"
+          >
+            <Lightbulb size={18} className="text-amber-300" />
+            <span>Sugestões</span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }

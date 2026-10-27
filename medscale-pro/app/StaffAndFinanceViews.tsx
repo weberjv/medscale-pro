@@ -2,12 +2,12 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import {
-  Users, DollarSign, Sliders, Plus, Trash2, Edit3, CheckCircle,
-  UserCheck, Award, Briefcase, Download, ShieldCheck, Stethoscope,
-  RotateCcw, Clock, Layers, Table, FileSpreadsheet, ChevronDown,
-  ChevronUp, FileText, Printer, History, ShieldAlert, Percent, Save, Palette,
-  ArrowLeftRight, AlertTriangle, CheckSquare, PlusCircle, MinusCircle
+  Users, Sliders, Plus, Trash2, Edit3, CheckCircle,
+  UserCheck, Award, Briefcase, Stethoscope, FileSpreadsheet,
+  ChevronDown, ChevronUp, FileText, Printer, History,
+  ShieldAlert, Percent, Save, Palette, ArrowLeftRight, Clock
 } from 'lucide-react';
+import PayrollAndAuditView from './PayrollAndAuditView';
 
 export const FUNCTION_COLOR_PALETTE: Record<
   string,
@@ -133,15 +133,16 @@ export default function StaffAndFinanceViews(props: any) {
     courses = [],
     setCourses,
     competenceMonth = '2026-10',
-    setCompetenceMonth,
-    competenceWindow = { startStr: '2026-09-26', endStr: '2026-10-25' },
-    doctorConferenceData = {},
-    setDoctorConferenceData,
     dynamicCategories = [],
     recordAction,
     setIsDoctorModalOpen,
     setEditingDoctor
   } = props || {};
+
+  // Se a visualização for a Folha PJ / Extrato PJ, delega para o componente dedicado
+  if (currentView === 'payroll') {
+    return <PayrollAndAuditView {...props} />;
+  }
 
   // Wrappers seguros
   const safeSetConfig = (updater: any) => {
@@ -158,12 +159,6 @@ export default function StaffAndFinanceViews(props: any) {
   };
   const safeSetCourses = (updater: any) => {
     if (typeof setCourses === 'function') setCourses(updater);
-  };
-  const safeSetCompetenceMonth = (val: string) => {
-    if (typeof setCompetenceMonth === 'function') setCompetenceMonth(val);
-  };
-  const safeSetDoctorConference = (updater: any) => {
-    if (typeof setDoctorConferenceData === 'function') setDoctorConferenceData(updater);
   };
   const safeRecordAction = (msg: string) => {
     if (typeof recordAction === 'function') recordAction(msg);
@@ -216,7 +211,6 @@ export default function StaffAndFinanceViews(props: any) {
     return safeDoctors.find((d: any) => Number(d?.id) === Number(id)) || null;
   };
 
-  // Especialidades dinâmicas da Emergência
   const registeredSpecialtiesList: { id: string; name: string }[] =
     Array.isArray(config?.registeredSpecialties) && config.registeredSpecialties.length > 0
       ? config.registeredSpecialties
@@ -274,7 +268,6 @@ export default function StaffAndFinanceViews(props: any) {
   const [approvalSpecialties, setApprovalSpecialties] = useState<Record<number, string>>({});
   const [expandedFichaByDocId, setExpandedFichaByDocId] = useState<Record<number, boolean>>({});
 
-  // Estados para Histórico de Trabalho e Ocorrências Individuais
   const [historyDraftByDoc, setHistoryDraftByDoc] = useState<
     Record<number, { type: string; date: string; endDate: string; details: string }>
   >({});
@@ -282,7 +275,7 @@ export default function StaffAndFinanceViews(props: any) {
     Record<number, { date: string; severity: string; title: string; description: string }>
   >({});
 
-  // Estados locais para a aba de Tabela de Remuneração
+  // Estados locais para a aba de Tabela de Remuneração (Com as 3 Formas de Remuneração por Função)
   const [newSpecialtyName, setNewSpecialtyName] = useState<string>('');
   const [newFunctionForm, setNewFunctionForm] = useState({
     name: '',
@@ -291,13 +284,19 @@ export default function StaffAndFinanceViews(props: any) {
     requiresSchedule: true,
     applyLeveling: false,
     initialLevelsCount: 1,
+    enableFixedQuota: true,
+    fixedQuotaRefHours: 12,
     fixedRate12h: 1500,
+    enableHourlyRate: true,
+    hourlyRefHours: 12,
     extraWeekday12h: 1650,
     extraWeekend12h: 1850,
+    enablePeriodicIncluded: false,
+    periodicRefHours: 12,
     monthlyFixedValue: 5000
   });
 
-  // Estado para o Catálogo Avançado de Adicionais & Bonificações (Suporta Múltiplas Funções de Incidência)
+  // Estado para o Catálogo Avançado de Adicionais & Bonificações
   const [newAdditionalForm, setNewAdditionalForm] = useState({
     name: '',
     incidence: 'shift' as 'shift' | 'monthly',
@@ -310,15 +309,6 @@ export default function StaffAndFinanceViews(props: any) {
     value12h: 250,
     percentValue: 10
   });
-
-  // Estados para a Folha PJ (Ajustes manuais e expansão de discriminação diária)
-  const [adjDraftByEntity, setAdjDraftByEntity] = useState<
-    Record<string, { type: 'add' | 'subtract'; amount: string; description: string }>
-  >({});
-  const [expandedAuditDaysByEntity, setExpandedAuditDaysByEntity] = useState<
-    Record<string, boolean>
-  >({});
-  const [doctorDivergenceNoteInput, setDoctorDivergenceNoteInput] = useState<string>('');
 
   // Estado para Edição do Próprio Cadastro pelo Médico
   const myLoggedDoc =
@@ -354,9 +344,6 @@ export default function StaffAndFinanceViews(props: any) {
     }
   }, [myLoggedDoc?.id, currentView]);
 
-  // ============================================================================
-  // HELPER DE CÁLCULO DE HORAS, DATAS, NÍVEIS DINÂMICOS E TAXAS POR FUNÇÃO
-  // ============================================================================
   const formatBrDate = (dateStr?: string) => {
     if (!dateStr) return '—';
     const parts = String(dateStr).split('-');
@@ -364,35 +351,6 @@ export default function StaffAndFinanceViews(props: any) {
     return `${parts[2]}/${parts[1]}/${parts[0]}`;
   };
 
-  const getWeekdayShortLabel = (dateStr?: string) => {
-    if (!dateStr) return '';
-    const d = new Date(`${dateStr}T12:00:00`);
-    if (isNaN(d.getTime())) return '';
-    const labels = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
-    return labels[d.getDay()] || '';
-  };
-
-  const getShiftHours = (s: any): number => {
-    if (typeof s?.hours === 'number' && s.hours > 0) return s.hours;
-    const st = String(s?.startTime || '07:00');
-    const et = String(s?.endTime || '19:00');
-    const [sh, sm] = st.split(':').map(Number);
-    const [eh, em] = et.split(':').map(Number);
-    if (isNaN(sh) || isNaN(eh)) return 12;
-    let diff = eh + (em || 0) / 60 - (sh + (sm || 0) / 60);
-    if (diff <= 0) diff += 24;
-    return Math.round(diff * 100) / 100;
-  };
-
-  const isWeekendDate = (dateStr?: string): boolean => {
-    if (!dateStr) return false;
-    const d = new Date(`${dateStr}T12:00:00`);
-    if (isNaN(d.getTime())) return false;
-    const day = d.getDay();
-    return day === 0 || day === 6;
-  };
-
-  // Retorna a lista de níveis ativos configurados naquela função (ex: [1, 2] ou [1, 2, 3, 4])
   const getActiveLevelsForFunction = (fnObj: any): number[] => {
     if (Array.isArray(fnObj?.activeLevels) && fnObj.activeLevels.length > 0) {
       return [...fnObj.activeLevels].map(Number).sort((a, b) => a - b);
@@ -405,60 +363,6 @@ export default function StaffAndFinanceViews(props: any) {
       if (extracted.length > 0) return extracted;
     }
     return [1];
-  };
-
-  const getFunctionEffectiveRates = (fnName: string, levelNum: number) => {
-    const fnObj = functionRatesObj[fnName] || functionRatesObj[allFunctionNames[0]] || {};
-    const requiresSchedule = fnObj.requiresSchedule !== false;
-    const applyLeveling = Boolean(fnObj.applyLeveling);
-
-    if (!applyLeveling) {
-      const fixed12hRef = Number(fnObj.fixed ?? 1500);
-      const extraWeekday12hRef = Number(fnObj.extraWeekday ?? fnObj.extra ?? 1650);
-      const extraWeekend12hRef = Number(
-        fnObj.extraWeekend ?? fnObj.extraWeekday ?? (fnObj.extra ? Number(fnObj.extra) + 200 : 1850)
-      );
-      const monthlyAdminRef = Number(fnObj.monthlyFixedValue ?? fnObj.mensalFixo ?? 5000);
-      return {
-        applyLeveling: false,
-        requiresSchedule,
-        fixed12hRef,
-        extraWeekday12hRef,
-        extraWeekend12hRef,
-        monthlyAdminRef
-      };
-    }
-
-    const activeLvls = getActiveLevelsForFunction(fnObj);
-    const chosenLvl = activeLvls.includes(Number(levelNum))
-      ? Number(levelNum)
-      : activeLvls[activeLvls.length - 1] || 1;
-    const lvlKey = `level${chosenLvl}`;
-    const lvlData = fnObj?.levels?.[lvlKey] || {};
-
-    const fixed12hRef = Number(lvlData.fixed ?? fnObj.fixed ?? 1500);
-    const extraWeekday12hRef = Number(
-      lvlData.extraWeekday ?? lvlData.extra ?? fnObj.extraWeekday ?? fnObj.extra ?? 1650
-    );
-    const extraWeekend12hRef = Number(
-      lvlData.extraWeekend ??
-        lvlData.extra ??
-        fnObj.extraWeekend ??
-        fnObj.extra ??
-        extraWeekday12hRef
-    );
-    const monthlyAdminRef = Number(
-      lvlData.monthlyFixedValue ?? fnObj.monthlyFixedValue ?? fnObj.mensalFixo ?? 5000
-    );
-
-    return {
-      applyLeveling: true,
-      requiresSchedule,
-      fixed12hRef,
-      extraWeekday12hRef,
-      extraWeekend12hRef,
-      monthlyAdminRef
-    };
   };
 
   const getDoctorSwapsAuditList = (docId: number) => {
@@ -519,721 +423,7 @@ export default function StaffAndFinanceViews(props: any) {
   };
 
   // ============================================================================
-  // MOTOR CENTRAL UNIFICADO DA FOLHA PJ E AUDITORIA ANALÍTICA DE CARGA HORÁRIA
-  // (USADO TANTO NA ABA "FOLHA PJ" DO GESTOR QUANTO NO "MEU EXTRATO PJ" DO MÉDICO)
-  // ============================================================================
-  const windowShifts = useMemo(() => {
-    return safeShifts.filter((s: any) => {
-      if (!s?.date || s?.isDispensedVacant) return false;
-      const hasDoc =
-        Boolean(s?.doctorId) ||
-        Boolean(s?.isManualUnregisteredDoctor && s?.manualDoctorName);
-      if (!hasDoc) return false;
-      return (
-        s.date >= (competenceWindow?.startStr || '0000-01-01') &&
-        s.date <= (competenceWindow?.endStr || '9999-12-31')
-      );
-    });
-  }, [safeShifts, competenceWindow]);
-
-  const monthCustomizations = config?.payrollCustomizations?.[competenceMonth] || {};
-  const allCatalogAdditionals = Array.isArray(config?.shiftAdditionals)
-    ? config.shiftAdditionals
-    : [];
-
-  const buildDetailedPayrollEntry = (
-    entityKey: string | number,
-    docObj: any,
-    entityWindowShifts: any[],
-    isManualEntry: boolean = false
-  ) => {
-    const docLevel = Number(docObj?.remunerationLevel || 1);
-    const defaultFn = docObj?.role || allFunctionNames[0] || 'Plantonista';
-    const customDoc = monthCustomizations[entityKey] || {};
-
-    // Filtra plantões que não sejam "acerto direto sem impacto na folha" para cálculo financeiro
-    const billableShifts = entityWindowShifts.filter(
-      (s: any) => s?.substituteBillingMode !== 'direct_settlement'
-    );
-
-    // 1. Auditoria Analítica de Carga Horária (Todos os plantões efetivamente trabalhados na janela)
-    const auditByFunction: Record<
-      string,
-      {
-        fixedShifts: number;
-        fixedHours: number;
-        extraShifts: number;
-        extraHours: number;
-        totalHours: number;
-      }
-    > = {};
-    allFunctionNames.forEach(fn => {
-      auditByFunction[fn] = {
-        fixedShifts: 0,
-        fixedHours: 0,
-        extraShifts: 0,
-        extraHours: 0,
-        totalHours: 0
-      };
-    });
-
-    const dailyWorkedScheduleList = [...entityWindowShifts]
-      .sort((a, b) => {
-        const dComp = String(a?.date || '').localeCompare(String(b?.date || ''));
-        if (dComp !== 0) return dComp;
-        return String(a?.startTime || '07:00').localeCompare(String(b?.startTime || '07:00'));
-      })
-      .map((s: any) => {
-        const fnName = s?.category || s?.role || defaultFn;
-        const hrs = getShiftHours(s);
-        const isFixed =
-          !isManualEntry &&
-          (s?.shiftType === 'Fixo' ||
-            s?.modality === 'Fixo' ||
-            (!s?.shiftType && !s?.modality && docObj?.contractType === 'Fixo Mensal'));
-
-        if (!auditByFunction[fnName]) {
-          auditByFunction[fnName] = {
-            fixedShifts: 0,
-            fixedHours: 0,
-            extraShifts: 0,
-            extraHours: 0,
-            totalHours: 0
-          };
-        }
-
-        if (isFixed) {
-          auditByFunction[fnName].fixedShifts += 1;
-          auditByFunction[fnName].fixedHours += hrs;
-        } else {
-          auditByFunction[fnName].extraShifts += 1;
-          auditByFunction[fnName].extraHours += hrs;
-        }
-        auditByFunction[fnName].totalHours += hrs;
-
-        return {
-          id: s.id,
-          date: s.date,
-          weekday: getWeekdayShortLabel(s.date),
-          startTime: s.startTime || '07:00',
-          endTime: s.endTime || '19:00',
-          hours: hrs,
-          functionName: fnName,
-          regime: isFixed ? 'Fixo' : 'Extra / Avulso',
-          isFromSwap: Boolean(s.isFromSwap),
-          directSettlement: s?.substituteBillingMode === 'direct_settlement'
-        };
-      });
-
-    // 2. Construção automática das Funções Exercidas na Competência (Cotas Fixas, Sem Escala e Horas Extras)
-    const autoRoleEntries: {
-      id: string;
-      functionName: string;
-      billingMode: 'monthly_no_schedule' | 'fixed_quota_monthly' | 'hourly_extra';
-      units: number;
-      hoursPerUnit: number;
-      weekdayHours: number;
-      weekendHours: number;
-    }[] = [];
-
-    // 2a. Funções Sem Escala (Administrativas/Coordenação) vinculadas ao médico
-    if (!isManualEntry) {
-      const docAllowedFns: string[] = Array.from(
-        new Set([docObj?.role, ...(docObj?.allowedFunctions || [])].filter(Boolean))
-      );
-      docAllowedFns.forEach((fnName, idx) => {
-        const fnCfg = functionRatesObj[fnName];
-        if (fnCfg && fnCfg.requiresSchedule === false) {
-          autoRoleEntries.push({
-            id: `auto_nosched_${idx}`,
-            functionName: fnName,
-            billingMode: 'monthly_no_schedule',
-            units: 1,
-            hoursPerUnit: 12,
-            weekdayHours: 0,
-            weekendHours: 0
-          });
-        }
-      });
-    }
-
-    // 2b. Cotas Fixas Mensais (4 ou 5 semanas pagam o valor integral da cota mensal por dia da semana/turno)
-    const autoWeeklyFixedSlotsMap: Record<
-      string,
-      { functionName: string; hoursPerUnit: number; occurrences: number }
-    > = {};
-
-    // 2c. Horas Trabalhadas em Plantão Extra/Avulso agrupadas por Função
-    const autoExtraByFnMap: Record<
-      string,
-      { weekdayHours: number; weekendHours: number }
-    > = {};
-
-    billableShifts.forEach((s: any) => {
-      const fnName = s?.category || s?.role || defaultFn;
-      const hrs = getShiftHours(s);
-      const isFixedShift =
-        !isManualEntry &&
-        (s?.shiftType === 'Fixo' ||
-          s?.modality === 'Fixo' ||
-          (!s?.shiftType && !s?.modality && docObj?.contractType === 'Fixo Mensal'));
-
-      if (isFixedShift) {
-        const dObj = new Date(`${s.date}T12:00:00`);
-        const dayOfWeek = isNaN(dObj.getTime()) ? 0 : dObj.getDay();
-        const slotKey = `${fnName}__${dayOfWeek}__${s.startTime || '07:00'}__${hrs}`;
-        if (!autoWeeklyFixedSlotsMap[slotKey]) {
-          autoWeeklyFixedSlotsMap[slotKey] = {
-            functionName: fnName,
-            hoursPerUnit: hrs,
-            occurrences: 0
-          };
-        }
-        autoWeeklyFixedSlotsMap[slotKey].occurrences += 1;
-      } else {
-        if (!autoExtraByFnMap[fnName]) {
-          autoExtraByFnMap[fnName] = { weekdayHours: 0, weekendHours: 0 };
-        }
-        if (isWeekendDate(s.date)) {
-          autoExtraByFnMap[fnName].weekendHours += hrs;
-        } else {
-          autoExtraByFnMap[fnName].weekdayHours += hrs;
-        }
-      }
-    });
-
-    const groupedAutoQuotas: Record<
-      string,
-      { functionName: string; hoursPerUnit: number; units: number }
-    > = {};
-    Object.values(autoWeeklyFixedSlotsMap).forEach(slot => {
-      const gKey = `${slot.functionName}__${slot.hoursPerUnit}`;
-      if (!groupedAutoQuotas[gKey]) {
-        groupedAutoQuotas[gKey] = {
-          functionName: slot.functionName,
-          hoursPerUnit: slot.hoursPerUnit,
-          units: 0
-        };
-      }
-      groupedAutoQuotas[gKey].units += 1;
-    });
-
-    Object.values(groupedAutoQuotas).forEach((q, idx) => {
-      autoRoleEntries.push({
-        id: `auto_fixed_${idx}`,
-        functionName: q.functionName,
-        billingMode: 'fixed_quota_monthly',
-        units: q.units,
-        hoursPerUnit: q.hoursPerUnit,
-        weekdayHours: 0,
-        weekendHours: 0
-      });
-    });
-
-    Object.entries(autoExtraByFnMap).forEach(([fnName, hrsObj], idx) => {
-      autoRoleEntries.push({
-        id: `auto_extra_${idx}`,
-        functionName: fnName,
-        billingMode: 'hourly_extra',
-        units: 1,
-        hoursPerUnit: 12,
-        weekdayHours: hrsObj.weekdayHours,
-        weekendHours: hrsObj.weekendHours
-      });
-    });
-
-    const hasCustomRoleEntries = Array.isArray(customDoc.roleEntries);
-    const activeRoleEntries = hasCustomRoleEntries
-      ? customDoc.roleEntries
-      : autoRoleEntries;
-
-    // Avaliação financeira de cada função exercida + mapa de remuneração por função
-    const remunerationByFunctionMap: Record<string, number> = {};
-    let functionsSubtotal = 0;
-
-    // Conta dispensas abonadas na janela para este médico
-    const abonadaDispensesCount = safeSwaps.filter(
-      (sw: any) =>
-        sw?.status === 'Aprovado' &&
-        sw?.type === 'Liberação / Dispensa Gerencial' &&
-        Number(sw?.requesterId) === Number(docObj?.id) &&
-        sw?.financialDispenseType !== 'desconto' &&
-        sw?.date >= competenceWindow.startStr &&
-        sw?.date <= competenceWindow.endStr
-    ).length;
-
-    const evaluatedRoleEntries = activeRoleEntries.map((entry: any) => {
-      const rates = getFunctionEffectiveRates(entry.functionName, docLevel);
-      let lineTotal = 0;
-
-      if (entry.billingMode === 'monthly_no_schedule') {
-        lineTotal = Number(entry.units || 1) * rates.monthlyAdminRef;
-      } else if (entry.billingMode === 'fixed_quota_monthly') {
-        const unitProp = rates.fixed12hRef * (Number(entry.hoursPerUnit || 12) / 12);
-        lineTotal = Number(entry.units || 0) * unitProp;
-      } else {
-        const wkVal = rates.extraWeekday12hRef * (Number(entry.weekdayHours || 0) / 12);
-        const fdVal = rates.extraWeekend12hRef * (Number(entry.weekendHours || 0) / 12);
-        lineTotal = wkVal + fdVal;
-      }
-
-      functionsSubtotal += lineTotal;
-      remunerationByFunctionMap[entry.functionName] =
-        (remunerationByFunctionMap[entry.functionName] || 0) + lineTotal;
-
-      const fnAudit = auditByFunction[entry.functionName] || {
-        fixedShifts: 0,
-        fixedHours: 0,
-        extraShifts: 0,
-        extraHours: 0,
-        totalHours: 0
-      };
-
-      return {
-        ...entry,
-        rates,
-        lineTotal,
-        fulfilledFixedShifts: fnAudit.fixedShifts,
-        fulfilledFixedHours: fnAudit.fixedHours,
-        fulfilledExtraHours: fnAudit.extraHours,
-        abonadaDispensesCount
-      };
-    });
-
-    // 3. Adicionais e Bonificações Acumuláveis por Quantidade de Competências (1x, 2x, 3x...)
-    const autoAdditionalCounts: Record<string, number> = {};
-    allCatalogAdditionals.forEach((add: any) => {
-      if (add.incidence === 'monthly') {
-        const docMonthly: string[] = Array.isArray(docObj?.monthlyAdditionals)
-          ? docObj.monthlyAdditionals
-          : [];
-        autoAdditionalCounts[add.id] = docMonthly.includes(add.id) ? 1 : 0;
-      } else {
-        const countInShifts = billableShifts.filter(
-          (s: any) => Array.isArray(s?.additionals) && s.additionals.includes(add.id)
-        ).length;
-        autoAdditionalCounts[add.id] = countInShifts;
-      }
-    });
-
-    const customAddCounts: Record<string, number> = customDoc.additionalCounts || {};
-    let additionalsSubtotal = 0;
-
-    const evaluatedAdditionals = allCatalogAdditionals.map((add: any) => {
-      const count =
-        customAddCounts[add.id] !== undefined
-          ? Number(customAddCounts[add.id])
-          : Number(autoAdditionalCounts[add.id] || 0);
-
-      const targetFns: string[] =
-        Array.isArray(add.targetFunctionNames) && add.targetFunctionNames.length > 0
-          ? add.targetFunctionNames
-          : add.targetFunctionName
-          ? [add.targetFunctionName]
-          : [defaultFn];
-
-      let singleCompetenceValue = 0;
-      if (add.calcMode === 'percent') {
-        const pct = Number(add.percentValue || 0);
-        if (add.applicationTarget === 'specific_function') {
-          const sumTargetFns = targetFns.reduce(
-            (acc, fn) => acc + Number(remunerationByFunctionMap[fn] || 0),
-            0
-          );
-          const fallbackBase =
-            sumTargetFns > 0
-              ? sumTargetFns
-              : getFunctionEffectiveRates(targetFns[0], docLevel).fixed12hRef;
-          singleCompetenceValue = (fallbackBase * pct) / 100;
-        } else if (add.applicationTarget === 'final_payroll') {
-          singleCompetenceValue = (functionsSubtotal * pct) / 100;
-        } else {
-          const base12h = getFunctionEffectiveRates(defaultFn, docLevel).fixed12hRef;
-          singleCompetenceValue = (base12h * pct) / 100;
-        }
-      } else {
-        singleCompetenceValue = Number(add.value12h || 0);
-      }
-
-      const totalAmount = count * singleCompetenceValue;
-      additionalsSubtotal += totalAmount;
-
-      return {
-        ...add,
-        targetFns,
-        count,
-        singleCompetenceValue,
-        totalAmount
-      };
-    });
-
-    // 4. Descontos sobre Passagens de Plantão (Incluindo Nível Inferior) e Dispensas Não Remuneradas
-    const doctorPassagensInWindow = safeSwaps.filter((sw: any) => {
-      if (sw?.status !== 'Aprovado') return false;
-      if (Number(sw?.requesterId) !== Number(docObj?.id)) return false;
-      const d = String(sw?.date || sw?.shiftDate || '');
-      if (d < competenceWindow.startStr || d > competenceWindow.endStr) return false;
-      if (
-        sw?.type === 'Liberação / Dispensa Gerencial' &&
-        sw?.financialDispenseType === 'abonada'
-      ) {
-        return false;
-      }
-      return true;
-    });
-
-    const swapDiscountConfigs = customDoc.swapDiscounts || {};
-    let totalPassagensDiscounts = 0;
-
-    const evaluatedPassagensDiscounts = doctorPassagensInWindow.map((sw: any) => {
-      const subDoc = resolveDoctorByIdLocal(sw.targetDoctorId);
-      const subLevel = Number(subDoc?.remunerationLevel || 1);
-      const isLowerLevel = subLevel < docLevel;
-      const fnName = sw.category || defaultFn;
-      const hrs = getShiftHours({ startTime: sw.startTime || '07:00', endTime: sw.endTime || '19:00' });
-
-      const titularRates = getFunctionEffectiveRates(fnName, docLevel);
-      const subRates = getFunctionEffectiveRates(fnName, subLevel);
-
-      const fullShiftValue = titularRates.fixed12hRef * (hrs / 12);
-      const subShiftValue = subRates.fixed12hRef * (hrs / 12);
-      const levelDiffValue = Math.max(0, fullShiftValue - subShiftValue);
-
-      const defaultMode =
-        sw.type === 'Liberação / Dispensa Gerencial' &&
-        sw.financialDispenseType === 'desconto'
-          ? 'full'
-          : 'none';
-
-      const cfg = swapDiscountConfigs[sw.id] || {
-        mode: defaultMode as 'none' | 'full' | 'level_diff' | 'fraction' | 'custom',
-        fractionPercent: 50,
-        customAmount: levelDiffValue > 0 ? levelDiffValue : fullShiftValue
-      };
-
-      let discountApplied = 0;
-      if (cfg.mode === 'full') {
-        discountApplied = fullShiftValue;
-      } else if (cfg.mode === 'level_diff') {
-        discountApplied = levelDiffValue > 0 ? levelDiffValue : fullShiftValue * 0.15;
-      } else if (cfg.mode === 'fraction') {
-        discountApplied = (fullShiftValue * Number(cfg.fractionPercent || 50)) / 100;
-      } else if (cfg.mode === 'custom') {
-        discountApplied = Math.max(0, Number(cfg.customAmount || 0));
-      }
-
-      totalPassagensDiscounts += discountApplied;
-
-      return {
-        swapId: sw.id,
-        date: sw.date,
-        startTime: sw.startTime || '07:00',
-        endTime: sw.endTime || '19:00',
-        hours: hrs,
-        functionName: fnName,
-        type: sw.type || 'Passagem de Plantão',
-        substituteName:
-          sw.type === 'Liberação / Dispensa Gerencial' && sw.dispenseMode === 'vacant'
-            ? 'Dispensado s/ Substituto'
-            : subDoc?.name || 'Substituto',
-        titularLevel: docLevel,
-        substituteLevel: subLevel,
-        isLowerLevel,
-        fullShiftValue,
-        levelDiffValue,
-        mode: cfg.mode,
-        fractionPercent: cfg.fractionPercent ?? 50,
-        customAmount: cfg.customAmount ?? 0,
-        discountApplied
-      };
-    });
-
-    // 5. Ajustes Manuais de Correção (+ Adicionar ou - Subtrair Valor)
-    const manualAdjustmentsList: {
-      id: string;
-      type: 'add' | 'subtract';
-      amount: number;
-      description: string;
-    }[] = Array.isArray(customDoc.manualAdjustments) ? customDoc.manualAdjustments : [];
-
-    const manualAdjustmentsNet = manualAdjustmentsList.reduce(
-      (acc, adj) =>
-        acc + (adj.type === 'subtract' ? -Number(adj.amount || 0) : Number(adj.amount || 0)),
-      0
-    );
-
-    const netTotalCalculated =
-      functionsSubtotal +
-      additionalsSubtotal +
-      manualAdjustmentsNet -
-      totalPassagensDiscounts;
-
-    const totalFulfilledHours = entityWindowShifts.reduce(
-      (acc: number, s: any) => acc + getShiftHours(s),
-      0
-    );
-
-    const confKey = `${competenceMonth}__${docObj?.id}`;
-    const conferenceStatus = doctorConferenceData?.[confKey] || {
-      checked: false,
-      checkedAt: '',
-      errorNote: ''
-    };
-
-    return {
-      entityKey,
-      isManualEntry,
-      doctor: docObj,
-      docLevel,
-      shiftsCount: entityWindowShifts.length,
-      totalFulfilledHours,
-      dailyWorkedScheduleList,
-      evaluatedRoleEntries,
-      activeRoleEntries,
-      functionsSubtotal,
-      evaluatedAdditionals,
-      additionalsSubtotal,
-      evaluatedPassagensDiscounts,
-      totalPassagensDiscounts,
-      manualAdjustmentsList,
-      manualAdjustmentsNet,
-      netTotal: netTotalCalculated,
-      auditByFunction,
-      conferenceStatus,
-      isCustomized:
-        hasCustomRoleEntries ||
-        Object.keys(customAddCounts).length > 0 ||
-        Object.keys(swapDiscountConfigs).length > 0 ||
-        manualAdjustmentsList.length > 0
-    };
-  };
-
-  // Constrói todas as linhas para o Gestor e também a linha espelhada do próprio Médico logado
-  const allActivePayrollRows = useMemo(() => {
-    const regRows = safeActiveDoctors.map(doc => {
-      const docWindowShifts = windowShifts.filter(
-        (s: any) => !s?.isManualUnregisteredDoctor && Number(s?.doctorId) === Number(doc.id)
-      );
-      return buildDetailedPayrollEntry(Number(doc.id), doc, docWindowShifts, false);
-    });
-
-    const manualGroupsMap: Record<
-      string,
-      { manualName: string; manualCrm: string; level: number; role: string; shifts: any[] }
-    > = {};
-
-    windowShifts
-      .filter((s: any) => Boolean(s?.isManualUnregisteredDoctor && s?.manualDoctorName))
-      .forEach((s: any) => {
-        const cleanName = String(s.manualDoctorName).trim();
-        const key = `manual__${cleanName.toLowerCase()}`;
-        if (!manualGroupsMap[key]) {
-          manualGroupsMap[key] = {
-            manualName: cleanName,
-            manualCrm: s.manualDoctorCrm || 'Alocação Manual',
-            level: Number(s.manualDoctorLevel || 1),
-            role: s.category || allFunctionNames[0] || 'Plantonista',
-            shifts: []
-          };
-        }
-        manualGroupsMap[key].shifts.push(s);
-      });
-
-    const manRows = Object.entries(manualGroupsMap)
-      .sort((a, b) => a[1].manualName.localeCompare(b[1].manualName, 'pt-BR'))
-      .map(([mKey, grp]) => {
-        const virtualDoc = {
-          id: mKey,
-          name: `Plantonista alocado manualmente (${grp.manualName})`,
-          crm: grp.manualCrm,
-          specialty: 'Alocação Manual Gestor',
-          razaoSocial: 'Plantonista Avulso / Manual',
-          cnpj: '—',
-          remunerationLevel: grp.level,
-          role: grp.role,
-          contractType: 'Coringa / Extra'
-        };
-        return buildDetailedPayrollEntry(mKey, virtualDoc, grp.shifts, true);
-      });
-
-    return [...regRows, ...manRows];
-  }, [
-    safeActiveDoctors,
-    windowShifts,
-    config,
-    competenceMonth,
-    safeSwaps,
-    doctorConferenceData
-  ]);
-
-  const detailedPayrollRows = useMemo(() => {
-    if (isAdmin) return allActivePayrollRows;
-    return allActivePayrollRows.filter(
-      r => !r.isManualEntry && Number(r.doctor?.id) === Number(currentUser?.id)
-    );
-  }, [allActivePayrollRows, isAdmin, currentUser?.id]);
-
-  // ============================================================================
-  // GERADOR PDF: DOCUMENTO ANALÍTICO DE AUDITORIA DE CARGA HORÁRIA DO HOSPITAL
-  // (E ESPELHO INDIVIDUAL DE PRODUÇÃO PJ DO MÉDICO)
-  // ============================================================================
-  const handleDownloadAnalyticalWorkloadAuditPDF = (singleDoctorRow?: any) => {
-    if (typeof window === 'undefined') return;
-    const todayStr = new Date().toISOString().split('T')[0];
-    const rowsToPrint = singleDoctorRow ? [singleDoctorRow] : detailedPayrollRows;
-
-    const doctorsBlocksHtml = rowsToPrint
-      .map(row => {
-        const d = row.doctor || {};
-
-        const fnSummaryPills = allFunctionNames
-          .map(fn => {
-            const aud = row.auditByFunction[fn];
-            if (!aud || aud.totalHours <= 0) return '';
-            return `
-              <span style="display:inline-block;margin:2px 6px 2px 0;padding:3px 8px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:4px;font-size:9.5px;">
-                <strong>${fn}:</strong> ${aud.totalHours}h totais (${aud.fixedHours}h Fixas | ${aud.extraHours}h Extras)
-              </span>
-            `;
-          })
-          .filter(Boolean)
-          .join('');
-
-        const dailyRowsHtml =
-          row.dailyWorkedScheduleList.length === 0
-            ? `<tr><td colspan="5" style="padding:6px;text-align:center;color:#64748b;">Nenhum plantão registado na escala neste período.</td></tr>`
-            : row.dailyWorkedScheduleList
-                .map(
-                  (sh: any) => `
-                  <tr>
-                    <td style="padding:4px 8px;border:1px solid #cbd5e1;font-weight:bold;">
-                      ${formatBrDate(sh.date)} (${sh.weekday})
-                    </td>
-                    <td style="padding:4px 8px;border:1px solid #cbd5e1;font-weight:bold;">
-                      ${sh.startTime} às ${sh.endTime}
-                    </td>
-                    <td style="padding:4px 8px;border:1px solid #cbd5e1;text-align:center;font-weight:bold;">
-                      ${sh.hours}h
-                    </td>
-                    <td style="padding:4px 8px;border:1px solid #cbd5e1;font-weight:bold;">
-                      ${sh.functionName}
-                    </td>
-                    <td style="padding:4px 8px;border:1px solid #cbd5e1;">
-                      ${sh.regime} ${sh.isFromSwap ? '🔄 (Troca/Substituição)' : ''}
-                    </td>
-                  </tr>
-                `
-                )
-                .join('');
-
-        const financialSummaryHtml = singleDoctorRow
-          ? `
-            <div style="margin-top:6px;padding:6px 10px;background:#ecfdf5;border:1px solid #6ee7b7;border-radius:6px;font-size:10px;">
-              <strong>Resumo Financeiro PJ (${competenceMonth}):</strong>
-              Funções: R$ ${row.functionsSubtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} |
-              Adicionais: + R$ ${row.additionalsSubtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} |
-              Descontos Passagens: - R$ ${row.totalPassagensDiscounts.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} |
-              Ajustes: R$ ${row.manualAdjustmentsNet.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} →
-              <strong style="color:#065f46;font-size:11px;">Líquido Final: R$ ${row.netTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</strong>
-            </div>
-          `
-          : '';
-
-        return `
-          <div style="margin-bottom:14px;padding:10px;border:1px solid #94a3b8;border-radius:6px;page-break-inside:avoid;">
-            <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #cbd5e1;padding-bottom:5px;margin-bottom:6px;">
-              <div>
-                <strong style="font-size:12px;text-transform:uppercase;">${d.name}</strong>
-                <span style="color:#475569;font-size:10px;margin-left:8px;">
-                  ${d.crm || ''} • ${d.specialty || 'Clínica Médica'} • Nível ${row.docLevel}
-                </span>
-              </div>
-              <div style="background:#0f172a;color:#ffffff;padding:3px 10px;border-radius:4px;font-weight:bold;font-size:10.5px;">
-                Total Cumprido: ${row.totalFulfilledHours}h (${row.shiftsCount} plantões)
-              </div>
-            </div>
-
-            <div style="margin-bottom:6px;">
-              <strong style="font-size:9.5px;text-transform:uppercase;color:#334155;display:block;margin-bottom:2px;">
-                Carga Horária Acumulada por Função na Competência:
-              </strong>
-              ${fnSummaryPills || '<span style="color:#94a3b8;font-size:9.5px;">Sem horas alocadas por função.</span>'}
-            </div>
-
-            <table style="width:100%;border-collapse:collapse;font-size:9.5px;">
-              <thead>
-                <tr style="background:#f1f5f9;text-align:left;">
-                  <th style="padding:4px 8px;border:1px solid #cbd5e1;width:20%;">Data / Dia</th>
-                  <th style="padding:4px 8px;border:1px solid #cbd5e1;width:18%;">Horário Exercido</th>
-                  <th style="padding:4px 8px;border:1px solid #cbd5e1;width:10%;text-align:center;">Carga Horária</th>
-                  <th style="padding:4px 8px;border:1px solid #cbd5e1;width:30%;">Função Exercida</th>
-                  <th style="padding:4px 8px;border:1px solid #cbd5e1;">Modalidade / Origem</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${dailyRowsHtml}
-              </tbody>
-            </table>
-            ${financialSummaryHtml}
-          </div>
-        `;
-      })
-      .join('');
-
-    const html = `
-      <!DOCTYPE html>
-      <html lang="pt-BR">
-      <head>
-        <meta charset="UTF-8" />
-        <title>Auditoria Analitica de Carga Horaria - ${competenceMonth}</title>
-        <style>
-          @page { size: A4 portrait; margin: 10mm; }
-          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; box-sizing: border-box; }
-          body { font-family: Arial, Helvetica, sans-serif; color: #0f172a; margin: 0; padding: 0; font-size: 10px; }
-        </style>
-      </head>
-      <body>
-        <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #0f172a;padding-bottom:6px;margin-bottom:12px;">
-          <div>
-            <h1 style="margin:0;font-size:15px;text-transform:uppercase;">
-              ${config?.appName || 'MedScale Pro'} — ${config?.sectorUnitName || 'Emergência Adulta - HGD'}
-            </h1>
-            <p style="margin:2px 0 0 0;font-size:10px;color:#475569;">
-              ${
-                singleDoctorRow
-                  ? `Espelho Individual de Produção PJ & Auditoria Analítica de Carga Horária`
-                  : `Relatório Oficial de Auditoria Analítica de Carga Horária (Por Função, Dia e Horário Exercido)`
-              }
-            </p>
-          </div>
-          <div style="text-align:right;">
-            <strong style="font-size:12px;display:block;">COMPETÊNCIA: ${competenceMonth}</strong>
-            <span style="font-size:9px;color:#475569;">Janela: ${formatBrDate(competenceWindow.startStr)} a ${formatBrDate(competenceWindow.endStr)}</span>
-          </div>
-        </div>
-
-        ${doctorsBlocksHtml}
-
-        <script>
-          window.onload = function() { window.print(); };
-        </script>
-      </body>
-      </html>
-    `;
-
-    const win = window.open('', '_blank');
-    if (win) {
-      win.document.open();
-      win.document.write(html);
-      win.document.close();
-    }
-    safeRecordAction(
-      `Documento Analítico de Auditoria de Carga Horária (${competenceMonth}) emitido em PDF`
-    );
-  };
-
-  // ============================================================================
-  // MANIPULAÇÃO DO CORPO CLÍNICO, HISTÓRICO DE TRABALHO, OCORRÊNCIAS E DOSSIÊ PDF
+  // MANIPULAÇÃO DO CORPO CLÍNICO, HISTÓRICO, OCORRÊNCIAS, DOSSIÊ PDF E XLS
   // ============================================================================
   const handleUpdateDoctorLevelInline = (docId: number, newLevel: number) => {
     if (!isAdmin) return;
@@ -1541,7 +731,7 @@ export default function StaffAndFinanceViews(props: any) {
           </tr>
         </table>
 
-        <div class="section-title">2. Histórico de Trabalho (Início de Função, Mudanças de Carga Horária e Férias Passadas)</div>
+        <div class="section-title">2. Histórico de Trabalho</div>
         <table>
           <thead>
             <tr style="background:#f1f5f9;">
@@ -1628,9 +818,6 @@ export default function StaffAndFinanceViews(props: any) {
     safeRecordAction(`Documento individual (Dossiê PDF) emitido para ${doc.name}`);
   };
 
-  // ============================================================================
-  // APROVAÇÃO, EXCLUSÃO E EXPORTAÇÃO XLS DE TODA A EQUIPA
-  // ============================================================================
   const handleApprovePendingDoctor = (doc: any) => {
     if (!isAdmin) return;
     const assignedLevel = Number(approvalLevels[doc.id] || doc.remunerationLevel || 1);
@@ -1709,7 +896,7 @@ export default function StaffAndFinanceViews(props: any) {
     if (!isAdmin) return;
     if (
       !confirm(
-        'Deseja remover de uma só vez os médicos fictícios da programação inicial (Dr. Carlos Eduardo, Dra. Ana Clara, Dr. Roberto Almeida e Dra. Juliana Costa)? Os médicos reais serão 100% preservados!'
+        'Deseja remover de uma só vez os médicos fictícios da programação inicial? Os médicos reais serão 100% preservados!'
       )
     ) {
       return;
@@ -2146,7 +1333,10 @@ export default function StaffAndFinanceViews(props: any) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {filteredActiveDocs.map((doc: any) => {
             const docShiftsCount = safeShifts.filter(
-              (s: any) => Number(s?.doctorId) === Number(doc.id) && !s?.isDispensedVacant
+              (s: any) =>
+                Number(s?.doctorId) === Number(doc.id) &&
+                !s?.isDispensedVacant &&
+                !s?.isPlannedOpenExtra
             ).length;
             const docCoursesList = safeCourses.filter(
               (c: any) => Number(c?.doctorId) === Number(doc.id)
@@ -2680,14 +1870,11 @@ export default function StaffAndFinanceViews(props: any) {
   }
 
   // ============================================================================
-  // 2. ABA: MEU CADASTRO PJ / PERFIL (LOGIN DO MÉDICO COM EDIÇÃO PRÓPRIA + RESUMO ESPELHADO)
+  // 2. ABA: MEU CADASTRO PJ / PERFIL (LOGIN DO MÉDICO COM EDIÇÃO PRÓPRIA)
   // ============================================================================
   if (currentView === 'profile') {
     const myDoc =
       safeDoctors.find((d: any) => Number(d?.id) === Number(currentUser?.id)) || currentUser;
-    const myDetailedPayroll = allActivePayrollRows.find(
-      r => !r.isManualEntry && Number(r.doctor?.id) === Number(myDoc?.id)
-    );
     const mySwapsAudit = getDoctorSwapsAuditList(Number(myDoc?.id));
 
     const handleSaveMyOwnProfile = (e: React.FormEvent) => {
@@ -2967,18 +2154,11 @@ export default function StaffAndFinanceViews(props: any) {
               </div>
               <div>
                 <span className="text-slate-400 font-bold uppercase text-[10px] block">
-                  Produção Líquida ({competenceMonth}) — Espelhada c/ Folha PJ
+                  Competência Ativa
                 </span>
-                <strong className="text-base font-black text-emerald-700">
-                  R${' '}
-                  {Number(myDetailedPayroll?.netTotal || 0).toLocaleString('pt-BR', {
-                    minimumFractionDigits: 2
-                  })}
+                <strong className="text-sm font-black text-blue-700">
+                  {competenceMonth} (Consulte “Meu Extrato PJ” no menu lateral)
                 </strong>
-                <span className="block text-[10px] text-slate-500">
-                  Carga Cumprida: {myDetailedPayroll?.totalFulfilledHours || 0}h (
-                  {myDetailedPayroll?.shiftsCount || 0} turnos)
-                </span>
               </div>
             </div>
 
@@ -3014,564 +2194,714 @@ export default function StaffAndFinanceViews(props: any) {
 
   // ============================================================================
   // 3. ABA: TABELA DE REMUNERAÇÃO
-  // (OPÇÃO "APLICAR NIVELAMENTO" -> INSERIR NÍVEL 1/2/3/... + ADICIONAIS MULTI-FUNÇÃO)
+  // (HABILITAÇÃO DAS 3 FORMAS DE REMUNERAÇÃO POR FUNÇÃO + NIVELAMENTO + ADICIONAIS)
   // ============================================================================
-  if (currentView === 'rates') {
-    const functionNames = Object.keys(functionRatesObj);
-    const shiftAdditionalsList = Array.isArray(config?.shiftAdditionals)
-      ? config.shiftAdditionals
-      : [];
+  const functionNames = Object.keys(functionRatesObj);
+  const shiftAdditionalsList = Array.isArray(config?.shiftAdditionals)
+    ? config.shiftAdditionals
+    : [];
 
-    const handleAddSpecialty = (e: React.FormEvent) => {
-      e.preventDefault();
-      const trimmed = newSpecialtyName.trim();
-      if (!trimmed) return;
-      if (
-        registeredSpecialtiesList.some(
-          sp => sp.name.toLowerCase() === trimmed.toLowerCase()
-        )
-      ) {
-        alert('Esta especialidade já está cadastrada!');
-        return;
+  const handleAddSpecialty = (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmed = newSpecialtyName.trim();
+    if (!trimmed) return;
+    if (
+      registeredSpecialtiesList.some(
+        sp => sp.name.toLowerCase() === trimmed.toLowerCase()
+      )
+    ) {
+      alert('Esta especialidade já está cadastrada!');
+      return;
+    }
+    const nextList = [
+      ...registeredSpecialtiesList,
+      { id: `esp_${Date.now()}`, name: trimmed }
+    ];
+    safeSetConfig((prev: any) => ({
+      ...prev,
+      registeredSpecialties: nextList
+    }));
+    setNewSpecialtyName('');
+    safeRecordAction(`Nova especialidade adicionada na emergência: ${trimmed}`);
+  };
+
+  const handleRemoveSpecialty = (specName: string) => {
+    if (!isAdmin) return;
+    if (!confirm(`Deseja remover a especialidade "${specName}"?`)) return;
+    const nextList = registeredSpecialtiesList.filter(sp => sp.name !== specName);
+    safeSetConfig((prev: any) => ({
+      ...prev,
+      registeredSpecialties: nextList
+    }));
+    safeRecordAction(`Especialidade removida: ${specName}`);
+  };
+
+  const handleUpdateFunctionField = (fnName: string, field: string, value: any) => {
+    if (!isAdmin) return;
+    safeSetConfig((prev: any) => {
+      const currFn = prev?.functionRates?.[fnName] || {};
+      const nextFn: any = {
+        ...currFn,
+        [field]: value
+      };
+      if (field === 'applyLeveling' && value === true && !Array.isArray(currFn.activeLevels)) {
+        nextFn.activeLevels = [1];
       }
-      const nextList = [
-        ...registeredSpecialtiesList,
-        { id: `esp_${Date.now()}`, name: trimmed }
-      ];
-      safeSetConfig((prev: any) => ({
-        ...prev,
-        registeredSpecialties: nextList
-      }));
-      setNewSpecialtyName('');
-      safeRecordAction(`Nova especialidade adicionada na emergência: ${trimmed}`);
-    };
-
-    const handleRemoveSpecialty = (specName: string) => {
-      if (!isAdmin) return;
-      if (!confirm(`Deseja remover a especialidade "${specName}"?`)) return;
-      const nextList = registeredSpecialtiesList.filter(sp => sp.name !== specName);
-      safeSetConfig((prev: any) => ({
-        ...prev,
-        registeredSpecialties: nextList
-      }));
-      safeRecordAction(`Especialidade removida: ${specName}`);
-    };
-
-    const handleUpdateFunctionField = (fnName: string, field: string, value: any) => {
-      if (!isAdmin) return;
-      safeSetConfig((prev: any) => {
-        const currFn = prev?.functionRates?.[fnName] || {};
-        const nextFn: any = {
-          ...currFn,
-          [field]: value
-        };
-        if (field === 'applyLeveling' && value === true && !Array.isArray(currFn.activeLevels)) {
-          nextFn.activeLevels = [1];
-        }
-        return {
-          ...prev,
-          functionRates: {
-            ...(prev?.functionRates || {}),
-            [fnName]: nextFn
-          }
-        };
-      });
-    };
-
-    // Inserir um novo Nível (1, 2, 3, 4, 5...) sob demanda na função
-    const handleInsertLevelInFunction = (fnName: string, levelToInsert?: number) => {
-      if (!isAdmin) return;
-      safeSetConfig((prev: any) => {
-        const currFn = prev?.functionRates?.[fnName] || {};
-        const currActive = getActiveLevelsForFunction(currFn);
-        const nextLevelNum =
-          levelToInsert && !currActive.includes(levelToInsert)
-            ? levelToInsert
-            : Math.max(0, ...currActive) + 1;
-
-        const nextActive = [...currActive, nextLevelNum].sort((a, b) => a - b);
-        const prevMax = currActive[currActive.length - 1] || 1;
-        const prevLvlData = currFn?.levels?.[`level${prevMax}`] || {
-          fixed: currFn.fixed || 1500,
-          extraWeekday: currFn.extraWeekday || currFn.extra || 1650,
-          extraWeekend: currFn.extraWeekend || 1850,
-          monthlyFixedValue: currFn.monthlyFixedValue || 5000
-        };
-
-        const nextKey = `level${nextLevelNum}`;
-        return {
-          ...prev,
-          functionRates: {
-            ...(prev?.functionRates || {}),
-            [fnName]: {
-              ...currFn,
-              applyLeveling: true,
-              activeLevels: nextActive,
-              levels: {
-                ...(currFn.levels || {}),
-                [nextKey]: currFn?.levels?.[nextKey] || {
-                  fixed: Number(prevLvlData.fixed || 1500) + 100,
-                  extra: Number(prevLvlData.extraWeekday || 1650) + 100,
-                  extraWeekday: Number(prevLvlData.extraWeekday || 1650) + 100,
-                  extraWeekend: Number(prevLvlData.extraWeekend || 1850) + 100,
-                  monthlyFixedValue: Number(prevLvlData.monthlyFixedValue || 5000) + 500
-                }
-              }
-            }
-          }
-        };
-      });
-      safeRecordAction(`Nível inserido na função ${fnName}`);
-    };
-
-    // Remover um nível específico da função
-    const handleRemoveLevelFromFunction = (fnName: string, levelNum: number) => {
-      if (!isAdmin) return;
-      safeSetConfig((prev: any) => {
-        const currFn = prev?.functionRates?.[fnName] || {};
-        const currActive = getActiveLevelsForFunction(currFn);
-        if (currActive.length <= 1) {
-          alert(
-            'A função com nivelamento ativo deve manter pelo menos 1 nível (ou desmarque a opção "Aplicar nivelamento").'
-          );
-          return prev;
-        }
-        const nextActive = currActive.filter(n => n !== Number(levelNum));
-        return {
-          ...prev,
-          functionRates: {
-            ...(prev?.functionRates || {}),
-            [fnName]: {
-              ...currFn,
-              activeLevels: nextActive
-            }
-          }
-        };
-      });
-    };
-
-    const handleUpdateFunctionLevelValue = (
-      fnName: string,
-      levelKey: string,
-      subField: 'fixed' | 'extraWeekday' | 'extraWeekend' | 'monthlyFixedValue',
-      val: number
-    ) => {
-      if (!isAdmin) return;
-      safeSetConfig((prev: any) => {
-        const currFn = prev?.functionRates?.[fnName] || {};
-        const currLevels = currFn.levels || {};
-        const currLvlObj = currLevels[levelKey] || {
-          fixed: currFn.fixed || 1500,
-          extra: currFn.extra || 1650,
-          extraWeekday: currFn.extraWeekday || currFn.extra || 1650,
-          extraWeekend: currFn.extraWeekend || 1850,
-          monthlyFixedValue: currFn.monthlyFixedValue || 5000
-        };
-        return {
-          ...prev,
-          functionRates: {
-            ...(prev?.functionRates || {}),
-            [fnName]: {
-              ...currFn,
-              levels: {
-                ...currLevels,
-                [levelKey]: {
-                  ...currLvlObj,
-                  [subField]: val,
-                  ...(subField === 'extraWeekday' ? { extra: val } : {})
-                }
-              }
-            }
-          }
-        };
-      });
-    };
-
-    const handleAddNewFunction = (e: React.FormEvent) => {
-      e.preventDefault();
-      const nameTrim = newFunctionForm.name.trim();
-      if (!nameTrim) return;
-
-      const f12 = Number(newFunctionForm.fixedRate12h || 1500);
-      const eWk = Number(newFunctionForm.extraWeekday12h || 1650);
-      const eFd = Number(newFunctionForm.extraWeekend12h || 1850);
-      const mFixed = Number(newFunctionForm.monthlyFixedValue || 5000);
-
-      const countLvls = newFunctionForm.applyLeveling
-        ? Math.max(1, Number(newFunctionForm.initialLevelsCount || 1))
-        : 1;
-      const activeLvlsArr = Array.from({ length: countLvls }, (_, i) => i + 1);
-      const levelsMap: Record<string, any> = {};
-      activeLvlsArr.forEach((lvlNum, idx) => {
-        levelsMap[`level${lvlNum}`] = {
-          fixed: f12 + idx * 100,
-          extra: eWk + idx * 100,
-          extraWeekday: eWk + idx * 100,
-          extraWeekend: eFd + idx * 100,
-          monthlyFixedValue: mFixed + idx * 500
-        };
-      });
-
-      safeSetConfig((prev: any) => ({
+      return {
         ...prev,
         functionRates: {
           ...(prev?.functionRates || {}),
-          [nameTrim]: {
-            description:
-              newFunctionForm.description.trim() ||
-              `${nameTrim} — Atuação médica na unidade`,
-            colorTheme: newFunctionForm.colorTheme || 'blue',
-            requiresSchedule: Boolean(newFunctionForm.requiresSchedule),
-            applyLeveling: Boolean(newFunctionForm.applyLeveling),
-            activeLevels: activeLvlsArr,
-            fixed: f12,
-            extra: eWk,
-            extraWeekday: eWk,
-            extraWeekend: eFd,
-            monthlyFixedValue: mFixed,
-            levels: levelsMap
+          [fnName]: nextFn
+        }
+      };
+    });
+  };
+
+  const handleInsertLevelInFunction = (fnName: string, levelToInsert?: number) => {
+    if (!isAdmin) return;
+    safeSetConfig((prev: any) => {
+      const currFn = prev?.functionRates?.[fnName] || {};
+      const currActive = getActiveLevelsForFunction(currFn);
+      const nextLevelNum =
+        levelToInsert && !currActive.includes(levelToInsert)
+          ? levelToInsert
+          : Math.max(0, ...currActive) + 1;
+
+      const nextActive = [...currActive, nextLevelNum].sort((a, b) => a - b);
+      const prevMax = currActive[currActive.length - 1] || 1;
+      const prevLvlData = currFn?.levels?.[`level${prevMax}`] || {
+        fixed: currFn.fixed || 1500,
+        extraWeekday: currFn.extraWeekday || currFn.extra || 1650,
+        extraWeekend: currFn.extraWeekend || 1850,
+        monthlyFixedValue: currFn.monthlyFixedValue || 5000
+      };
+
+      const nextKey = `level${nextLevelNum}`;
+      return {
+        ...prev,
+        functionRates: {
+          ...(prev?.functionRates || {}),
+          [fnName]: {
+            ...currFn,
+            applyLeveling: true,
+            activeLevels: nextActive,
+            levels: {
+              ...(currFn.levels || {}),
+              [nextKey]: currFn?.levels?.[nextKey] || {
+                fixed: Number(prevLvlData.fixed || 1500) + 100,
+                extra: Number(prevLvlData.extraWeekday || 1650) + 100,
+                extraWeekday: Number(prevLvlData.extraWeekday || 1650) + 100,
+                extraWeekend: Number(prevLvlData.extraWeekend || 1850) + 100,
+                monthlyFixedValue: Number(prevLvlData.monthlyFixedValue || 5000) + 500
+              }
+            }
           }
         }
-      }));
-
-      setNewFunctionForm({
-        name: '',
-        description: '',
-        colorTheme: 'blue',
-        requiresSchedule: true,
-        applyLeveling: false,
-        initialLevelsCount: 1,
-        fixedRate12h: 1500,
-        extraWeekday12h: 1650,
-        extraWeekend12h: 1850,
-        monthlyFixedValue: 5000
-      });
-      safeRecordAction(`Nova função adicionada na Tabela de Remuneração: ${nameTrim}`);
-    };
-
-    const handleDeleteFunction = (fnName: string) => {
-      if (!isAdmin) return;
-      if (!confirm(`Deseja remover a função "${fnName}" da Tabela de Remuneração?`))
-        return;
-      safeSetConfig((prev: any) => {
-        const copy = { ...(prev?.functionRates || {}) };
-        delete copy[fnName];
-        return { ...prev, functionRates: copy };
-      });
-      safeRecordAction(`Função ${fnName} removida da Tabela de Remuneração`);
-    };
-
-    const handleToggleTargetFnOnNewAdditional = (fnName: string) => {
-      setNewAdditionalForm(prev => {
-        const curr = prev.targetFunctionNames || [];
-        const exists = curr.includes(fnName);
-        const next = exists ? curr.filter(x => x !== fnName) : [...curr, fnName];
-        return {
-          ...prev,
-          targetFunctionNames: next.length > 0 ? next : [fnName]
-        };
-      });
-    };
-
-    const handleAddAdditional = (e: React.FormEvent) => {
-      e.preventDefault();
-      if (!newAdditionalForm.name.trim()) return;
-      const created = {
-        id: `add_${Date.now()}`,
-        name: newAdditionalForm.name.trim(),
-        incidence: newAdditionalForm.incidence,
-        calcMode: newAdditionalForm.calcMode,
-        applicationTarget: newAdditionalForm.applicationTarget,
-        targetFunctionNames:
-          newAdditionalForm.applicationTarget === 'specific_function'
-            ? newAdditionalForm.targetFunctionNames
-            : [],
-        targetFunctionName:
-          newAdditionalForm.applicationTarget === 'specific_function'
-            ? newAdditionalForm.targetFunctionNames[0] || ''
-            : '',
-        value12h: Number(newAdditionalForm.value12h || 0),
-        percentValue: Number(newAdditionalForm.percentValue || 0)
       };
-      safeSetConfig((prev: any) => ({
+    });
+    safeRecordAction(`Nível inserido na função ${fnName}`);
+  };
+
+  const handleRemoveLevelFromFunction = (fnName: string, levelNum: number) => {
+    if (!isAdmin) return;
+    safeSetConfig((prev: any) => {
+      const currFn = prev?.functionRates?.[fnName] || {};
+      const currActive = getActiveLevelsForFunction(currFn);
+      if (currActive.length <= 1) {
+        alert(
+          'A função com nivelamento ativo deve manter pelo menos 1 nível (ou desmarque a opção "Aplicar nivelamento").'
+        );
+        return prev;
+      }
+      const nextActive = currActive.filter(n => n !== Number(levelNum));
+      return {
         ...prev,
-        shiftAdditionals: [...shiftAdditionalsList, created]
-      }));
-      setNewAdditionalForm({
-        name: '',
-        incidence: 'shift',
-        calcMode: 'fixed',
-        applicationTarget: 'final_payroll',
-        targetFunctionNames: [allFunctionNames[0] || 'Plantonista'],
-        value12h: 250,
-        percentValue: 10
-      });
-      safeRecordAction(`Novo adicional/bonificação cadastrado: ${created.name}`);
-    };
+        functionRates: {
+          ...(prev?.functionRates || {}),
+          [fnName]: {
+            ...currFn,
+            activeLevels: nextActive
+          }
+        }
+      };
+    });
+  };
 
-    const handleUpdateExistingAdditional = (addId: string, field: string, value: any) => {
-      if (!isAdmin) return;
-      safeSetConfig((prev: any) => ({
+  const handleUpdateFunctionLevelValue = (
+    fnName: string,
+    levelKey: string,
+    subField: 'fixed' | 'extraWeekday' | 'extraWeekend' | 'monthlyFixedValue',
+    val: number
+  ) => {
+    if (!isAdmin) return;
+    safeSetConfig((prev: any) => {
+      const currFn = prev?.functionRates?.[fnName] || {};
+      const currLevels = currFn.levels || {};
+      const currLvlObj = currLevels[levelKey] || {
+        fixed: currFn.fixed || 1500,
+        extra: currFn.extra || 1650,
+        extraWeekday: currFn.extraWeekday || currFn.extra || 1650,
+        extraWeekend: currFn.extraWeekend || 1850,
+        monthlyFixedValue: currFn.monthlyFixedValue || 5000
+      };
+      return {
         ...prev,
-        shiftAdditionals: shiftAdditionalsList.map((item: any) =>
-          item.id === addId ? { ...item, [field]: value } : item
-        )
-      }));
+        functionRates: {
+          ...(prev?.functionRates || {}),
+          [fnName]: {
+            ...currFn,
+            levels: {
+              ...currLevels,
+              [levelKey]: {
+                ...currLvlObj,
+                [subField]: val,
+                ...(subField === 'extraWeekday' ? { extra: val } : {})
+              }
+            }
+          }
+        }
+      };
+    });
+  };
+
+  const handleAddNewFunction = (e: React.FormEvent) => {
+    e.preventDefault();
+    const nameTrim = newFunctionForm.name.trim();
+    if (!nameTrim) return;
+
+    const f12 = Number(newFunctionForm.fixedRate12h || 1500);
+    const eWk = Number(newFunctionForm.extraWeekday12h || 1650);
+    const eFd = Number(newFunctionForm.extraWeekend12h || 1850);
+    const mFixed = Number(newFunctionForm.monthlyFixedValue || 5000);
+
+    const countLvls = newFunctionForm.applyLeveling
+      ? Math.max(1, Number(newFunctionForm.initialLevelsCount || 1))
+      : 1;
+    const activeLvlsArr = Array.from({ length: countLvls }, (_, i) => i + 1);
+    const levelsMap: Record<string, any> = {};
+    activeLvlsArr.forEach((lvlNum, idx) => {
+      levelsMap[`level${lvlNum}`] = {
+        fixed: f12 + idx * 100,
+        extra: eWk + idx * 100,
+        extraWeekday: eWk + idx * 100,
+        extraWeekend: eFd + idx * 100,
+        monthlyFixedValue: mFixed + idx * 500
+      };
+    });
+
+    safeSetConfig((prev: any) => ({
+      ...prev,
+      functionRates: {
+        ...(prev?.functionRates || {}),
+        [nameTrim]: {
+          description:
+            newFunctionForm.description.trim() ||
+            `${nameTrim} — Atuação médica na unidade`,
+          colorTheme: newFunctionForm.colorTheme || 'blue',
+          requiresSchedule: Boolean(newFunctionForm.requiresSchedule),
+          applyLeveling: Boolean(newFunctionForm.applyLeveling),
+          activeLevels: activeLvlsArr,
+          enableFixedQuota: Boolean(newFunctionForm.enableFixedQuota),
+          fixedQuotaRefHours: Number(newFunctionForm.fixedQuotaRefHours || 12),
+          enableHourlyRate: Boolean(newFunctionForm.enableHourlyRate),
+          hourlyRefHours: Number(newFunctionForm.hourlyRefHours || 12),
+          enablePeriodicIncluded: Boolean(newFunctionForm.enablePeriodicIncluded),
+          periodicRefHours: Number(newFunctionForm.periodicRefHours || 12),
+          fixed: f12,
+          extra: eWk,
+          extraWeekday: eWk,
+          extraWeekend: eFd,
+          monthlyFixedValue: mFixed,
+          levels: levelsMap
+        }
+      }
+    }));
+
+    setNewFunctionForm({
+      name: '',
+      description: '',
+      colorTheme: 'blue',
+      requiresSchedule: true,
+      applyLeveling: false,
+      initialLevelsCount: 1,
+      enableFixedQuota: true,
+      fixedQuotaRefHours: 12,
+      fixedRate12h: 1500,
+      enableHourlyRate: true,
+      hourlyRefHours: 12,
+      extraWeekday12h: 1650,
+      extraWeekend12h: 1850,
+      enablePeriodicIncluded: false,
+      periodicRefHours: 12,
+      monthlyFixedValue: 5000
+    });
+    safeRecordAction(`Nova função adicionada na Tabela de Remuneração: ${nameTrim}`);
+  };
+
+  const handleDeleteFunction = (fnName: string) => {
+    if (!isAdmin) return;
+    if (!confirm(`Deseja remover a função "${fnName}" da Tabela de Remuneração?`))
+      return;
+    safeSetConfig((prev: any) => {
+      const copy = { ...(prev?.functionRates || {}) };
+      delete copy[fnName];
+      return { ...prev, functionRates: copy };
+    });
+    safeRecordAction(`Função ${fnName} removida da Tabela de Remuneração`);
+  };
+
+  const handleToggleTargetFnOnNewAdditional = (fnName: string) => {
+    setNewAdditionalForm(prev => {
+      const curr = prev.targetFunctionNames || [];
+      const exists = curr.includes(fnName);
+      const next = exists ? curr.filter(x => x !== fnName) : [...curr, fnName];
+      return {
+        ...prev,
+        targetFunctionNames: next.length > 0 ? next : [fnName]
+      };
+    });
+  };
+
+  const handleAddAdditional = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newAdditionalForm.name.trim()) return;
+    const created = {
+      id: `add_${Date.now()}`,
+      name: newAdditionalForm.name.trim(),
+      incidence: newAdditionalForm.incidence,
+      calcMode: newAdditionalForm.calcMode,
+      applicationTarget: newAdditionalForm.applicationTarget,
+      targetFunctionNames:
+        newAdditionalForm.applicationTarget === 'specific_function'
+          ? newAdditionalForm.targetFunctionNames
+          : [],
+      targetFunctionName:
+        newAdditionalForm.applicationTarget === 'specific_function'
+          ? newAdditionalForm.targetFunctionNames[0] || ''
+          : '',
+      value12h: Number(newAdditionalForm.value12h || 0),
+      percentValue: Number(newAdditionalForm.percentValue || 0)
     };
+    safeSetConfig((prev: any) => ({
+      ...prev,
+      shiftAdditionals: [...shiftAdditionalsList, created]
+    }));
+    setNewAdditionalForm({
+      name: '',
+      incidence: 'shift',
+      calcMode: 'fixed',
+      applicationTarget: 'final_payroll',
+      targetFunctionNames: [allFunctionNames[0] || 'Plantonista'],
+      value12h: 250,
+      percentValue: 10
+    });
+    safeRecordAction(`Novo adicional/bonificação cadastrado: ${created.name}`);
+  };
 
-    const handleToggleTargetFnOnExistingAdditional = (add: any, fnName: string) => {
-      if (!isAdmin) return;
-      const currList: string[] =
-        Array.isArray(add.targetFunctionNames) && add.targetFunctionNames.length > 0
-          ? add.targetFunctionNames
-          : add.targetFunctionName
-          ? [add.targetFunctionName]
-          : [];
-      const exists = currList.includes(fnName);
-      const nextList = exists
-        ? currList.filter(x => x !== fnName)
-        : [...currList, fnName];
-      handleUpdateExistingAdditional(
-        add.id,
-        'targetFunctionNames',
-        nextList.length > 0 ? nextList : [fnName]
-      );
-    };
+  const handleUpdateExistingAdditional = (addId: string, field: string, value: any) => {
+    if (!isAdmin) return;
+    safeSetConfig((prev: any) => ({
+      ...prev,
+      shiftAdditionals: shiftAdditionalsList.map((item: any) =>
+        item.id === addId ? { ...item, [field]: value } : item
+      )
+    }));
+  };
 
-    return (
-      <div className="space-y-8 text-slate-800">
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-          <h2 className="text-xl sm:text-2xl font-bold text-slate-900 flex items-center gap-2">
-            <Sliders className="text-blue-600" size={24} />
-            Tabela de Remuneração, Nivelamento Sob Demanda & Adicionais Multi-Função
-          </h2>
-          <p className="text-xs text-slate-500 mt-1">
-            Ao marcar <strong>(✓) Aplicar nivelamento</strong>, insira apenas os níveis que desejar para aquela função (Nível 1, 2, 3...). Configure adicionais que podem incidir sobre uma ou múltiplas funções específicas.
-          </p>
-        </div>
+  const handleToggleTargetFnOnExistingAdditional = (add: any, fnName: string) => {
+    if (!isAdmin) return;
+    const currList: string[] =
+      Array.isArray(add.targetFunctionNames) && add.targetFunctionNames.length > 0
+        ? add.targetFunctionNames
+        : add.targetFunctionName
+        ? [add.targetFunctionName]
+        : [];
+    const exists = currList.includes(fnName);
+    const nextList = exists
+      ? currList.filter(x => x !== fnName)
+      : [...currList, fnName];
+    handleUpdateExistingAdditional(
+      add.id,
+      'targetFunctionNames',
+      nextList.length > 0 ? nextList : [fnName]
+    );
+  };
 
-        {/* BLOCO 1: ESPECIALIDADES MÉDICAS */}
-        <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-          <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2 border-b border-slate-100 pb-3">
-            <Stethoscope className="text-indigo-600" size={20} />
-            Especialidades Médicas da Emergência
-          </h3>
+  return (
+    <div className="space-y-8 text-slate-800">
+      <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+        <h2 className="text-xl sm:text-2xl font-bold text-slate-900 flex items-center gap-2">
+          <Sliders className="text-blue-600" size={24} />
+          Tabela de Remuneração, Formas de Remuneração por Função, Nivelamento & Adicionais
+        </h2>
+        <p className="text-xs text-slate-500 mt-1">
+          Para cada função, habilite as modalidades desejadas: <strong>1. Por Cota Fixa Mensal</strong> (valor incide fechado na folha, independente de 4 ou 5 semanas), <strong>2. Por Carga Horária Total (CH/Extra)</strong> (ajuste proporcional por fração de horas) e/ou <strong>3. Incluso na Cota Mensal (Escala Periódica)</strong> (contabiliza horas na auditoria sem pagamento extra).
+        </p>
+      </div>
 
-          <div className="flex flex-wrap items-center gap-2">
-            {registeredSpecialtiesList.map(spec => (
-              <div
-                key={spec.id || spec.name}
-                className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-950 text-xs font-extrabold"
-              >
-                <span>{spec.name}</span>
-                {isAdmin && (
-                  <button
-                    type="button"
-                    onClick={() => handleRemoveSpecialty(spec.name)}
-                    className="w-5 h-5 rounded-full bg-indigo-200/70 hover:bg-red-500 hover:text-white text-indigo-900 flex items-center justify-center transition-colors font-black"
-                  >
-                    ×
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
+      {/* BLOCO 1: ESPECIALIDADES MÉDICAS */}
+      <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
+        <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2 border-b border-slate-100 pb-3">
+          <Stethoscope className="text-indigo-600" size={20} />
+          Especialidades Médicas da Emergência
+        </h3>
 
-          {isAdmin && (
-            <form
-              onSubmit={handleAddSpecialty}
-              className="flex flex-col sm:flex-row gap-2 pt-2 text-xs"
+        <div className="flex flex-wrap items-center gap-2">
+          {registeredSpecialtiesList.map(spec => (
+            <div
+              key={spec.id || spec.name}
+              className="inline-flex items-center gap-2 px-3.5 py-2 rounded-xl bg-indigo-50 border border-indigo-200 text-indigo-950 text-xs font-extrabold"
             >
-              <input
-                type="text"
-                placeholder="Digite uma nova especialidade..."
-                value={newSpecialtyName}
-                onChange={e => setNewSpecialtyName(e.target.value)}
-                className="flex-1 border border-slate-300 rounded-xl px-3.5 py-2 font-semibold"
-              />
-              <button
-                type="submit"
-                className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-xl font-bold flex items-center justify-center gap-1.5 shrink-0"
-              >
-                <Plus size={15} /> Adicionar Especialidade
-              </button>
-            </form>
-          )}
+              <span>{spec.name}</span>
+              {isAdmin && (
+                <button
+                  type="button"
+                  onClick={() => handleRemoveSpecialty(spec.name)}
+                  className="w-5 h-5 rounded-full bg-indigo-200/70 hover:bg-red-500 hover:text-white text-indigo-900 flex items-center justify-center transition-colors font-black"
+                >
+                  ×
+                </button>
+              )}
+            </div>
+          ))}
         </div>
 
-        {/* BLOCO 2: CARTÕES DE FUNÇÕES COM INSERÇÃO DINÂMICA DE NÍVEIS (1, 2, 3...) */}
-        <div className="space-y-4">
-          <h3 className="text-base font-extrabold text-slate-900 uppercase px-1 flex items-center gap-2">
-            <Briefcase size={18} className="text-blue-600" />
-            Funções Médicas — Cores, Nivelamento Sob Demanda (+ Inserir Nível 1/2/3...) & Valores
-          </h3>
+        {isAdmin && (
+          <form
+            onSubmit={handleAddSpecialty}
+            className="flex flex-col sm:flex-row gap-2 pt-2 text-xs"
+          >
+            <input
+              type="text"
+              placeholder="Digite uma nova especialidade..."
+              value={newSpecialtyName}
+              onChange={e => setNewSpecialtyName(e.target.value)}
+              className="flex-1 border border-slate-300 rounded-xl px-3.5 py-2 font-semibold"
+            />
+            <button
+              type="submit"
+              className="bg-indigo-600 hover:bg-indigo-700 text-white px-5 py-2 rounded-xl font-bold flex items-center justify-center gap-1.5 shrink-0"
+            >
+              <Plus size={15} /> Adicionar Especialidade
+            </button>
+          </form>
+        )}
+      </div>
 
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-            {functionNames.map((fnName, fnIdx) => {
-              const fnObj = functionRatesObj[fnName] || {};
-              const requiresSchedule = fnObj.requiresSchedule !== false;
-              const applyLeveling = Boolean(fnObj.applyLeveling);
-              const activeLevels = getActiveLevelsForFunction(fnObj);
-              const colorInfo = getFunctionColorInfo(fnName, fnIdx);
-              const levelsObj = fnObj.levels || {};
+      {/* BLOCO 2: CARTÕES DE FUNÇÕES COM AS 3 FORMAS DE REMUNERAÇÃO + NIVELAMENTO SOB DEMANDA */}
+      <div className="space-y-4">
+        <h3 className="text-base font-extrabold text-slate-900 uppercase px-1 flex items-center gap-2">
+          <Briefcase size={18} className="text-blue-600" />
+          Funções Cadastradas — Formas de Remuneração Habilitadas, CH de Referência & Nivelamento
+        </h3>
 
-              return (
-                <div
-                  key={fnName}
-                  style={{ borderTop: `5px solid ${colorInfo.hex}` }}
-                  className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4 text-xs flex flex-col justify-between"
-                >
-                  <div className="space-y-4">
-                    <div className="flex items-start justify-between gap-2 border-b border-slate-100 pb-3">
-                      <div className="space-y-2 w-full">
-                        <div className="flex items-center justify-between gap-2 flex-wrap">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span
-                              style={{ backgroundColor: colorInfo.hex }}
-                              className="px-3 py-1 rounded-lg text-white font-black text-xs shadow-xs"
-                            >
-                              {fnName}
-                            </span>
-                            <span
-                              className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
-                                requiresSchedule
-                                  ? 'bg-blue-100 text-blue-800'
-                                  : 'bg-purple-100 text-purple-800'
-                              }`}
-                            >
-                              {requiresSchedule
-                                ? 'Com Escala (Cota Fixa 4/5 sem. ou Por Hora)'
-                                : 'Sem Escala (Fixo Mensal)'}
-                            </span>
-                          </div>
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+          {functionNames.map((fnName, fnIdx) => {
+            const fnObj = functionRatesObj[fnName] || {};
+            const requiresSchedule = fnObj.requiresSchedule !== false;
+            const applyLeveling = Boolean(fnObj.applyLeveling);
+            const activeLevels = getActiveLevelsForFunction(fnObj);
+            const colorInfo = getFunctionColorInfo(fnName, fnIdx);
+            const levelsObj = fnObj.levels || {};
 
-                          {isAdmin && (
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteFunction(fnName)}
-                              className="text-slate-400 hover:text-red-600 p-1"
-                              title="Excluir função"
-                            >
-                              <Trash2 size={15} />
-                            </button>
-                          )}
-                        </div>
+            const enableFixedQuota = fnObj.enableFixedQuota !== false;
+            const fixedQuotaRefHours = Number(fnObj.fixedQuotaRefHours || 12);
+            const enableHourlyRate = fnObj.enableHourlyRate !== false;
+            const hourlyRefHours = Number(fnObj.hourlyRefHours || 12);
+            const enablePeriodicIncluded = Boolean(fnObj.enablePeriodicIncluded);
+            const periodicRefHours = Number(fnObj.periodicRefHours || 12);
 
-                        {/* Seletor de Cor */}
-                        <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex flex-wrap items-center justify-between gap-2">
-                          <span className="font-extrabold text-slate-700 text-[11px] flex items-center gap-1.5">
-                            <Palette size={14} style={{ color: colorInfo.hex }} />
-                            Cor na Escala, Heatmap & PDF:
+            return (
+              <div
+                key={fnName}
+                style={{ borderTop: `5px solid ${colorInfo.hex}` }}
+                className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4 text-xs flex flex-col justify-between"
+              >
+                <div className="space-y-4">
+                  <div className="flex items-start justify-between gap-2 border-b border-slate-100 pb-3">
+                    <div className="space-y-2.5 w-full">
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span
+                            style={{ backgroundColor: colorInfo.hex }}
+                            className="px-3 py-1 rounded-lg text-white font-black text-xs shadow-xs"
+                          >
+                            {fnName}
                           </span>
-
-                          {isAdmin ? (
-                            <div className="flex items-center gap-1.5 flex-wrap">
-                              {Object.values(FUNCTION_COLOR_PALETTE).map(pal => {
-                                const isSelected = colorInfo.id === pal.id;
-                                return (
-                                  <button
-                                    key={pal.id}
-                                    type="button"
-                                    onClick={() =>
-                                      handleUpdateFunctionField(fnName, 'colorTheme', pal.id)
-                                    }
-                                    style={{ backgroundColor: pal.hex }}
-                                    className={`w-6 h-6 rounded-full transition-all flex items-center justify-center text-white font-black text-[10px] ${
-                                      isSelected
-                                        ? 'ring-2 ring-offset-2 ring-slate-900 scale-110'
-                                        : 'opacity-75 hover:opacity-100'
-                                    }`}
-                                    title={pal.label}
-                                  >
-                                    {isSelected ? '✓' : ''}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          ) : (
-                            <span
-                              style={{ backgroundColor: colorInfo.hex }}
-                              className="px-2.5 py-0.5 rounded text-white font-bold text-[10px]"
-                            >
-                              {colorInfo.label}
-                            </span>
-                          )}
+                          <span
+                            className={`px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase ${
+                              requiresSchedule
+                                ? 'bg-blue-100 text-blue-800'
+                                : 'bg-purple-100 text-purple-800'
+                            }`}
+                          >
+                            {requiresSchedule
+                              ? 'Entra na Escala'
+                              : 'Cargo Sem Escala (Fixo Mensal)'}
+                          </span>
                         </div>
 
-                        {/* CHECKBOX: ( ) APLICAR NIVELAMENTO + BOTÕES DE INSERIR NÍVEL 1, 2, 3... */}
-                        <div className="flex flex-wrap items-center justify-between gap-2">
-                          <label className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-blue-50 border border-blue-200 text-blue-950 font-extrabold cursor-pointer">
-                            <input
-                              type="checkbox"
-                              disabled={!isAdmin}
-                              checked={applyLeveling}
-                              onChange={e =>
-                                handleUpdateFunctionField(
-                                  fnName,
-                                  'applyLeveling',
-                                  e.target.checked
-                                )
-                              }
-                              className="w-4 h-4 accent-blue-600"
-                            />
-                            <span>( ) Aplicar nivelamento nesta função</span>
-                          </label>
-
-                          {isAdmin && applyLeveling && (
-                            <div className="flex flex-wrap items-center gap-1">
-                              {[1, 2, 3, 4, 5].map(lvlN => {
-                                const alreadyIn = activeLevels.includes(lvlN);
-                                if (alreadyIn) return null;
-                                return (
-                                  <button
-                                    key={lvlN}
-                                    type="button"
-                                    onClick={() =>
-                                      handleInsertLevelInFunction(fnName, lvlN)
-                                    }
-                                    className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-black text-[10px] flex items-center gap-1 shadow-2xs"
-                                  >
-                                    <Plus size={11} /> Inserir Nível {lvlN}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
+                        {isAdmin && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteFunction(fnName)}
+                            className="text-slate-400 hover:text-red-600 p-1"
+                            title="Excluir função"
+                          >
+                            <Trash2 size={15} />
+                          </button>
+                        )}
                       </div>
-                    </div>
 
-                    {/* Descrição */}
-                    <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-1">
-                      <label className="block text-[10px] font-extrabold text-slate-700 uppercase">
-                        📝 Descrição / Detalhamento da Função:
-                      </label>
-                      {isAdmin ? (
-                        <textarea
-                          rows={2}
-                          value={fnObj.description ?? ''}
-                          onChange={e =>
-                            handleUpdateFunctionField(fnName, 'description', e.target.value)
-                          }
-                          className="w-full border border-slate-300 rounded-lg px-2.5 py-1 bg-white text-slate-800 font-medium"
-                        />
-                      ) : (
-                        <p className="text-slate-600 italic">{fnObj.description || fnName}</p>
-                      )}
-                    </div>
-
-                    {/* MODO A: SEM NIVELAMENTO */}
-                    {!applyLeveling ? (
-                      <div className="p-4 rounded-2xl bg-emerald-50/50 border-2 border-emerald-200 space-y-3">
-                        <span className="px-2.5 py-0.5 rounded bg-emerald-700 text-white font-black text-[10px] uppercase inline-block">
-                          Valor Fixo da Função (Sem Nivelamento — Proporcional a 12h)
+                      {/* Seletor de Cor */}
+                      <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex flex-wrap items-center justify-between gap-2">
+                        <span className="font-extrabold text-slate-700 text-[11px] flex items-center gap-1.5">
+                          <Palette size={14} style={{ color: colorInfo.hex }} />
+                          Cor na Escala, Heatmap & PDF:
                         </span>
 
-                        {requiresSchedule ? (
-                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        {isAdmin ? (
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            {Object.values(FUNCTION_COLOR_PALETTE).map(pal => {
+                              const isSelected = colorInfo.id === pal.id;
+                              return (
+                                <button
+                                  key={pal.id}
+                                  type="button"
+                                  onClick={() =>
+                                    handleUpdateFunctionField(fnName, 'colorTheme', pal.id)
+                                  }
+                                  style={{ backgroundColor: pal.hex }}
+                                  className={`w-6 h-6 rounded-full transition-all flex items-center justify-center text-white font-black text-[10px] ${
+                                    isSelected
+                                      ? 'ring-2 ring-offset-2 ring-slate-900 scale-110'
+                                      : 'opacity-75 hover:opacity-100'
+                                  }`}
+                                  title={pal.label}
+                                >
+                                  {isSelected ? '✓' : ''}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <span
+                            style={{ backgroundColor: colorInfo.hex }}
+                            className="px-2.5 py-0.5 rounded text-white font-bold text-[10px]"
+                          >
+                            {colorInfo.label}
+                          </span>
+                        )}
+                      </div>
+
+                      {/* HABILITAR FORMAS DE REMUNERAÇÃO PARA ESTA FUNÇÃO */}
+                      {requiresSchedule && (
+                        <div className="p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                          <span className="block text-[10px] font-black uppercase text-slate-700">
+                            Formas de Remuneração Habilitadas para esta Função:
+                          </span>
+
+                          {/* 1. Cota Fixa Mensal */}
+                          <div className="flex flex-wrap items-center justify-between gap-2 p-2 rounded-lg bg-blue-50/70 border border-blue-200">
+                            <label className="inline-flex items-center gap-2 font-extrabold text-blue-950 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                disabled={!isAdmin}
+                                checked={enableFixedQuota}
+                                onChange={e =>
+                                  handleUpdateFunctionField(
+                                    fnName,
+                                    'enableFixedQuota',
+                                    e.target.checked
+                                  )
+                                }
+                                className="w-4 h-4 accent-blue-600"
+                              />
+                              <span>1. Por Cota Fixa Mensal (Valor fechado 4/5 sem.)</span>
+                            </label>
+                            {enableFixedQuota && (
+                              <div className="flex items-center gap-1 text-[10px]">
+                                <Clock size={12} className="text-blue-700" />
+                                <span className="font-bold text-slate-600">CH Ref. Semanal:</span>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  disabled={!isAdmin}
+                                  value={fixedQuotaRefHours}
+                                  onChange={e =>
+                                    handleUpdateFunctionField(
+                                      fnName,
+                                      'fixedQuotaRefHours',
+                                      Math.max(1, Number(e.target.value))
+                                    )
+                                  }
+                                  className="w-12 border border-blue-300 rounded px-1.5 py-0.5 bg-white font-black text-center"
+                                />
+                                <span className="font-bold">h/sem</span>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* 2. Carga Horária Total (CH / Extra) */}
+                          <div className="flex flex-wrap items-center justify-between gap-2 p-2 rounded-lg bg-emerald-50/70 border border-emerald-200">
+                            <label className="inline-flex items-center gap-2 font-extrabold text-emerald-950 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                disabled={!isAdmin}
+                                checked={enableHourlyRate}
+                                onChange={e =>
+                                  handleUpdateFunctionField(
+                                    fnName,
+                                    'enableHourlyRate',
+                                    e.target.checked
+                                  )
+                                }
+                                className="w-4 h-4 accent-emerald-600"
+                              />
+                              <span>2. Por Carga Horária Total (Paga fração de CH)</span>
+                            </label>
+                            {enableHourlyRate && (
+                              <div className="flex items-center gap-1 text-[10px]">
+                                <Clock size={12} className="text-emerald-700" />
+                                <span className="font-bold text-slate-600">CH Base Ref.:</span>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  disabled={!isAdmin}
+                                  value={hourlyRefHours}
+                                  onChange={e =>
+                                    handleUpdateFunctionField(
+                                      fnName,
+                                      'hourlyRefHours',
+                                      Math.max(1, Number(e.target.value))
+                                    )
+                                  }
+                                  className="w-12 border border-emerald-300 rounded px-1.5 py-0.5 bg-white font-black text-center"
+                                />
+                                <span className="font-bold">h</span>
+                              </div>
+                            )}
+                          </div>
+
+                          {/* 3. Incluso na Cota Mensal (Escala Periódica) */}
+                          <div className="flex flex-wrap items-center justify-between gap-2 p-2 rounded-lg bg-purple-50/70 border border-purple-200">
+                            <label className="inline-flex items-center gap-2 font-extrabold text-purple-950 cursor-pointer">
+                              <input
+                                type="checkbox"
+                                disabled={!isAdmin}
+                                checked={enablePeriodicIncluded}
+                                onChange={e =>
+                                  handleUpdateFunctionField(
+                                    fnName,
+                                    'enablePeriodicIncluded',
+                                    e.target.checked
+                                  )
+                                }
+                                className="w-4 h-4 accent-purple-600"
+                              />
+                              <span>
+                                3. Incluso na Cota Mensal / Escala Periódica (R$ 0 adic.)
+                              </span>
+                            </label>
+                            {enablePeriodicIncluded && (
+                              <div className="flex items-center gap-1 text-[10px]">
+                                <span className="font-bold text-purple-800">CH Ref.:</span>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  disabled={!isAdmin}
+                                  value={periodicRefHours}
+                                  onChange={e =>
+                                    handleUpdateFunctionField(
+                                      fnName,
+                                      'periodicRefHours',
+                                      Math.max(1, Number(e.target.value))
+                                    )
+                                  }
+                                  className="w-12 border border-purple-300 rounded px-1.5 py-0.5 bg-white font-black text-center"
+                                />
+                                <span className="font-bold">h</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* CHECKBOX: ( ) APLICAR NIVELAMENTO + BOTÕES DE INSERIR NÍVEL 1, 2, 3... */}
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <label className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-blue-50 border border-blue-200 text-blue-950 font-extrabold cursor-pointer">
+                          <input
+                            type="checkbox"
+                            disabled={!isAdmin}
+                            checked={applyLeveling}
+                            onChange={e =>
+                              handleUpdateFunctionField(
+                                fnName,
+                                'applyLeveling',
+                                e.target.checked
+                              )
+                            }
+                            className="w-4 h-4 accent-blue-600"
+                          />
+                          <span>( ) Aplicar nivelamento nesta função</span>
+                        </label>
+
+                        {isAdmin && applyLeveling && (
+                          <div className="flex flex-wrap items-center gap-1">
+                            {[1, 2, 3, 4, 5].map(lvlN => {
+                              const alreadyIn = activeLevels.includes(lvlN);
+                              if (alreadyIn) return null;
+                              return (
+                                <button
+                                  key={lvlN}
+                                  type="button"
+                                  onClick={() =>
+                                    handleInsertLevelInFunction(fnName, lvlN)
+                                  }
+                                  className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-black text-[10px] flex items-center gap-1 shadow-2xs"
+                                >
+                                  <Plus size={11} /> Inserir Nível {lvlN}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Descrição */}
+                  <div className="bg-slate-50 p-3 rounded-xl border border-slate-200 space-y-1">
+                    <label className="block text-[10px] font-extrabold text-slate-700 uppercase">
+                      📝 Descrição / Detalhamento da Função:
+                    </label>
+                    {isAdmin ? (
+                      <textarea
+                        rows={2}
+                        value={fnObj.description ?? ''}
+                        onChange={e =>
+                          handleUpdateFunctionField(fnName, 'description', e.target.value)
+                        }
+                        className="w-full border border-slate-300 rounded-lg px-2.5 py-1 bg-white text-slate-800 font-medium"
+                      />
+                    ) : (
+                      <p className="text-slate-600 italic">{fnObj.description || fnName}</p>
+                    )}
+                  </div>
+
+                  {/* MODO A: SEM NIVELAMENTO */}
+                  {!applyLeveling ? (
+                    <div className="p-4 rounded-2xl bg-emerald-50/50 border-2 border-emerald-200 space-y-3">
+                      <span className="px-2.5 py-0.5 rounded bg-emerald-700 text-white font-black text-[10px] uppercase inline-block">
+                        Valores da Função (Sem Nivelamento)
+                      </span>
+
+                      {requiresSchedule ? (
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          {enableFixedQuota && (
                             <div>
                               <label className="block text-[10px] font-extrabold text-slate-700 mb-1">
-                                Cota Fixa Mensal (Ref. 12h R$)
+                                Valor Cota Fixa Mensal ({fixedQuotaRefHours}h/sem R$)
                               </label>
                               <input
                                 type="number"
@@ -3587,105 +2917,110 @@ export default function StaffAndFinanceViews(props: any) {
                                 className="w-full border border-slate-300 rounded-xl px-2.5 py-1.5 bg-white font-black text-slate-900"
                               />
                             </div>
-                            <div>
-                              <label className="block text-[10px] font-extrabold text-blue-900 mb-1">
-                                Extra 12h — Dia Semana (R$)
-                              </label>
-                              <input
-                                type="number"
-                                disabled={!isAdmin}
-                                value={fnObj.extraWeekday ?? fnObj.extra ?? 1650}
-                                onChange={e => {
-                                  const v = Number(e.target.value);
-                                  handleUpdateFunctionField(fnName, 'extraWeekday', v);
-                                  handleUpdateFunctionField(fnName, 'extra', v);
-                                }}
-                                className="w-full border border-blue-300 rounded-xl px-2.5 py-1.5 bg-white font-black text-blue-900"
-                              />
-                            </div>
-                            <div>
-                              <label className="block text-[10px] font-extrabold text-emerald-900 mb-1">
-                                Extra 12h — Fim Semana (R$)
-                              </label>
-                              <input
-                                type="number"
-                                disabled={!isAdmin}
-                                value={
-                                  fnObj.extraWeekend ??
-                                  (fnObj.extra ? Number(fnObj.extra) + 200 : 1850)
-                                }
-                                onChange={e =>
-                                  handleUpdateFunctionField(
-                                    fnName,
-                                    'extraWeekend',
-                                    Number(e.target.value)
-                                  )
-                                }
-                                className="w-full border border-emerald-400 rounded-xl px-2.5 py-1.5 bg-white font-black text-emerald-800"
-                              />
-                            </div>
-                          </div>
-                        ) : (
-                          <div>
-                            <label className="block text-[10px] font-bold text-slate-600 mb-1">
-                              Valor Mensal Fixo do Cargo Sem Escala (R$)
-                            </label>
-                            <input
-                              type="number"
-                              disabled={!isAdmin}
-                              value={fnObj.monthlyFixedValue ?? 5000}
-                              onChange={e =>
-                                handleUpdateFunctionField(
-                                  fnName,
-                                  'monthlyFixedValue',
-                                  Number(e.target.value)
-                                )
-                              }
-                              className="w-full border rounded-xl px-3 py-1.5 bg-white font-black text-purple-900"
-                            />
-                          </div>
-                        )}
-                      </div>
-                    ) : (
-                      /* MODO B: COM NIVELAMENTO (EXIBE APENAS OS NÍVEIS INSERIDOS PELO GESTOR) */
-                      <div className="space-y-2.5">
-                        <span className="block font-extrabold text-slate-700 uppercase text-[11px]">
-                          Níveis Ativos nesta Função ({activeLevels.map(n => `Nível ${n}`).join(', ')}):
-                        </span>
+                          )}
+                          {enableHourlyRate && (
+                            <>
+                              <div>
+                                <label className="block text-[10px] font-extrabold text-blue-900 mb-1">
+                                  CH/Extra ({hourlyRefHours}h) — Dia Semana (R$)
+                                </label>
+                                <input
+                                  type="number"
+                                  disabled={!isAdmin}
+                                  value={fnObj.extraWeekday ?? fnObj.extra ?? 1650}
+                                  onChange={e => {
+                                    const v = Number(e.target.value);
+                                    handleUpdateFunctionField(fnName, 'extraWeekday', v);
+                                    handleUpdateFunctionField(fnName, 'extra', v);
+                                  }}
+                                  className="w-full border border-blue-300 rounded-xl px-2.5 py-1.5 bg-white font-black text-blue-900"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[10px] font-extrabold text-emerald-900 mb-1">
+                                  CH/Extra ({hourlyRefHours}h) — Fim Semana (R$)
+                                </label>
+                                <input
+                                  type="number"
+                                  disabled={!isAdmin}
+                                  value={
+                                    fnObj.extraWeekend ??
+                                    (fnObj.extra ? Number(fnObj.extra) + 200 : 1850)
+                                  }
+                                  onChange={e =>
+                                    handleUpdateFunctionField(
+                                      fnName,
+                                      'extraWeekend',
+                                      Number(e.target.value)
+                                    )
+                                  }
+                                  className="w-full border border-emerald-400 rounded-xl px-2.5 py-1.5 bg-white font-black text-emerald-800"
+                                />
+                              </div>
+                            </>
+                          )}
+                        </div>
+                      ) : (
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-600 mb-1">
+                            Valor Mensal Fixo do Cargo Sem Escala (R$)
+                          </label>
+                          <input
+                            type="number"
+                            disabled={!isAdmin}
+                            value={fnObj.monthlyFixedValue ?? 5000}
+                            onChange={e =>
+                              handleUpdateFunctionField(
+                                fnName,
+                                'monthlyFixedValue',
+                                Number(e.target.value)
+                              )
+                            }
+                            className="w-full border rounded-xl px-3 py-1.5 bg-white font-black text-purple-900"
+                          />
+                        </div>
+                      )}
+                    </div>
+                  ) : (
+                    /* MODO B: COM NIVELAMENTO */
+                    <div className="space-y-2.5">
+                      <span className="block font-extrabold text-slate-700 uppercase text-[11px]">
+                        Níveis Ativos nesta Função ({activeLevels.map(n => `Nível ${n}`).join(', ')}):
+                      </span>
 
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                          {activeLevels.map(lvlNum => {
-                            const lvlKey = `level${lvlNum}`;
-                            const lvlData = levelsObj[lvlKey] || {};
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                        {activeLevels.map(lvlNum => {
+                          const lvlKey = `level${lvlNum}`;
+                          const lvlData = levelsObj[lvlKey] || {};
 
-                            return (
-                              <div
-                                key={lvlKey}
-                                className="p-3 rounded-xl border border-blue-200 bg-blue-50/30 space-y-2"
-                              >
-                                <div className="flex items-center justify-between">
-                                  <span className="px-2.5 py-0.5 rounded bg-blue-600 text-white font-black text-[10px] uppercase">
-                                    Nível {lvlNum}
-                                  </span>
-                                  {isAdmin && activeLevels.length > 1 && (
-                                    <button
-                                      type="button"
-                                      onClick={() =>
-                                        handleRemoveLevelFromFunction(fnName, lvlNum)
-                                      }
-                                      className="text-slate-400 hover:text-red-600 text-[10px] font-bold flex items-center gap-0.5"
-                                      title={`Remover Nível ${lvlNum} desta função`}
-                                    >
-                                      <Trash2 size={11} /> Remover
-                                    </button>
-                                  )}
-                                </div>
+                          return (
+                            <div
+                              key={lvlKey}
+                              className="p-3 rounded-xl border border-blue-200 bg-blue-50/30 space-y-2"
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="px-2.5 py-0.5 rounded bg-blue-600 text-white font-black text-[10px] uppercase">
+                                  Nível {lvlNum}
+                                </span>
+                                {isAdmin && activeLevels.length > 1 && (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleRemoveLevelFromFunction(fnName, lvlNum)
+                                    }
+                                    className="text-slate-400 hover:text-red-600 text-[10px] font-bold flex items-center gap-0.5"
+                                  >
+                                    <Trash2 size={11} /> Remover
+                                  </button>
+                                )}
+                              </div>
 
-                                {requiresSchedule ? (
-                                  <div className="grid grid-cols-3 gap-1.5">
+                              {requiresSchedule ? (
+                                <div className="grid grid-cols-3 gap-1.5">
+                                  {enableFixedQuota && (
                                     <div>
                                       <label className="block text-[9px] font-bold text-slate-500">
-                                        Cota Fixa 12h
+                                        Cota ({fixedQuotaRefHours}h/sem)
                                       </label>
                                       <input
                                         type="number"
@@ -3702,1903 +3037,723 @@ export default function StaffAndFinanceViews(props: any) {
                                         className="w-full border rounded-lg px-1.5 py-1 bg-white font-extrabold text-slate-900"
                                       />
                                     </div>
-                                    <div>
-                                      <label className="block text-[9px] font-bold text-blue-700">
-                                        Extra Sem. 12h
-                                      </label>
-                                      <input
-                                        type="number"
-                                        disabled={!isAdmin}
-                                        value={
-                                          lvlData.extraWeekday ??
-                                          lvlData.extra ??
-                                          fnObj.extra ??
-                                          1650
-                                        }
-                                        onChange={e =>
-                                          handleUpdateFunctionLevelValue(
-                                            fnName,
-                                            lvlKey,
-                                            'extraWeekday',
-                                            Number(e.target.value)
-                                          )
-                                        }
-                                        className="w-full border rounded-lg px-1.5 py-1 bg-white font-extrabold text-blue-800"
-                                      />
-                                    </div>
-                                    <div>
-                                      <label className="block text-[9px] font-bold text-emerald-700">
-                                        Extra FDS 12h
-                                      </label>
-                                      <input
-                                        type="number"
-                                        disabled={!isAdmin}
-                                        value={
-                                          lvlData.extraWeekend ??
-                                          lvlData.extra ??
-                                          fnObj.extraWeekend ??
-                                          1850
-                                        }
-                                        onChange={e =>
-                                          handleUpdateFunctionLevelValue(
-                                            fnName,
-                                            lvlKey,
-                                            'extraWeekend',
-                                            Number(e.target.value)
-                                          )
-                                        }
-                                        className="w-full border rounded-lg px-1.5 py-1 bg-white font-extrabold text-emerald-700"
-                                      />
-                                    </div>
-                                  </div>
-                                ) : (
-                                  <div>
-                                    <label className="block text-[10px] font-bold text-slate-500">
-                                      Valor Mensal Fixo (R$)
-                                    </label>
-                                    <input
-                                      type="number"
-                                      disabled={!isAdmin}
-                                      value={
-                                        lvlData.monthlyFixedValue ??
-                                        fnObj.monthlyFixedValue ??
-                                        5000
-                                      }
-                                      onChange={e =>
-                                        handleUpdateFunctionLevelValue(
-                                          fnName,
-                                          lvlKey,
-                                          'monthlyFixedValue',
-                                          Number(e.target.value)
-                                        )
-                                      }
-                                      className="w-full border rounded-lg px-2.5 py-1 bg-white font-extrabold text-purple-800"
-                                    />
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          {/* Formulário para Criar Nova Função */}
-          {isAdmin && (
-            <form
-              onSubmit={handleAddNewFunction}
-              className="bg-white p-5 rounded-2xl border-2 border-dashed border-blue-300 space-y-4 text-xs"
-            >
-              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-                <h4 className="font-extrabold text-sm text-blue-950 uppercase flex items-center gap-2">
-                  <Plus size={16} className="text-blue-600" /> Cadastrar Nova Função / Setor na Tabela de Remuneração
-                </h4>
-
-                <div className="flex flex-wrap items-center gap-3">
-                  <label className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-blue-50 border border-blue-300 font-extrabold text-blue-950 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={newFunctionForm.applyLeveling}
-                      onChange={e =>
-                        setNewFunctionForm({
-                          ...newFunctionForm,
-                          applyLeveling: e.target.checked
-                        })
-                      }
-                      className="w-4 h-4 accent-blue-600"
-                    />
-                    <span>( ) Aplicar nivelamento</span>
-                  </label>
-
-                  {newFunctionForm.applyLeveling && (
-                    <div className="flex items-center gap-1.5">
-                      <span className="font-bold text-blue-900">Iniciar com quantos níveis?</span>
-                      <select
-                        value={newFunctionForm.initialLevelsCount}
-                        onChange={e =>
-                          setNewFunctionForm({
-                            ...newFunctionForm,
-                            initialLevelsCount: Number(e.target.value)
-                          })
-                        }
-                        className="border border-blue-400 rounded-lg px-2 py-1 bg-white font-black text-blue-950"
-                      >
-                        <option value={1}>Apenas Nível 1</option>
-                        <option value={2}>Níveis 1 e 2</option>
-                        <option value={3}>Níveis 1, 2 e 3</option>
-                        <option value={4}>Níveis 1, 2, 3 e 4</option>
-                      </select>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-6 gap-3">
-                <div className="sm:col-span-2">
-                  <label className="block font-bold mb-1">Nome da Função *</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Ex: Plantão - Cardiologia"
-                    value={newFunctionForm.name}
-                    onChange={e =>
-                      setNewFunctionForm({ ...newFunctionForm, name: e.target.value })
-                    }
-                    className="w-full border rounded-lg px-3 py-2 font-bold"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-bold mb-1">Cor na Escala & Heatmap</label>
-                  <select
-                    value={newFunctionForm.colorTheme}
-                    onChange={e =>
-                      setNewFunctionForm({
-                        ...newFunctionForm,
-                        colorTheme: e.target.value
-                      })
-                    }
-                    className="w-full border rounded-lg px-2.5 py-2 bg-white font-extrabold"
-                  >
-                    {Object.values(FUNCTION_COLOR_PALETTE).map(pal => (
-                      <option key={pal.id} value={pal.id}>
-                        🎨 {pal.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block font-bold mb-1">Tipo de Alocação</label>
-                  <select
-                    value={newFunctionForm.requiresSchedule ? 'sim' : 'nao'}
-                    onChange={e =>
-                      setNewFunctionForm({
-                        ...newFunctionForm,
-                        requiresSchedule: e.target.value === 'sim'
-                      })
-                    }
-                    className="w-full border rounded-lg px-2.5 py-2 bg-white font-bold"
-                  >
-                    <option value="sim">Com Escala (Cota Fixa ou Hora)</option>
-                    <option value="nao">Sem Escala (Fixo Mensal)</option>
-                  </select>
-                </div>
-
-                {newFunctionForm.requiresSchedule ? (
-                  <>
-                    <div>
-                      <label className="block font-bold mb-1">
-                        Cota Fixa Mensal 12h (R$)
-                      </label>
-                      <input
-                        type="number"
-                        value={newFunctionForm.fixedRate12h}
-                        onChange={e =>
-                          setNewFunctionForm({
-                            ...newFunctionForm,
-                            fixedRate12h: Number(e.target.value)
-                          })
-                        }
-                        className="w-full border rounded-lg px-3 py-2 font-bold"
-                      />
-                    </div>
-                    <div>
-                      <label className="block font-bold mb-1">
-                        Extra 12h Semana / FDS
-                      </label>
-                      <div className="grid grid-cols-2 gap-1">
-                        <input
-                          type="number"
-                          value={newFunctionForm.extraWeekday12h}
-                          onChange={e =>
-                            setNewFunctionForm({
-                              ...newFunctionForm,
-                              extraWeekday12h: Number(e.target.value)
-                            })
-                          }
-                          className="w-full border rounded-lg px-2 py-2 font-bold text-blue-900"
-                        />
-                        <input
-                          type="number"
-                          value={newFunctionForm.extraWeekend12h}
-                          onChange={e =>
-                            setNewFunctionForm({
-                              ...newFunctionForm,
-                              extraWeekend12h: Number(e.target.value)
-                            })
-                          }
-                          className="w-full border rounded-lg px-2 py-2 font-bold text-emerald-800"
-                        />
-                      </div>
-                    </div>
-                  </>
-                ) : (
-                  <div className="sm:col-span-2">
-                    <label className="block font-bold mb-1">
-                      Valor Mensal Fixo do Cargo (R$)
-                    </label>
-                    <input
-                      type="number"
-                      value={newFunctionForm.monthlyFixedValue}
-                      onChange={e =>
-                        setNewFunctionForm({
-                          ...newFunctionForm,
-                          monthlyFixedValue: Number(e.target.value)
-                        })
-                      }
-                      className="w-full border rounded-lg px-3 py-2 font-bold"
-                    />
-                  </div>
-                )}
-              </div>
-
-              <div>
-                <label className="block font-bold mb-1">
-                  Descrição / Atribuições da Função:
-                </label>
-                <input
-                  type="text"
-                  placeholder="Ex: Atendimento de porta e observação clínica..."
-                  value={newFunctionForm.description}
-                  onChange={e =>
-                    setNewFunctionForm({ ...newFunctionForm, description: e.target.value })
-                  }
-                  className="w-full border rounded-lg px-3 py-2"
-                />
-              </div>
-
-              <div className="flex justify-end">
-                <button
-                  type="submit"
-                  className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-bold shadow-sm"
-                >
-                  + Criar Função na Tabela
-                </button>
-              </div>
-            </form>
-          )}
-        </div>
-
-        {/* BLOCO 3: CATÁLOGO DETALHADO DE ADICIONAIS & BONIFICAÇÕES (COM MULTI-FUNÇÃO) */}
-        <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5 text-xs">
-          <div>
-            <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
-              <Percent size={18} className="text-amber-600" />
-              Catálogo de Adicionais & Bonificações (Acumuláveis por Competência + Múltiplas Funções de Incidência)
-            </h3>
-            <p className="text-slate-500 mt-0.5">
-              O médico pode acumular múltiplas competências do mesmo adicional (ex: 2x Liderança, 3x Fim de Semana). Se o adicional incidir sobre funções específicas, marque abaixo uma ou várias funções!
-            </p>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
-            {shiftAdditionalsList.map((add: any) => {
-              const targetFns: string[] =
-                Array.isArray(add.targetFunctionNames) && add.targetFunctionNames.length > 0
-                  ? add.targetFunctionNames
-                  : add.targetFunctionName
-                  ? [add.targetFunctionName]
-                  : [allFunctionNames[0] || 'Plantonista'];
-
-              const targetLabel =
-                add.applicationTarget === 'specific_function'
-                  ? `Incide sobre: ${targetFns.join(', ')}`
-                  : add.applicationTarget === 'final_payroll'
-                  ? 'Sobre o Valor Final da Folha PJ'
-                  : 'Sobre a Base do Plantão (Ref. 12h)';
-
-              return (
-                <div
-                  key={add.id}
-                  className="p-4 rounded-2xl border border-slate-200 bg-slate-50/80 space-y-2.5"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <strong className="text-sm font-black text-slate-900 block">
-                        {add.name}
-                      </strong>
-                      <div className="flex flex-wrap items-center gap-1.5 mt-1">
-                        <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-900 font-bold text-[10px]">
-                          {add.incidence === 'monthly'
-                            ? 'Bonificação Mensal'
-                            : 'Por Plantão (Acumulável 1x, 2x...)'}
-                        </span>
-                        <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-950 font-black text-[10px]">
-                          {add.calcMode === 'percent'
-                            ? `Percentual: ${add.percentValue || 0}%`
-                            : `Fixo: R$ ${Number(add.value12h || 0).toLocaleString('pt-BR')}`}
-                        </span>
-                        <span className="px-2 py-0.5 rounded bg-indigo-100 text-indigo-900 font-bold text-[10px]">
-                          {targetLabel}
-                        </span>
-                      </div>
-                    </div>
-
-                    {isAdmin && (
-                      <button
-                        type="button"
-                        onClick={() =>
-                          safeSetConfig((prev: any) => ({
-                            ...prev,
-                            shiftAdditionals: shiftAdditionalsList.filter(
-                              (item: any) => item.id !== add.id
-                            )
-                          }))
-                        }
-                        className="text-slate-400 hover:text-red-600 p-1"
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    )}
-                  </div>
-
-                  {isAdmin && (
-                    <div className="space-y-2 pt-2 border-t border-slate-200/80">
-                      <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                        <div>
-                          <label className="block text-[10px] font-bold text-slate-500">
-                            Modo de Cálculo
-                          </label>
-                          <select
-                            value={add.calcMode || 'fixed'}
-                            onChange={e =>
-                              handleUpdateExistingAdditional(add.id, 'calcMode', e.target.value)
-                            }
-                            className="w-full border rounded-lg px-2 py-1 bg-white font-bold"
-                          >
-                            <option value="fixed">Valor Fixo (R$)</option>
-                            <option value="percent">Percentual (%)</option>
-                          </select>
-                        </div>
-
-                        <div>
-                          <label className="block text-[10px] font-bold text-slate-500">
-                            {add.calcMode === 'percent' ? 'Percentual (%)' : 'Valor (R$)'}
-                          </label>
-                          <input
-                            type="number"
-                            value={
-                              add.calcMode === 'percent'
-                                ? add.percentValue ?? 10
-                                : add.value12h ?? 250
-                            }
-                            onChange={e =>
-                              handleUpdateExistingAdditional(
-                                add.id,
-                                add.calcMode === 'percent' ? 'percentValue' : 'value12h',
-                                Number(e.target.value)
-                              )
-                            }
-                            className="w-full border rounded-lg px-2 py-1 bg-white font-black text-slate-900"
-                          />
-                        </div>
-
-                        <div>
-                          <label className="block text-[10px] font-bold text-slate-500">
-                            Aplicar Sobre:
-                          </label>
-                          <select
-                            value={add.applicationTarget || 'shift_base'}
-                            onChange={e =>
-                              handleUpdateExistingAdditional(
-                                add.id,
-                                'applicationTarget',
-                                e.target.value
-                              )
-                            }
-                            className="w-full border rounded-lg px-2 py-1 bg-white font-bold"
-                          >
-                            <option value="final_payroll">Valor Final da Folha</option>
-                            <option value="specific_function">Função(ões) Específica(s)</option>
-                            <option value="shift_base">Base do Plantão (12h)</option>
-                          </select>
-                        </div>
-                      </div>
-
-                      {add.applicationTarget === 'specific_function' && (
-                        <div className="p-2.5 rounded-xl bg-white border border-indigo-200 space-y-1.5">
-                          <span className="block text-[10px] font-extrabold text-indigo-900 uppercase">
-                            Selecione sobre qual(is) função(ões) este adicional incide:
-                          </span>
-                          <div className="flex flex-wrap gap-1.5">
-                            {allFunctionNames.map(fn => {
-                              const checked = targetFns.includes(fn);
-                              return (
-                                <label
-                                  key={fn}
-                                  className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[10px] font-bold cursor-pointer ${
-                                    checked
-                                      ? 'bg-indigo-600 text-white border-indigo-700'
-                                      : 'bg-slate-50 text-slate-700 border-slate-300'
-                                  }`}
-                                >
-                                  <input
-                                    type="checkbox"
-                                    checked={checked}
-                                    onChange={() =>
-                                      handleToggleTargetFnOnExistingAdditional(add, fn)
-                                    }
-                                    className="hidden"
-                                  />
-                                  <span>{checked ? '✓ ' : '+ '}{fn}</span>
-                                </label>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-
-          {isAdmin && (
-            <form
-              onSubmit={handleAddAdditional}
-              className="p-4 rounded-2xl bg-amber-50/50 border-2 border-dashed border-amber-300 space-y-3"
-            >
-              <h4 className="font-extrabold text-amber-950 uppercase text-xs flex items-center gap-1.5">
-                <Plus size={15} className="text-amber-700" />
-                Cadastrar Novo Adicional ou Bonificação
-              </h4>
-
-              <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 items-end">
-                <div className="sm:col-span-2">
-                  <label className="block font-bold mb-1">
-                    Nome do Adicional / Bonificação *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="Ex: Adicional de Liderança / Adicional FDS"
-                    value={newAdditionalForm.name}
-                    onChange={e =>
-                      setNewAdditionalForm({ ...newAdditionalForm, name: e.target.value })
-                    }
-                    className="w-full border rounded-xl px-3 py-2 bg-white font-bold"
-                  />
-                </div>
-
-                <div>
-                  <label className="block font-bold mb-1">Periodicidade</label>
-                  <select
-                    value={newAdditionalForm.incidence}
-                    onChange={e =>
-                      setNewAdditionalForm({
-                        ...newAdditionalForm,
-                        incidence: e.target.value as 'shift' | 'monthly'
-                      })
-                    }
-                    className="w-full border rounded-xl px-3 py-2 bg-white font-bold"
-                  >
-                    <option value="shift">Por Plantão (Acumulável)</option>
-                    <option value="monthly">Na Folha Mensal</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block font-bold mb-1">Tipo de Valor</label>
-                  <select
-                    value={newAdditionalForm.calcMode}
-                    onChange={e =>
-                      setNewAdditionalForm({
-                        ...newAdditionalForm,
-                        calcMode: e.target.value as 'fixed' | 'percent'
-                      })
-                    }
-                    className="w-full border rounded-xl px-3 py-2 bg-white font-extrabold text-amber-950"
-                  >
-                    <option value="fixed">Valor Fixo (R$)</option>
-                    <option value="percent">Valor Percentual (%)</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block font-bold mb-1">
-                    {newAdditionalForm.calcMode === 'percent'
-                      ? 'Percentual (%)'
-                      : 'Valor 1 Competência (R$)'}
-                  </label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={
-                      newAdditionalForm.calcMode === 'percent'
-                        ? newAdditionalForm.percentValue
-                        : newAdditionalForm.value12h
-                    }
-                    onChange={e =>
-                      setNewAdditionalForm({
-                        ...newAdditionalForm,
-                        ...(newAdditionalForm.calcMode === 'percent'
-                          ? { percentValue: Number(e.target.value) }
-                          : { value12h: Number(e.target.value) })
-                      })
-                    }
-                    className="w-full border rounded-xl px-3 py-2 bg-white font-black"
-                  />
-                </div>
-              </div>
-
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-start pt-1">
-                <div>
-                  <label className="block font-bold mb-1">
-                    Onde Aplicar esta Bonificação / Adicional?
-                  </label>
-                  <select
-                    value={newAdditionalForm.applicationTarget}
-                    onChange={e =>
-                      setNewAdditionalForm({
-                        ...newAdditionalForm,
-                        applicationTarget: e.target.value as
-                          | 'final_payroll'
-                          | 'specific_function'
-                          | 'shift_base'
-                      })
-                    }
-                    className="w-full border rounded-xl px-3 py-2 bg-white font-extrabold text-indigo-950"
-                  >
-                    <option value="final_payroll">
-                      Aplicar sobre o Valor Final da Folha
-                    </option>
-                    <option value="specific_function">
-                      Aplicar sobre Uma ou Mais Funções Específicas
-                    </option>
-                    <option value="shift_base">
-                      Aplicar sobre o Plantão Individual (Base 12h)
-                    </option>
-                  </select>
-                </div>
-
-                {newAdditionalForm.applicationTarget === 'specific_function' ? (
-                  <div className="sm:col-span-2 p-3 rounded-xl bg-white border border-indigo-200 space-y-1.5">
-                    <label className="block font-extrabold text-indigo-950 text-[11px]">
-                      Marque uma ou mais funções sobre as quais este adicional incidirá:
-                    </label>
-                    <div className="flex flex-wrap gap-1.5">
-                      {allFunctionNames.map(fn => {
-                        const checked = (
-                          newAdditionalForm.targetFunctionNames || []
-                        ).includes(fn);
-                        return (
-                          <button
-                            key={fn}
-                            type="button"
-                            onClick={() => handleToggleTargetFnOnNewAdditional(fn)}
-                            className={`px-3 py-1 rounded-lg border font-bold text-[11px] transition-all ${
-                              checked
-                                ? 'bg-indigo-600 text-white border-indigo-700'
-                                : 'bg-slate-50 text-slate-700 border-slate-300'
-                            }`}
-                          >
-                            {checked ? '✓ ' : '+ '}
-                            {fn}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="sm:col-span-2" />
-                )}
-              </div>
-
-              <div className="flex justify-end">
-                <button
-                  type="submit"
-                  className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl px-5 py-2.5 font-bold"
-                >
-                  + Salvar Adicional / Bonificação
-                </button>
-              </div>
-            </form>
-          )}
-        </div>
-      </div>
-    );
-  }
-
-  // ============================================================================
-  // 4. ABA: FOLHA PJ 26 A 25 + AUDITORIA ANALÍTICA DE CARGA HORÁRIA + EXTRATO DO MÉDICO
-  // ============================================================================
-  const totalNet = detailedPayrollRows.reduce(
-    (acc, item) => acc + Number(item.netTotal || 0),
-    0
-  );
-
-  const updateDoctorPayrollCustom = (
-    entityKey: string | number,
-    updater: (curr: any) => any
-  ) => {
-    if (!isAdmin) return;
-    safeSetConfig((prev: any) => {
-      const allCustom = prev?.payrollCustomizations || {};
-      const monthObj = allCustom[competenceMonth] || {};
-      const docObj = monthObj[entityKey] || {};
-      const nextDocObj = updater(docObj);
-      return {
-        ...prev,
-        payrollCustomizations: {
-          ...allCustom,
-          [competenceMonth]: {
-            ...monthObj,
-            [entityKey]: nextDocObj
-          }
-        }
-      };
-    });
-  };
-
-  // Manipuladores de Funções Exercidas na linha do médico na Folha PJ
-  const handleAddRoleEntryToPayrollRow = (docRow: any) => {
-    const currEntries = [...docRow.activeRoleEntries];
-    currEntries.push({
-      id: `re_${Date.now()}`,
-      functionName: docRow.doctor.role || allFunctionNames[0] || 'Plantonista',
-      billingMode: 'fixed_quota_monthly',
-      units: 1,
-      hoursPerUnit: 12,
-      weekdayHours: 12,
-      weekendHours: 0
-    });
-    updateDoctorPayrollCustom(docRow.entityKey, curr => ({
-      ...curr,
-      roleEntries: currEntries
-    }));
-  };
-
-  const handleUpdateRoleEntryInPayrollRow = (
-    docRow: any,
-    entryIdx: number,
-    field: string,
-    value: any
-  ) => {
-    const currEntries = docRow.activeRoleEntries.map((item: any, idx: number) =>
-      idx === entryIdx ? { ...item, [field]: value } : item
-    );
-    updateDoctorPayrollCustom(docRow.entityKey, curr => ({
-      ...curr,
-      roleEntries: currEntries
-    }));
-  };
-
-  const handleRemoveRoleEntryFromPayrollRow = (docRow: any, entryIdx: number) => {
-    const currEntries = docRow.activeRoleEntries.filter(
-      (_: any, idx: number) => idx !== entryIdx
-    );
-    updateDoctorPayrollCustom(docRow.entityKey, curr => ({
-      ...curr,
-      roleEntries: currEntries
-    }));
-  };
-
-  // Manipulador de Multiplicador / Competências Acumuladas de Adicionais (0x, 1x, 2x, 3x...)
-  const handleUpdateAdditionalCountOnRow = (
-    docRow: any,
-    addId: string,
-    newCount: number
-  ) => {
-    updateDoctorPayrollCustom(docRow.entityKey, curr => ({
-      ...curr,
-      additionalCounts: {
-        ...(curr.additionalCounts || {}),
-        [addId]: Math.max(0, Number(newCount))
-      }
-    }));
-  };
-
-  // Manipulador de Desconto sobre Passagem de Plantão (Sem desconto, Integral, Dif. Nível, Fração %, Parcial R$)
-  const handleUpdateSwapDiscountOnRow = (
-    docRow: any,
-    swapId: any,
-    field: 'mode' | 'fractionPercent' | 'customAmount',
-    val: any
-  ) => {
-    updateDoctorPayrollCustom(docRow.entityKey, curr => {
-      const currDiscounts = curr.swapDiscounts || {};
-      const currSwapCfg = currDiscounts[swapId] || {
-        mode: 'none',
-        fractionPercent: 50,
-        customAmount: 0
-      };
-      return {
-        ...curr,
-        swapDiscounts: {
-          ...currDiscounts,
-          [swapId]: {
-            ...currSwapCfg,
-            [field]: val
-          }
-        }
-      };
-    });
-  };
-
-  // Manipuladores de Ajuste Manual (+ Adicionar ou - Subtrair Valor)
-  const handleAddManualAdjustmentOnRow = (docRow: any) => {
-    const draft = adjDraftByEntity[String(docRow.entityKey)] || {
-      type: 'add',
-      amount: '',
-      description: ''
-    };
-    const numVal = Number(draft.amount);
-    if (!numVal || numVal <= 0) {
-      alert('Informe um valor válido em R$ para o ajuste.');
-      return;
-    }
-
-    const newAdj = {
-      id: `adj_${Date.now()}`,
-      type: draft.type,
-      amount: numVal,
-      description:
-        draft.description.trim() ||
-        (draft.type === 'add' ? 'Ajuste positivo (+)' : 'Ajuste negativo (-)')
-    };
-
-    updateDoctorPayrollCustom(docRow.entityKey, curr => ({
-      ...curr,
-      manualAdjustments: [...(curr.manualAdjustments || []), newAdj]
-    }));
-
-    setAdjDraftByEntity(prev => ({
-      ...prev,
-      [String(docRow.entityKey)]: { type: 'add', amount: '', description: '' }
-    }));
-    safeRecordAction(
-      `Ajuste manual (${newAdj.type === 'add' ? '+' : '-'} R$ ${numVal}) aplicado na folha de ${
-        docRow.doctor.name
-      }`
-    );
-  };
-
-  const handleRemoveManualAdjustmentOnRow = (docRow: any, adjId: string) => {
-    updateDoctorPayrollCustom(docRow.entityKey, curr => ({
-      ...curr,
-      manualAdjustments: (curr.manualAdjustments || []).filter(
-        (a: any) => a.id !== adjId
-      )
-    }));
-  };
-
-  const handleResetDoctorPayrollToAuto = (entityKey: string | number, docName: string) => {
-    if (!isAdmin) return;
-    safeSetConfig((prev: any) => {
-      const allCustom = { ...(prev?.payrollCustomizations || {}) };
-      const monthObj = { ...(allCustom[competenceMonth] || {}) };
-      delete monthObj[entityKey];
-      return {
-        ...prev,
-        payrollCustomizations: {
-          ...allCustom,
-          [competenceMonth]: monthObj
-        }
-      };
-    });
-    safeRecordAction(`Cálculo da Folha PJ de ${docName} restaurado para leitura automática`);
-  };
-
-  // Conferência pelo próprio Médico (De Acordo / Apontar Divergência)
-  const handleDoctorConfirmPayroll = (docId: number) => {
-    const confKey = `${competenceMonth}__${docId}`;
-    safeSetDoctorConference((prev: any) => ({
-      ...(prev || {}),
-      [confKey]: {
-        checked: true,
-        checkedAt: new Date().toLocaleString('pt-BR'),
-        errorNote: ''
-      }
-    }));
-    safeRecordAction(
-      `Médico ${currentUser?.name || docId} confirmou estar DE ACORDO com o extrato PJ (${competenceMonth})`
-    );
-  };
-
-  const handleDoctorReportDivergence = (docId: number) => {
-    if (!doctorDivergenceNoteInput.trim()) {
-      alert('Descreva a divergência encontrada para que o gestor possa revisar.');
-      return;
-    }
-    const confKey = `${competenceMonth}__${docId}`;
-    safeSetDoctorConference((prev: any) => ({
-      ...(prev || {}),
-      [confKey]: {
-        checked: false,
-        checkedAt: new Date().toLocaleString('pt-BR'),
-        errorNote: doctorDivergenceNoteInput.trim()
-      }
-    }));
-    setDoctorDivergenceNoteInput('');
-    safeRecordAction(
-      `Médico ${currentUser?.name || docId} apontou divergência no extrato PJ (${competenceMonth})`
-    );
-  };
-
-  // Exportação CSV/Excel Completa da Folha PJ + Auditoria Analítica por Função e Dias
-  const handleExportPayrollAndAuditCSV = () => {
-    if (typeof window === 'undefined') return;
-
-    const fnHeaders: string[] = [];
-    allFunctionNames.forEach(fn => {
-      fnHeaders.push(`${fn} - Horas Fixas`);
-      fnHeaders.push(`${fn} - Horas Extras`);
-      fnHeaders.push(`${fn} - Total Horas`);
-    });
-
-    const header = [
-      'Medico / Identificacao',
-      'CRM',
-      'Especialidade',
-      'Nivel Senioridade',
-      'Razao Social PJ',
-      'CNPJ',
-      'Funcoes Exercidas na Competencia',
-      'Subtotal Funcoes (R$)',
-      'Adicionais Acumulados (Competencias)',
-      'Subtotal Adicionais (R$)',
-      'Descontos de Passagens (R$)',
-      'Ajustes Manuais (+/- R$)',
-      'Liquido Total PJ (R$)',
-      'Total Horas Cumpridas na Escala',
-      'Discriminacao de Dias e Horarios Exercidos',
-      ...fnHeaders
-    ];
-
-    const rows = detailedPayrollRows.map(item => {
-      const d = item.doctor || {};
-      const rolesDesc =
-        item.evaluatedRoleEntries.length > 0
-          ? item.evaluatedRoleEntries
-              .map((re: any) => {
-                if (re.billingMode === 'monthly_no_schedule') {
-                  return `${re.functionName} (Cargo Mensal s/ Escala)`;
-                }
-                if (re.billingMode === 'fixed_quota_monthly') {
-                  return `${re.units}x Cota Fixa ${re.hoursPerUnit}h ${re.functionName}`;
-                }
-                return `${re.functionName} (${re.weekdayHours}h Sem + ${re.weekendHours}h FDS)`;
-              })
-              .join(' + ')
-          : 'Sem função lançada';
-
-      const addsDesc =
-        item.evaluatedAdditionals
-          .filter((a: any) => a.count > 0)
-          .map((a: any) => `${a.count}x ${a.name}`)
-          .join(' + ') || 'Nenhum adicional';
-
-      const daysDesc =
-        item.dailyWorkedScheduleList
-          .map(
-            (sh: any) =>
-              `[${formatBrDate(sh.date)} ${sh.startTime}-${sh.endTime} (${sh.hours}h) ${sh.functionName}]`
-          )
-          .join(' | ') || 'Sem turnos';
-
-      const fnCols: string[] = [];
-      allFunctionNames.forEach(fn => {
-        const audit = item.auditByFunction[fn] || {
-          fixedHours: 0,
-          extraHours: 0,
-          totalHours: 0
-        };
-        fnCols.push(String(audit.fixedHours || 0).replace('.', ','));
-        fnCols.push(String(audit.extraHours || 0).replace('.', ','));
-        fnCols.push(String(audit.totalHours || 0).replace('.', ','));
-      });
-
-      return [
-        `"${(d.name || '').replace(/"/g, '""')}"`,
-        `"${(d.crm || '').replace(/"/g, '""')}"`,
-        `"${(d.specialty || '').replace(/"/g, '""')}"`,
-        `Nivel ${item.docLevel}`,
-        `"${(d.razaoSocial || '').replace(/"/g, '""')}"`,
-        `"${(d.cnpj || '').replace(/"/g, '""')}"`,
-        `"${rolesDesc}"`,
-        String(item.functionsSubtotal.toFixed(2).replace('.', ',')),
-        `"${addsDesc}"`,
-        String(item.additionalsSubtotal.toFixed(2).replace('.', ',')),
-        String(item.totalPassagensDiscounts.toFixed(2).replace('.', ',')),
-        String(item.manualAdjustmentsNet.toFixed(2).replace('.', ',')),
-        String(item.netTotal.toFixed(2).replace('.', ',')),
-        String(item.totalFulfilledHours).replace('.', ','),
-        `"${daysDesc}"`,
-        ...fnCols
-      ].join(';');
-    });
-
-    const csvContent = '\uFEFF' + [header.join(';'), ...rows].join('\n');
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', `Folha_PJ_e_Auditoria_Analitica_${competenceMonth}.csv`);
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
-
-  return (
-    <div className="space-y-6 text-slate-800">
-      {/* Cabeçalho da Folha PJ / Meu Extrato PJ */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-        <div>
-          <h2 className="text-xl sm:text-2xl font-bold text-slate-900 flex items-center gap-2">
-            <DollarSign className="text-emerald-600" size={24} />
-            {isAdmin
-              ? `Folha Financeira PJ & Auditoria Analítica de Carga Horária (${competenceMonth})`
-              : `Meu Extrato de Produção PJ & Carga Horária (${competenceMonth})`}
-          </h2>
-          <p className="text-xs text-slate-500 mt-0.5">
-            Janela 26 a 25: <strong>{formatBrDate(competenceWindow?.startStr)}</strong> até{' '}
-            <strong>{formatBrDate(competenceWindow?.endStr)}</strong> • Funções fixas mensais (4 ou 5 semanas), horas trabalhadas, adicionais acumuláveis, descontos de passagens e ajustes.
-          </p>
-        </div>
-
-        <div className="flex flex-wrap items-center gap-2 text-xs">
-          <input
-            type="month"
-            value={competenceMonth}
-            onChange={e => safeSetCompetenceMonth(e.target.value)}
-            className="border border-slate-300 rounded-xl px-3 py-2 font-extrabold"
-          />
-
-          <button
-            type="button"
-            onClick={() =>
-              handleDownloadAnalyticalWorkloadAuditPDF(
-                !isAdmin ? detailedPayrollRows[0] : undefined
-              )
-            }
-            className="bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-xl font-bold flex items-center gap-1.5 shadow-sm"
-          >
-            <Printer size={14} />
-            {isAdmin
-              ? 'Baixar Documento de Auditoria de Carga Horária (PDF)'
-              : 'Baixar Meu Espelho PJ & Horas (PDF)'}
-          </button>
-
-          {isAdmin && (
-            <button
-              type="button"
-              onClick={handleExportPayrollAndAuditCSV}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-bold flex items-center gap-1.5 shadow-sm"
-            >
-              <Download size={14} /> Exportar Planilha Completa (CSV/Excel)
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Banner Consolidado */}
-      <div className="bg-emerald-900 text-white p-5 rounded-2xl flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-md">
-        <div>
-          <span className="text-[11px] font-extrabold uppercase text-emerald-300">
-            {isAdmin
-              ? `Total Consolidado da Folha PJ (${competenceMonth})`
-              : `Minha Produção Líquida Total na Competência (${competenceMonth})`}
-          </span>
-          <div className="text-2xl sm:text-3xl font-black mt-0.5">
-            R$ {totalNet.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-          </div>
-        </div>
-        <div className="text-xs text-emerald-200 flex items-center gap-2 max-w-md">
-          <ShieldCheck size={20} className="shrink-0" />
-          <span>
-            Funções de cadastro fixo pagam o valor integral da cota mensal (4 ou 5 semanas). Plantões extras pagam por hora trabalhada. Todas as horas cumpridas ficam discriminadas na Auditoria abaixo.
-          </span>
-        </div>
-      </div>
-
-      {/* PAINEL DE DUPLO CHECK / CONFERÊNCIA DO MÉDICO (VISÍVEL NO LOGIN DO MÉDICO) */}
-      {!isAdmin && detailedPayrollRows[0] && (
-        <div className="bg-white p-5 rounded-2xl border-2 border-blue-200 shadow-sm space-y-3 text-xs">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div>
-              <h3 className="text-sm font-black text-slate-900 uppercase flex items-center gap-2">
-                <CheckSquare size={17} className="text-blue-600" />
-                Conferência do Meu Extrato de Produção PJ ({competenceMonth})
-              </h3>
-              <p className="text-slate-500 mt-0.5">
-                Verifique abaixo as suas funções cadastradas, adicionais acumulados, descontos de passagens e horas trabalhadas.
-              </p>
-            </div>
-
-            <div className="flex items-center gap-2">
-              {detailedPayrollRows[0].conferenceStatus?.checked ? (
-                <span className="px-3.5 py-2 rounded-xl bg-emerald-100 text-emerald-900 font-black flex items-center gap-1.5">
-                  <CheckCircle size={15} /> Extrato Confirmado em{' '}
-                  {detailedPayrollRows[0].conferenceStatus.checkedAt}
-                </span>
-              ) : (
-                <button
-                  type="button"
-                  onClick={() => handleDoctorConfirmPayroll(Number(currentUser?.id))}
-                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2 rounded-xl font-black flex items-center gap-1.5 shadow-sm"
-                >
-                  <CheckCircle size={15} /> ✅ Confirmar Extrato PJ (De Acordo)
-                </button>
-              )}
-            </div>
-          </div>
-
-          <div className="flex flex-col sm:flex-row gap-2 pt-2 border-t border-slate-100">
-            <input
-              type="text"
-              placeholder="Caso identifique alguma divergência em horas, funções ou adicionais, descreva aqui para revisão do gestor..."
-              value={doctorDivergenceNoteInput}
-              onChange={e => setDoctorDivergenceNoteInput(e.target.value)}
-              className="flex-1 border border-slate-300 rounded-xl px-3 py-1.5"
-            />
-            <button
-              type="button"
-              onClick={() => handleDoctorReportDivergence(Number(currentUser?.id))}
-              className="bg-amber-600 hover:bg-amber-700 text-white px-4 py-1.5 rounded-xl font-bold shrink-0"
-            >
-              ⚠️ Apontar Divergência ao Gestor
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* TABELA 1: COMPOSIÇÃO DETALHADA DA FOLHA PJ
-          (FUNÇÕES EXERCIDAS + ADICIONAIS ACUMULÁVEIS + DESCONTOS DE PASSAGENS + AJUSTES MANUAIS) */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
-        <div className="p-4 border-b border-slate-100 flex items-center justify-between">
-          <div>
-            <h3 className="text-sm font-black text-slate-900 uppercase flex items-center gap-2">
-              <Layers size={17} className="text-blue-600" />
-              1. Composição Financeira PJ — Funções Exercidas, Adicionais Acumuláveis, Descontos de Passagens & Ajustes
-            </h3>
-            <p className="text-[11px] text-slate-500">
-              Tudo o que o gestor configurar abaixo reflete imediatamente na aba “Meu Extrato PJ” do respetivo médico.
-            </p>
-          </div>
-        </div>
-
-        <table className="w-full text-left border-collapse text-xs">
-          <thead>
-            <tr className="bg-slate-900 text-white uppercase text-[10px]">
-              <th className="py-3 px-4">Médico / Auditoria</th>
-              <th className="py-3 px-3">
-                Funções Exercidas (Fixo s/ Escala, Cota Fixa 4/5 Sem. ou Por Hora)
-              </th>
-              <th className="py-3 px-3">
-                Adicionais & Bonificações (Quantidade Acumulada 1x, 2x...)
-              </th>
-              <th className="py-3 px-3">
-                Descontos Passagens & Ajustes (+/-)
-              </th>
-              <th className="py-3 px-4 text-right">Líquido Final PJ</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-200">
-            {detailedPayrollRows.map(row => {
-              const d = row.doctor || {};
-              const adjDraft = adjDraftByEntity[String(row.entityKey)] || {
-                type: 'add',
-                amount: '',
-                description: ''
-              };
-
-              return (
-                <tr
-                  key={row.entityKey}
-                  className={`hover:bg-slate-50/80 align-top ${
-                    row.isManualEntry ? 'bg-amber-50/30' : ''
-                  }`}
-                >
-                  {/* COLUNA 1: IDENTIFICAÇÃO DO MÉDICO */}
-                  <td className="py-4 px-4 space-y-1.5 min-w-[215px]">
-                    <div className="flex items-center gap-1.5 flex-wrap">
-                      <strong className="text-slate-900 text-sm font-black">
-                        {d.name}
-                      </strong>
-                      <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-900 font-black text-[10px]">
-                        Nível {row.docLevel}
-                      </span>
-                    </div>
-                    <p className="text-slate-500 text-[11px]">
-                      {d.crm} • {d.specialty || 'Clínica Médica'}
-                    </p>
-                    {!row.isManualEntry && (
-                      <p className="text-slate-600 font-semibold text-[10px]">
-                        PJ: {d.razaoSocial || '—'}
-                      </p>
-                    )}
-
-                    <div className="pt-1 flex flex-wrap items-center gap-1.5">
-                      <span className="px-2 py-0.5 rounded bg-slate-900 text-white font-extrabold text-[10px]">
-                        Escala: {row.shiftsCount} pl. ({row.totalFulfilledHours}h cumpridas)
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => handleDownloadAnalyticalWorkloadAuditPDF(row)}
-                        className="px-2 py-0.5 rounded bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-[10px] flex items-center gap-1 border border-slate-300"
-                        title="Baixar espelho individual com discriminação de dias e horários"
-                      >
-                        <Printer size={10} /> Espelho PDF
-                      </button>
-                      {isAdmin && row.isCustomized && (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleResetDoctorPayrollToAuto(row.entityKey, d.name)
-                          }
-                          className="text-[10px] font-bold text-amber-700 hover:underline flex items-center gap-0.5"
-                        >
-                          <RotateCcw size={11} /> Auto
-                        </button>
-                      )}
-                    </div>
-
-                    {row.conferenceStatus?.checked && (
-                      <div className="p-1.5 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-900 font-bold text-[10px]">
-                        ✓ Confirmado pelo médico ({row.conferenceStatus.checkedAt})
-                      </div>
-                    )}
-                    {row.conferenceStatus?.errorNote && (
-                      <div className="p-2 rounded-lg bg-rose-50 border border-rose-300 text-rose-900 font-bold text-[10px]">
-                        ⚠ Divergência apontada pelo médico: “{row.conferenceStatus.errorNote}”
-                      </div>
-                    )}
-                  </td>
-
-                  {/* COLUNA 2: FUNÇÕES EXERCIDAS (FIXO S/ ESCALA, COTA FIXA 4/5 SEMANAS OU POR HORA TRABALHADA) */}
-                  <td className="py-4 px-3 min-w-[360px] space-y-2">
-                    {row.evaluatedRoleEntries.length === 0 ? (
-                      <div className="text-slate-400 italic text-[11px]">
-                        Nenhuma função remunerada lançada nesta competência.
-                      </div>
-                    ) : (
-                      <div className="space-y-2">
-                        {row.evaluatedRoleEntries.map((re: any, reIdx: number) => {
-                          const cInfo = getFunctionColorInfo(re.functionName);
-                          return (
-                            <div
-                              key={re.id || reIdx}
-                              style={{ borderLeft: `4px solid ${cInfo.hex}` }}
-                              className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2"
-                            >
-                              {isAdmin ? (
-                                <div className="flex flex-wrap items-center justify-between gap-1.5">
-                                  <select
-                                    value={re.functionName}
-                                    onChange={e =>
-                                      handleUpdateRoleEntryInPayrollRow(
-                                        row,
-                                        reIdx,
-                                        'functionName',
-                                        e.target.value
-                                      )
-                                    }
-                                    className="border border-slate-300 rounded-lg px-2 py-1 bg-white font-black text-slate-900 text-[11px]"
-                                  >
-                                    {allFunctionNames.map(fn => (
-                                      <option key={fn} value={fn}>
-                                        {fn}
-                                      </option>
-                                    ))}
-                                  </select>
-
-                                  <select
-                                    value={re.billingMode}
-                                    onChange={e =>
-                                      handleUpdateRoleEntryInPayrollRow(
-                                        row,
-                                        reIdx,
-                                        'billingMode',
-                                        e.target.value
-                                      )
-                                    }
-                                    className="border border-blue-300 rounded-lg px-2 py-1 bg-blue-50 font-extrabold text-blue-950 text-[10px]"
-                                  >
-                                    <option value="fixed_quota_monthly">
-                                      Cota Fixa Mensal (4 ou 5 sem.)
-                                    </option>
-                                    <option value="hourly_extra">
-                                      Por Hora Trabalhada (Extra/Avulso)
-                                    </option>
-                                    <option value="monthly_no_schedule">
-                                      Cargo Fixo Mensal (Sem Escala)
-                                    </option>
-                                  </select>
-
-                                  <button
-                                    type="button"
-                                    onClick={() =>
-                                      handleRemoveRoleEntryFromPayrollRow(row, reIdx)
-                                    }
-                                    className="text-slate-400 hover:text-red-600 p-0.5"
-                                    title="Remover função"
-                                  >
-                                    <Trash2 size={13} />
-                                  </button>
+                                  )}
+                                  {enableHourlyRate && (
+                                    <>
+                                      <div>
+                                        <label className="block text-[9px] font-bold text-blue-700">
+                                          CH Sem. ({hourlyRefHours}h)
+                                        </label>
+                                        <input
+                                          type="number"
+                                          disabled={!isAdmin}
+                                          value={
+                                            lvlData.extraWeekday ??
+                                            lvlData.extra ??
+                                            fnObj.extra ??
+                                            1650
+                                          }
+                                          onChange={e =>
+                                            handleUpdateFunctionLevelValue(
+                                              fnName,
+                                              lvlKey,
+                                              'extraWeekday',
+                                              Number(e.target.value)
+                                            )
+                                          }
+                                          className="w-full border rounded-lg px-1.5 py-1 bg-white font-extrabold text-blue-800"
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="block text-[9px] font-bold text-emerald-700">
+                                          CH FDS ({hourlyRefHours}h)
+                                        </label>
+                                        <input
+                                          type="number"
+                                          disabled={!isAdmin}
+                                          value={
+                                            lvlData.extraWeekend ??
+                                            lvlData.extra ??
+                                            fnObj.extraWeekend ??
+                                            1850
+                                          }
+                                          onChange={e =>
+                                            handleUpdateFunctionLevelValue(
+                                              fnName,
+                                              lvlKey,
+                                              'extraWeekend',
+                                              Number(e.target.value)
+                                            )
+                                          }
+                                          className="w-full border rounded-lg px-1.5 py-1 bg-white font-extrabold text-emerald-700"
+                                        />
+                                      </div>
+                                    </>
+                                  )}
                                 </div>
                               ) : (
-                                <div className="flex items-center justify-between">
-                                  <strong className="text-slate-900 font-black">
-                                    {re.functionName}
-                                  </strong>
-                                  <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-900 font-bold text-[10px]">
-                                    {re.billingMode === 'fixed_quota_monthly'
-                                      ? 'Cota Fixa Mensal (4/5 sem.)'
-                                      : re.billingMode === 'monthly_no_schedule'
-                                      ? 'Cargo Fixo Mensal'
-                                      : 'Por Hora Trabalhada'}
-                                  </span>
-                                </div>
-                              )}
-
-                              {/* Campos conforme a modalidade da função */}
-                              {re.billingMode === 'fixed_quota_monthly' && (
-                                <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
-                                  {isAdmin ? (
-                                    <div className="flex items-center gap-1">
-                                      <input
-                                        type="number"
-                                        min={0}
-                                        value={re.units}
-                                        onChange={e =>
-                                          handleUpdateRoleEntryInPayrollRow(
-                                            row,
-                                            reIdx,
-                                            'units',
-                                            Math.max(0, Number(e.target.value))
-                                          )
-                                        }
-                                        className="w-12 border rounded px-1.5 py-0.5 text-center font-black bg-white"
-                                      />
-                                      <span className="text-[10px] font-bold">
-                                        cota(s) fixa(s) de
-                                      </span>
-                                      <input
-                                        type="number"
-                                        min={1}
-                                        max={24}
-                                        value={re.hoursPerUnit}
-                                        onChange={e =>
-                                          handleUpdateRoleEntryInPayrollRow(
-                                            row,
-                                            reIdx,
-                                            'hoursPerUnit',
-                                            Math.max(1, Number(e.target.value))
-                                          )
-                                        }
-                                        className="w-12 border rounded px-1.5 py-0.5 text-center font-black bg-white"
-                                      />
-                                      <span className="text-[10px] font-bold">h/sem</span>
-                                    </div>
-                                  ) : (
-                                    <span>
-                                      {re.units}x Cota Fixa de {re.hoursPerUnit}h semanais
-                                    </span>
-                                  )}
-
-                                  <span className="font-black text-blue-900 ml-auto">
-                                    R${' '}
-                                    {re.lineTotal.toLocaleString('pt-BR', {
-                                      minimumFractionDigits: 2
-                                    })}
-                                  </span>
-                                </div>
-                              )}
-
-                              {re.billingMode === 'hourly_extra' && (
-                                <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
-                                  {isAdmin ? (
-                                    <div className="flex items-center gap-2">
-                                      <div className="flex items-center gap-1">
-                                        <span className="text-[10px] font-bold text-slate-600">
-                                          Sem(h):
-                                        </span>
-                                        <input
-                                          type="number"
-                                          min={0}
-                                          value={re.weekdayHours}
-                                          onChange={e =>
-                                            handleUpdateRoleEntryInPayrollRow(
-                                              row,
-                                              reIdx,
-                                              'weekdayHours',
-                                              Math.max(0, Number(e.target.value))
-                                            )
-                                          }
-                                          className="w-14 border border-blue-300 rounded px-1.5 py-0.5 text-center font-black bg-white"
-                                        />
-                                      </div>
-                                      <div className="flex items-center gap-1">
-                                        <span className="text-[10px] font-bold text-emerald-700">
-                                          FDS(h):
-                                        </span>
-                                        <input
-                                          type="number"
-                                          min={0}
-                                          value={re.weekendHours}
-                                          onChange={e =>
-                                            handleUpdateRoleEntryInPayrollRow(
-                                              row,
-                                              reIdx,
-                                              'weekendHours',
-                                              Math.max(0, Number(e.target.value))
-                                            )
-                                          }
-                                          className="w-14 border border-emerald-400 rounded px-1.5 py-0.5 text-center font-black bg-white"
-                                        />
-                                      </div>
-                                    </div>
-                                  ) : (
-                                    <span>
-                                      Dia Semana: {re.weekdayHours}h • Fim de Semana:{' '}
-                                      {re.weekendHours}h
-                                    </span>
-                                  )}
-
-                                  <span className="font-black text-emerald-800 ml-auto">
-                                    R${' '}
-                                    {re.lineTotal.toLocaleString('pt-BR', {
-                                      minimumFractionDigits: 2
-                                    })}
-                                  </span>
-                                </div>
-                              )}
-
-                              {re.billingMode === 'monthly_no_schedule' && (
-                                <div className="flex items-center justify-between text-[11px]">
-                                  <span className="text-purple-900 font-bold">
-                                    Cargo Fixo Mensal (Sem Escala)
-                                  </span>
-                                  <span className="font-black text-purple-900">
-                                    R${' '}
-                                    {re.lineTotal.toLocaleString('pt-BR', {
-                                      minimumFractionDigits: 2
-                                    })}
-                                  </span>
-                                </div>
-                              )}
-
-                              {/* Sinalizador de Presença Real na Escala */}
-                              {re.billingMode === 'fixed_quota_monthly' && (
-                                <div className="text-[10px] text-slate-500 flex items-center justify-between pt-1 border-t border-slate-200/70">
-                                  <span>
-                                    Auditoria escala: <strong>{re.fulfilledFixedShifts} pl. ({re.fulfilledFixedHours}h)</strong>
-                                    {re.abonadaDispensesCount > 0
-                                      ? ` + ${re.abonadaDispensesCount} dispensa(s) abonada(s)`
-                                      : ''}
-                                  </span>
-                                  <span className="text-[9px] font-bold text-blue-700">
-                                    Valor integral 4/5 sem.
-                                  </span>
+                                <div>
+                                  <label className="block text-[10px] font-bold text-slate-500">
+                                    Valor Mensal Fixo (R$)
+                                  </label>
+                                  <input
+                                    type="number"
+                                    disabled={!isAdmin}
+                                    value={
+                                      lvlData.monthlyFixedValue ??
+                                      fnObj.monthlyFixedValue ??
+                                      5000
+                                    }
+                                    onChange={e =>
+                                      handleUpdateFunctionLevelValue(
+                                        fnName,
+                                        lvlKey,
+                                        'monthlyFixedValue',
+                                        Number(e.target.value)
+                                      )
+                                    }
+                                    className="w-full border rounded-lg px-2.5 py-1 bg-white font-extrabold text-purple-800"
+                                  />
                                 </div>
                               )}
                             </div>
                           );
                         })}
                       </div>
-                    )}
-
-                    <div className="flex items-center justify-between pt-1">
-                      {isAdmin && (
-                        <button
-                          type="button"
-                          onClick={() => handleAddRoleEntryToPayrollRow(row)}
-                          className="text-[10px] font-extrabold text-blue-700 bg-blue-50 hover:bg-blue-100 px-2.5 py-1 rounded-lg border border-blue-200 flex items-center gap-1"
-                        >
-                          <Plus size={12} /> + Inserir Função Exercida
-                        </button>
-                      )}
-                      <span className="text-[11px] font-extrabold text-slate-700 ml-auto">
-                        Subtotal Funções: R${' '}
-                        {row.functionsSubtotal.toLocaleString('pt-BR', {
-                          minimumFractionDigits: 2
-                        })}
-                      </span>
                     </div>
-                  </td>
-
-                  {/* COLUNA 3: ADICIONAIS ACUMULÁVEIS POR QUANTIDADE DE COMPETÊNCIAS (1x, 2x, 3x...) */}
-                  <td className="py-4 px-3 min-w-[275px] space-y-2">
-                    <div className="space-y-1.5">
-                      {row.evaluatedAdditionals.map((add: any) => {
-                        const isActive = add.count > 0;
-                        if (!isAdmin && !isActive) return null;
-
-                        return (
-                          <div
-                            key={add.id}
-                            className={`p-2 rounded-xl border flex items-center justify-between gap-2 ${
-                              isActive
-                                ? 'bg-amber-50/80 border-amber-300 text-amber-950'
-                                : 'bg-white border-slate-200 text-slate-400'
-                            }`}
-                          >
-                            <div className="min-w-0">
-                              <strong className="block text-[11px] font-extrabold truncate">
-                                {add.name}
-                              </strong>
-                              <span className="block text-[9px] text-slate-500 truncate">
-                                {add.calcMode === 'percent'
-                                  ? `${add.percentValue}% (${
-                                      add.applicationTarget === 'specific_function'
-                                        ? add.targetFns.join(', ')
-                                        : 'Folha'
-                                    })`
-                                  : `R$ ${add.value12h} / comp.`}
-                              </span>
-                            </div>
-
-                            <div className="flex items-center gap-1.5 shrink-0">
-                              {isAdmin ? (
-                                <div className="flex items-center gap-1">
-                                  <input
-                                    type="number"
-                                    min={0}
-                                    max={31}
-                                    value={add.count}
-                                    onChange={e =>
-                                      handleUpdateAdditionalCountOnRow(
-                                        row,
-                                        add.id,
-                                        Number(e.target.value)
-                                      )
-                                    }
-                                    className="w-11 border border-amber-400 rounded px-1 py-0.5 text-center font-black bg-white text-slate-900"
-                                    title="Quantidade de competências acumuladas deste adicional"
-                                  />
-                                  <span className="text-[10px] font-black">x</span>
-                                </div>
-                              ) : (
-                                <span className="px-2 py-0.5 rounded bg-amber-200 font-black text-[10px]">
-                                  {add.count}x
-                                </span>
-                              )}
-
-                              <span className="font-extrabold text-[11px] min-w-[68px] text-right">
-                                R${' '}
-                                {add.totalAmount.toLocaleString('pt-BR', {
-                                  minimumFractionDigits: 2
-                                })}
-                              </span>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-
-                    <div className="text-right text-[11px] font-extrabold text-amber-900 pt-1">
-                      Subtotal Adicionais: + R${' '}
-                      {row.additionalsSubtotal.toLocaleString('pt-BR', {
-                        minimumFractionDigits: 2
-                      })}
-                    </div>
-                  </td>
-
-                  {/* COLUNA 4: DESCONTOS DE PASSAGENS DE PLANTÃO & AJUSTES MANUAIS (+/-) */}
-                  <td className="py-4 px-3 min-w-[310px] space-y-3">
-                    {/* Bloco A: Descontos de Passagens de Plantão */}
-                    <div className="space-y-1.5">
-                      <span className="block text-[10px] font-extrabold uppercase text-slate-500">
-                        Passagens de Plantão na Competência ({row.evaluatedPassagensDiscounts.length}):
-                      </span>
-
-                      {row.evaluatedPassagensDiscounts.length === 0 ? (
-                        <span className="text-[10px] text-slate-400 italic block">
-                          Nenhuma passagem registada pelo titular.
-                        </span>
-                      ) : (
-                        row.evaluatedPassagensDiscounts.map((pd: any) => (
-                          <div
-                            key={pd.swapId}
-                            className="p-2 rounded-xl bg-rose-50/50 border border-rose-200 space-y-1.5 text-[10px]"
-                          >
-                            <div className="flex items-center justify-between gap-1">
-                              <strong className="text-slate-900">
-                                {formatBrDate(pd.date)} ({pd.hours}h) → {pd.substituteName}
-                              </strong>
-                              {pd.isLowerLevel && (
-                                <span className="px-1.5 py-0.5 rounded bg-rose-600 text-white font-black text-[9px]">
-                                  Nível {pd.titularLevel} → Nível {pd.substituteLevel}
-                                </span>
-                              )}
-                            </div>
-
-                            {isAdmin ? (
-                              <div className="flex flex-wrap items-center gap-1.5">
-                                <select
-                                  value={pd.mode}
-                                  onChange={e =>
-                                    handleUpdateSwapDiscountOnRow(
-                                      row,
-                                      pd.swapId,
-                                      'mode',
-                                      e.target.value
-                                    )
-                                  }
-                                  className="border border-rose-300 rounded px-1.5 py-0.5 bg-white font-bold text-rose-950"
-                                >
-                                  <option value="none">Sem Desconto (R$ 0)</option>
-                                  <option value="full">
-                                    Desconto Integral (R$ {pd.fullShiftValue.toFixed(0)})
-                                  </option>
-                                  <option value="level_diff">
-                                    Dif. Nível Inferior (R$ {pd.levelDiffValue.toFixed(0)})
-                                  </option>
-                                  <option value="fraction">Fração (%)</option>
-                                  <option value="custom">Valor Parcial (R$)</option>
-                                </select>
-
-                                {pd.mode === 'fraction' && (
-                                  <div className="flex items-center gap-0.5">
-                                    <input
-                                      type="number"
-                                      min={0}
-                                      max={100}
-                                      value={pd.fractionPercent}
-                                      onChange={e =>
-                                        handleUpdateSwapDiscountOnRow(
-                                          row,
-                                          pd.swapId,
-                                          'fractionPercent',
-                                          Number(e.target.value)
-                                        )
-                                      }
-                                      className="w-11 border rounded px-1 py-0.5 bg-white font-black text-center"
-                                    />
-                                    <span>%</span>
-                                  </div>
-                                )}
-
-                                {pd.mode === 'custom' && (
-                                  <input
-                                    type="number"
-                                    min={0}
-                                    value={pd.customAmount}
-                                    onChange={e =>
-                                      handleUpdateSwapDiscountOnRow(
-                                        row,
-                                        pd.swapId,
-                                        'customAmount',
-                                        Number(e.target.value)
-                                      )
-                                    }
-                                    className="w-16 border rounded px-1.5 py-0.5 bg-white font-black"
-                                    placeholder="R$"
-                                  />
-                                )}
-
-                                <span className="font-black text-rose-700 ml-auto">
-                                  - R${' '}
-                                  {pd.discountApplied.toLocaleString('pt-BR', {
-                                    minimumFractionDigits: 2
-                                  })}
-                                </span>
-                              </div>
-                            ) : (
-                              <div className="flex justify-between text-rose-800 font-bold">
-                                <span>
-                                  {pd.mode === 'none'
-                                    ? 'Isento de desconto'
-                                    : 'Desconto aplicado'}
-                                </span>
-                                <span>
-                                  - R${' '}
-                                  {pd.discountApplied.toLocaleString('pt-BR', {
-                                    minimumFractionDigits: 2
-                                  })}
-                                </span>
-                              </div>
-                            )}
-                          </div>
-                        ))
-                      )}
-                    </div>
-
-                    {/* Bloco B: Ajustes Manuais (+ Adicionar ou - Subtrair Valor) */}
-                    <div className="pt-2 border-t border-slate-200 space-y-1.5">
-                      <span className="block text-[10px] font-extrabold uppercase text-slate-500">
-                        Ajustes Manuais de Correção (+/-):
-                      </span>
-
-                      {row.manualAdjustmentsList.map((adj: any) => (
-                        <div
-                          key={adj.id}
-                          className={`p-1.5 rounded-lg border flex items-center justify-between gap-2 text-[10px] font-bold ${
-                            adj.type === 'subtract'
-                              ? 'bg-red-50 border-red-200 text-red-900'
-                              : 'bg-emerald-50 border-emerald-200 text-emerald-900'
-                          }`}
-                        >
-                          <span>
-                            {adj.type === 'subtract' ? '−' : '+'} R${' '}
-                            {Number(adj.amount).toLocaleString('pt-BR', {
-                              minimumFractionDigits: 2
-                            })}{' '}
-                            ({adj.description})
-                          </span>
-                          {isAdmin && (
-                            <button
-                              type="button"
-                              onClick={() => handleRemoveManualAdjustmentOnRow(row, adj.id)}
-                              className="text-slate-400 hover:text-red-600"
-                            >
-                              <Trash2 size={11} />
-                            </button>
-                          )}
-                        </div>
-                      ))}
-
-                      {isAdmin && (
-                        <div className="flex flex-wrap items-center gap-1 pt-1">
-                          <select
-                            value={adjDraft.type}
-                            onChange={e =>
-                              setAdjDraftByEntity(prev => ({
-                                ...prev,
-                                [String(row.entityKey)]: {
-                                  ...adjDraft,
-                                  type: e.target.value as 'add' | 'subtract'
-                                }
-                              }))
-                            }
-                            className="border rounded px-1.5 py-1 bg-white font-black text-[10px]"
-                          >
-                            <option value="add">+ Somar</option>
-                            <option value="subtract">- Subtrair</option>
-                          </select>
-                          <input
-                            type="number"
-                            placeholder="Valor R$"
-                            value={adjDraft.amount}
-                            onChange={e =>
-                              setAdjDraftByEntity(prev => ({
-                                ...prev,
-                                [String(row.entityKey)]: {
-                                  ...adjDraft,
-                                  amount: e.target.value
-                                }
-                              }))
-                            }
-                            className="w-20 border rounded px-2 py-1 bg-white font-bold text-[10px]"
-                          />
-                          <input
-                            type="text"
-                            placeholder="Motivo..."
-                            value={adjDraft.description}
-                            onChange={e =>
-                              setAdjDraftByEntity(prev => ({
-                                ...prev,
-                                [String(row.entityKey)]: {
-                                  ...adjDraft,
-                                  description: e.target.value
-                                }
-                              }))
-                            }
-                            className="flex-1 min-w-[90px] border rounded px-2 py-1 bg-white text-[10px]"
-                          />
-                          <button
-                            type="button"
-                            onClick={() => handleAddManualAdjustmentOnRow(row)}
-                            className="bg-slate-900 text-white px-2.5 py-1 rounded font-bold text-[10px]"
-                          >
-                            OK
-                          </button>
-                        </div>
-                      )}
-                    </div>
-                  </td>
-
-                  {/* COLUNA 5: LÍQUIDO FINAL PJ */}
-                  <td className="py-4 px-4 text-right whitespace-nowrap">
-                    <span className="text-base font-black text-emerald-700 block">
-                      R${' '}
-                      {row.netTotal.toLocaleString('pt-BR', {
-                        minimumFractionDigits: 2
-                      })}
-                    </span>
-                    <span className="text-[10px] text-slate-400 font-bold uppercase block">
-                      Líquido Final PJ
-                    </span>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-
-      {/* TABELA 2: DOCUMENTO ANALÍTICO DE AUDITORIA DE CARGA HORÁRIA POR FUNÇÃO, DIA E HORÁRIO */}
-      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
-        <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-          <div>
-            <h3 className="text-sm font-black text-slate-900 uppercase flex items-center gap-2">
-              <Table size={17} className="text-indigo-600" />
-              2. Auditoria Analítica de Carga Horária por Função + Discriminação de Dias e Horários Exercidos
-            </h3>
-            <p className="text-[11px] text-slate-500">
-              Clique em “Ver Dias e Horários” em qualquer médico para abrir a listagem cronológica exata dos plantões cumpridos na competência, ou clique em “Baixar Documento de Auditoria (PDF)” no topo.
-            </p>
-          </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
 
-        <table className="w-full text-left border-collapse text-xs">
-          <thead>
-            <tr className="bg-slate-800 text-white uppercase text-[10px]">
-              <th className="py-3 px-4">Médico / Plantonista (A-Z)</th>
-              <th className="py-3 px-3 text-center">Carga Total Acumulada</th>
-              {allFunctionNames.map((fn, idx) => {
-                const cInfo = getFunctionColorInfo(fn, idx);
-                return (
-                  <th
-                    key={fn}
-                    style={{ borderTop: `3px solid ${cInfo.hex}` }}
-                    className="py-3 px-3 text-center border-l border-slate-700"
-                  >
-                    {fn}
-                    <span className="block text-[9px] text-slate-300 font-normal">
-                      (Fixo | Extra | Total)
-                    </span>
-                  </th>
-                );
-              })}
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-200">
-            {detailedPayrollRows.map(row => {
-              const d = row.doctor || {};
-              const isExpanded = Boolean(
-                expandedAuditDaysByEntity[String(row.entityKey)] || !isAdmin
-              );
+        {/* Formulário para Criar Nova Função */}
+        {isAdmin && (
+          <form
+            onSubmit={handleAddNewFunction}
+            className="bg-white p-5 rounded-2xl border-2 border-dashed border-blue-300 space-y-4 text-xs"
+          >
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <h4 className="font-extrabold text-sm text-blue-950 uppercase flex items-center gap-2">
+                <Plus size={16} className="text-blue-600" /> Cadastrar Nova Função / Setor na Tabela de Remuneração
+              </h4>
 
-              return (
-                <React.Fragment key={row.entityKey}>
-                  <tr className="hover:bg-slate-50">
-                    <td className="py-3 px-4 font-bold text-slate-900">
-                      <div className="flex items-center justify-between gap-2">
-                        <span>{d.name}</span>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setExpandedAuditDaysByEntity(prev => ({
-                              ...prev,
-                              [String(row.entityKey)]: !prev[String(row.entityKey)]
-                            }))
+              <div className="flex flex-wrap items-center gap-3">
+                <label className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-xl bg-blue-50 border border-blue-300 font-extrabold text-blue-950 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={newFunctionForm.applyLeveling}
+                    onChange={e =>
+                      setNewFunctionForm({
+                        ...newFunctionForm,
+                        applyLeveling: e.target.checked
+                      })
+                    }
+                    className="w-4 h-4 accent-blue-600"
+                  />
+                  <span>( ) Aplicar nivelamento</span>
+                </label>
+
+                {newFunctionForm.applyLeveling && (
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-bold text-blue-900">Iniciar com quantos níveis?</span>
+                    <select
+                      value={newFunctionForm.initialLevelsCount}
+                      onChange={e =>
+                        setNewFunctionForm({
+                          ...newFunctionForm,
+                          initialLevelsCount: Number(e.target.value)
+                        })
+                      }
+                      className="border border-blue-400 rounded-lg px-2 py-1 bg-white font-black text-blue-950"
+                    >
+                      <option value={1}>Apenas Nível 1</option>
+                      <option value={2}>Níveis 1 e 2</option>
+                      <option value={3}>Níveis 1, 2 e 3</option>
+                      <option value={4}>Níveis 1, 2, 3 e 4</option>
+                    </select>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-6 gap-3">
+              <div className="sm:col-span-2">
+                <label className="block font-bold mb-1">Nome da Função *</label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ex: Plantão - Cardiologia"
+                  value={newFunctionForm.name}
+                  onChange={e =>
+                    setNewFunctionForm({ ...newFunctionForm, name: e.target.value })
+                  }
+                  className="w-full border rounded-lg px-3 py-2 font-bold"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold mb-1">Cor na Escala & Heatmap</label>
+                <select
+                  value={newFunctionForm.colorTheme}
+                  onChange={e =>
+                    setNewFunctionForm({
+                      ...newFunctionForm,
+                      colorTheme: e.target.value
+                    })
+                  }
+                  className="w-full border rounded-lg px-2.5 py-2 bg-white font-extrabold"
+                >
+                  {Object.values(FUNCTION_COLOR_PALETTE).map(pal => (
+                    <option key={pal.id} value={pal.id}>
+                      🎨 {pal.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-bold mb-1">Tipo de Alocação</label>
+                <select
+                  value={newFunctionForm.requiresSchedule ? 'sim' : 'nao'}
+                  onChange={e =>
+                    setNewFunctionForm({
+                      ...newFunctionForm,
+                      requiresSchedule: e.target.value === 'sim'
+                    })
+                  }
+                  className="w-full border rounded-lg px-2.5 py-2 bg-white font-bold"
+                >
+                  <option value="sim">Com Escala</option>
+                  <option value="nao">Sem Escala (Fixo Mensal)</option>
+                </select>
+              </div>
+
+              {newFunctionForm.requiresSchedule ? (
+                <>
+                  <div>
+                    <label className="block font-bold mb-1">
+                      Cota Fixa Mensal (R$)
+                    </label>
+                    <input
+                      type="number"
+                      value={newFunctionForm.fixedRate12h}
+                      onChange={e =>
+                        setNewFunctionForm({
+                          ...newFunctionForm,
+                          fixedRate12h: Number(e.target.value)
+                        })
+                      }
+                      className="w-full border rounded-lg px-3 py-2 font-bold"
+                    />
+                  </div>
+                  <div>
+                    <label className="block font-bold mb-1">
+                      CH/Extra Semana / FDS
+                    </label>
+                    <div className="grid grid-cols-2 gap-1">
+                      <input
+                        type="number"
+                        value={newFunctionForm.extraWeekday12h}
+                        onChange={e =>
+                          setNewFunctionForm({
+                            ...newFunctionForm,
+                            extraWeekday12h: Number(e.target.value)
+                          })
+                        }
+                        className="w-full border rounded-lg px-2 py-2 font-bold text-blue-900"
+                      />
+                      <input
+                        type="number"
+                        value={newFunctionForm.extraWeekend12h}
+                        onChange={e =>
+                          setNewFunctionForm({
+                            ...newFunctionForm,
+                            extraWeekend12h: Number(e.target.value)
+                          })
+                        }
+                        className="w-full border rounded-lg px-2 py-2 font-bold text-emerald-800"
+                      />
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div className="sm:col-span-2">
+                  <label className="block font-bold mb-1">
+                    Valor Mensal Fixo do Cargo (R$)
+                  </label>
+                  <input
+                    type="number"
+                    value={newFunctionForm.monthlyFixedValue}
+                    onChange={e =>
+                      setNewFunctionForm({
+                        ...newFunctionForm,
+                        monthlyFixedValue: Number(e.target.value)
+                      })
+                    }
+                    className="w-full border rounded-lg px-3 py-2 font-bold"
+                  />
+                </div>
+              )}
+            </div>
+
+            {newFunctionForm.requiresSchedule && (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3 rounded-xl bg-slate-50 border border-slate-200">
+                <label className="flex items-center justify-between gap-2 font-bold text-blue-950">
+                  <span className="inline-flex items-center gap-1.5">
+                    <input
+                      type="checkbox"
+                      checked={newFunctionForm.enableFixedQuota}
+                      onChange={e =>
+                        setNewFunctionForm({
+                          ...newFunctionForm,
+                          enableFixedQuota: e.target.checked
+                        })
+                      }
+                      className="accent-blue-600"
+                    />
+                    Habilitar Cota Fixa Mensal
+                  </span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={newFunctionForm.fixedQuotaRefHours}
+                    onChange={e =>
+                      setNewFunctionForm({
+                        ...newFunctionForm,
+                        fixedQuotaRefHours: Number(e.target.value)
+                      })
+                    }
+                    className="w-14 border rounded px-1.5 py-0.5 bg-white font-black text-center"
+                    title="CH semanal de referência da cota"
+                  />
+                </label>
+
+                <label className="flex items-center justify-between gap-2 font-bold text-emerald-950">
+                  <span className="inline-flex items-center gap-1.5">
+                    <input
+                      type="checkbox"
+                      checked={newFunctionForm.enableHourlyRate}
+                      onChange={e =>
+                        setNewFunctionForm({
+                          ...newFunctionForm,
+                          enableHourlyRate: e.target.checked
+                        })
+                      }
+                      className="accent-emerald-600"
+                    />
+                    Habilitar Por Carga Horária (CH)
+                  </span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={newFunctionForm.hourlyRefHours}
+                    onChange={e =>
+                      setNewFunctionForm({
+                        ...newFunctionForm,
+                        hourlyRefHours: Number(e.target.value)
+                      })
+                    }
+                    className="w-14 border rounded px-1.5 py-0.5 bg-white font-black text-center"
+                    title="CH base de referência"
+                  />
+                </label>
+
+                <label className="flex items-center justify-between gap-2 font-bold text-purple-950">
+                  <span className="inline-flex items-center gap-1.5">
+                    <input
+                      type="checkbox"
+                      checked={newFunctionForm.enablePeriodicIncluded}
+                      onChange={e =>
+                        setNewFunctionForm({
+                          ...newFunctionForm,
+                          enablePeriodicIncluded: e.target.checked
+                        })
+                      }
+                      className="accent-purple-600"
+                    />
+                    Habilitar Incluso na Cota (Periódica)
+                  </span>
+                  <input
+                    type="number"
+                    min={1}
+                    value={newFunctionForm.periodicRefHours}
+                    onChange={e =>
+                      setNewFunctionForm({
+                        ...newFunctionForm,
+                        periodicRefHours: Number(e.target.value)
+                      })
+                    }
+                    className="w-14 border rounded px-1.5 py-0.5 bg-white font-black text-center"
+                  />
+                </label>
+              </div>
+            )}
+
+            <div>
+              <label className="block font-bold mb-1">
+                Descrição / Atribuições da Função:
+              </label>
+              <input
+                type="text"
+                placeholder="Ex: Atendimento de porta e observação clínica..."
+                value={newFunctionForm.description}
+                onChange={e =>
+                  setNewFunctionForm({ ...newFunctionForm, description: e.target.value })
+                }
+                className="w-full border rounded-lg px-3 py-2"
+              />
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                type="submit"
+                className="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-bold shadow-sm"
+              >
+                + Criar Função na Tabela
+              </button>
+            </div>
+          </form>
+        )}
+      </div>
+
+      {/* BLOCO 3: CATÁLOGO DETALHADO DE ADICIONAIS & BONIFICAÇÕES (MANTIDO INTACTO) */}
+      <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5 text-xs">
+        <div>
+          <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">
+            <Percent size={18} className="text-amber-600" />
+            Catálogo de Adicionais & Bonificações (Acumuláveis por Competência + Múltiplas Funções de Incidência)
+          </h3>
+          <p className="text-slate-500 mt-0.5">
+            O médico pode acumular múltiplas competências do mesmo adicional (ex: 2x Liderança, 3x Fim de Semana). Se o adicional incidir sobre funções específicas, marque abaixo uma ou várias funções!
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
+          {shiftAdditionalsList.map((add: any) => {
+            const targetFns: string[] =
+              Array.isArray(add.targetFunctionNames) && add.targetFunctionNames.length > 0
+                ? add.targetFunctionNames
+                : add.targetFunctionName
+                ? [add.targetFunctionName]
+                : [allFunctionNames[0] || 'Plantonista'];
+
+            const targetLabel =
+              add.applicationTarget === 'specific_function'
+                ? `Incide sobre: ${targetFns.join(', ')}`
+                : add.applicationTarget === 'final_payroll'
+                ? 'Sobre o Valor Final da Folha PJ'
+                : 'Sobre a Base do Plantão (Ref. 12h)';
+
+            return (
+              <div
+                key={add.id}
+                className="p-4 rounded-2xl border border-slate-200 bg-slate-50/80 space-y-2.5"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <strong className="text-sm font-black text-slate-900 block">
+                      {add.name}
+                    </strong>
+                    <div className="flex flex-wrap items-center gap-1.5 mt-1">
+                      <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-900 font-bold text-[10px]">
+                        {add.incidence === 'monthly'
+                          ? 'Bonificação Mensal'
+                          : 'Por Plantão (Acumulável 1x, 2x...)'}
+                      </span>
+                      <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-950 font-black text-[10px]">
+                        {add.calcMode === 'percent'
+                          ? `Percentual: ${add.percentValue || 0}%`
+                          : `Fixo: R$ ${Number(add.value12h || 0).toLocaleString('pt-BR')}`}
+                      </span>
+                      <span className="px-2 py-0.5 rounded bg-indigo-100 text-indigo-900 font-bold text-[10px]">
+                        {targetLabel}
+                      </span>
+                    </div>
+                  </div>
+
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      onClick={() =>
+                        safeSetConfig((prev: any) => ({
+                          ...prev,
+                          shiftAdditionals: shiftAdditionalsList.filter(
+                            (item: any) => item.id !== add.id
+                          )
+                        }))
+                      }
+                      className="text-slate-400 hover:text-red-600 p-1"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  )}
+                </div>
+
+                {isAdmin && (
+                  <div className="space-y-2 pt-2 border-t border-slate-200/80">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500">
+                          Modo de Cálculo
+                        </label>
+                        <select
+                          value={add.calcMode || 'fixed'}
+                          onChange={e =>
+                            handleUpdateExistingAdditional(add.id, 'calcMode', e.target.value)
                           }
-                          className="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-900 font-extrabold text-[10px] flex items-center gap-1 shrink-0"
+                          className="w-full border rounded-lg px-2 py-1 bg-white font-bold"
                         >
-                          <Clock size={11} />
-                          {isExpanded ? 'Ocultar Dias' : 'Ver Dias e Horários'}
-                        </button>
+                          <option value="fixed">Valor Fixo (R$)</option>
+                          <option value="percent">Percentual (%)</option>
+                        </select>
                       </div>
-                    </td>
 
-                    <td className="py-3 px-3 text-center font-black text-slate-900 bg-slate-50">
-                      {row.totalFulfilledHours}h ({row.shiftsCount} pl.)
-                    </td>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500">
+                          {add.calcMode === 'percent' ? 'Percentual (%)' : 'Valor (R$)'}
+                        </label>
+                        <input
+                          type="number"
+                          value={
+                            add.calcMode === 'percent'
+                              ? add.percentValue ?? 10
+                              : add.value12h ?? 250
+                          }
+                          onChange={e =>
+                            handleUpdateExistingAdditional(
+                              add.id,
+                              add.calcMode === 'percent' ? 'percentValue' : 'value12h',
+                              Number(e.target.value)
+                            )
+                          }
+                          className="w-full border rounded-lg px-2 py-1 bg-white font-black text-slate-900"
+                        />
+                      </div>
 
-                    {allFunctionNames.map(fn => {
-                      const audit = row.auditByFunction[fn] || {
-                        fixedHours: 0,
-                        extraHours: 0,
-                        totalHours: 0
-                      };
-                      const hasAny = audit.totalHours > 0;
-                      return (
-                        <td
-                          key={fn}
-                          className="py-3 px-3 text-center border-l border-slate-100"
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-500">
+                          Aplicar Sobre:
+                        </label>
+                        <select
+                          value={add.applicationTarget || 'shift_base'}
+                          onChange={e =>
+                            handleUpdateExistingAdditional(
+                              add.id,
+                              'applicationTarget',
+                              e.target.value
+                            )
+                          }
+                          className="w-full border rounded-lg px-2 py-1 bg-white font-bold"
                         >
-                          {!hasAny ? (
-                            <span className="text-slate-300">—</span>
-                          ) : (
-                            <div className="inline-flex flex-wrap items-center justify-center gap-1 font-bold text-[10px]">
-                              <span className="px-1.5 py-0.5 rounded bg-blue-50 text-blue-800">
-                                Fixo: {audit.fixedHours}h
-                              </span>
-                              <span className="px-1.5 py-0.5 rounded bg-emerald-50 text-emerald-800">
-                                Extra: {audit.extraHours}h
-                              </span>
-                              <span className="px-1.5 py-0.5 rounded bg-slate-900 text-white font-black">
-                                Total: {audit.totalHours}h
-                              </span>
-                            </div>
-                          )}
-                        </td>
+                          <option value="final_payroll">Valor Final da Folha</option>
+                          <option value="specific_function">Função(ões) Específica(s)</option>
+                          <option value="shift_base">Base do Plantão (12h)</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {add.applicationTarget === 'specific_function' && (
+                      <div className="p-2.5 rounded-xl bg-white border border-indigo-200 space-y-1.5">
+                        <span className="block text-[10px] font-extrabold text-indigo-900 uppercase">
+                          Selecione sobre qual(is) função(ões) este adicional incide:
+                        </span>
+                        <div className="flex flex-wrap gap-1.5">
+                          {allFunctionNames.map(fn => {
+                            const checked = targetFns.includes(fn);
+                            return (
+                              <label
+                                key={fn}
+                                className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-[10px] font-bold cursor-pointer ${
+                                  checked
+                                    ? 'bg-indigo-600 text-white border-indigo-700'
+                                    : 'bg-slate-50 text-slate-700 border-slate-300'
+                                }`}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() =>
+                                    handleToggleTargetFnOnExistingAdditional(add, fn)
+                                  }
+                                  className="hidden"
+                                />
+                                <span>{checked ? '✓ ' : '+ '}{fn}</span>
+                              </label>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {isAdmin && (
+          <form
+            onSubmit={handleAddAdditional}
+            className="p-4 rounded-2xl bg-amber-50/50 border-2 border-dashed border-amber-300 space-y-3"
+          >
+            <h4 className="font-extrabold text-amber-950 uppercase text-xs flex items-center gap-1.5">
+              <Plus size={15} className="text-amber-700" />
+              Cadastrar Novo Adicional ou Bonificação
+            </h4>
+
+            <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 items-end">
+              <div className="sm:col-span-2">
+                <label className="block font-bold mb-1">
+                  Nome do Adicional / Bonificação *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="Ex: Adicional de Liderança / Adicional FDS"
+                  value={newAdditionalForm.name}
+                  onChange={e =>
+                    setNewAdditionalForm({ ...newAdditionalForm, name: e.target.value })
+                  }
+                  className="w-full border rounded-xl px-3 py-2 bg-white font-bold"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold mb-1">Periodicidade</label>
+                <select
+                  value={newAdditionalForm.incidence}
+                  onChange={e =>
+                    setNewAdditionalForm({
+                      ...newAdditionalForm,
+                      incidence: e.target.value as 'shift' | 'monthly'
+                    })
+                  }
+                  className="w-full border rounded-xl px-3 py-2 bg-white font-bold"
+                >
+                  <option value="shift">Por Plantão (Acumulável)</option>
+                  <option value="monthly">Na Folha Mensal</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-bold mb-1">Tipo de Valor</label>
+                <select
+                  value={newAdditionalForm.calcMode}
+                  onChange={e =>
+                    setNewAdditionalForm({
+                      ...newAdditionalForm,
+                      calcMode: e.target.value as 'fixed' | 'percent'
+                    })
+                  }
+                  className="w-full border rounded-xl px-3 py-2 bg-white font-extrabold text-amber-950"
+                >
+                  <option value="fixed">Valor Fixo (R$)</option>
+                  <option value="percent">Valor Percentual (%)</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-bold mb-1">
+                  {newAdditionalForm.calcMode === 'percent'
+                    ? 'Percentual (%)'
+                    : 'Valor 1 Competência (R$)'}
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={
+                    newAdditionalForm.calcMode === 'percent'
+                      ? newAdditionalForm.percentValue
+                      : newAdditionalForm.value12h
+                  }
+                  onChange={e =>
+                    setNewAdditionalForm({
+                      ...newAdditionalForm,
+                      ...(newAdditionalForm.calcMode === 'percent'
+                        ? { percentValue: Number(e.target.value) }
+                        : { value12h: Number(e.target.value) })
+                    })
+                  }
+                  className="w-full border rounded-xl px-3 py-2 bg-white font-black"
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 items-start pt-1">
+              <div>
+                <label className="block font-bold mb-1">
+                  Onde Aplicar esta Bonificação / Adicional?
+                </label>
+                <select
+                  value={newAdditionalForm.applicationTarget}
+                  onChange={e =>
+                    setNewAdditionalForm({
+                      ...newAdditionalForm,
+                      applicationTarget: e.target.value as
+                        | 'final_payroll'
+                        | 'specific_function'
+                        | 'shift_base'
+                    })
+                  }
+                  className="w-full border rounded-xl px-3 py-2 bg-white font-extrabold text-indigo-950"
+                >
+                  <option value="final_payroll">
+                    Aplicar sobre o Valor Final da Folha
+                  </option>
+                  <option value="specific_function">
+                    Aplicar sobre Uma ou Mais Funções Específicas
+                  </option>
+                  <option value="shift_base">
+                    Aplicar sobre o Plantão Individual (Base 12h)
+                  </option>
+                </select>
+              </div>
+
+              {newAdditionalForm.applicationTarget === 'specific_function' ? (
+                <div className="sm:col-span-2 p-3 rounded-xl bg-white border border-indigo-200 space-y-1.5">
+                  <label className="block font-extrabold text-indigo-950 text-[11px]">
+                    Marque uma ou mais funções sobre as quais este adicional incidirá:
+                  </label>
+                  <div className="flex flex-wrap gap-1.5">
+                    {allFunctionNames.map(fn => {
+                      const checked = (
+                        newAdditionalForm.targetFunctionNames || []
+                      ).includes(fn);
+                      return (
+                        <button
+                          key={fn}
+                          type="button"
+                          onClick={() => handleToggleTargetFnOnNewAdditional(fn)}
+                          className={`px-3 py-1 rounded-lg border font-bold text-[11px] transition-all ${
+                            checked
+                              ? 'bg-indigo-600 text-white border-indigo-700'
+                              : 'bg-slate-50 text-slate-700 border-slate-300'
+                          }`}
+                        >
+                          {checked ? '✓ ' : '+ '}
+                          {fn}
+                        </button>
                       );
                     })}
-                  </tr>
+                  </div>
+                </div>
+              ) : (
+                <div className="sm:col-span-2" />
+              )}
+            </div>
 
-                  {/* LINHA EXPANSÍVEL: DISCRIMINAÇÃO POR DIA E HORÁRIO EXERCIDOS */}
-                  {isExpanded && (
-                    <tr className="bg-slate-50/90">
-                      <td
-                        colSpan={2 + allFunctionNames.length}
-                        className="p-4 border-b border-slate-200"
-                      >
-                        <div className="space-y-2">
-                          <div className="flex items-center justify-between">
-                            <strong className="text-[11px] font-black text-indigo-950 uppercase">
-                              📅 Discriminação Analítica de Dias e Horários Exercidos — {d.name} ({row.dailyWorkedScheduleList.length} plantões / {row.totalFulfilledHours}h)
-                            </strong>
-                            <button
-                              type="button"
-                              onClick={() => handleDownloadAnalyticalWorkloadAuditPDF(row)}
-                              className="text-[10px] font-extrabold text-indigo-700 hover:underline flex items-center gap-1"
-                            >
-                              <Printer size={12} /> Imprimir Auditoria Individual
-                            </button>
-                          </div>
-
-                          {row.dailyWorkedScheduleList.length === 0 ? (
-                            <p className="text-slate-400 italic text-[11px]">
-                              Nenhum turno registado na escala neste período de competência.
-                            </p>
-                          ) : (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                              {row.dailyWorkedScheduleList.map((sh: any) => {
-                                const cInfo = getFunctionColorInfo(sh.functionName);
-                                return (
-                                  <div
-                                    key={sh.id}
-                                    style={{ borderLeft: `4px solid ${cInfo.hex}` }}
-                                    className="p-2.5 rounded-xl bg-white border border-slate-200 flex items-center justify-between gap-2 text-[11px]"
-                                  >
-                                    <div>
-                                      <strong className="text-slate-900 block">
-                                        {formatBrDate(sh.date)} ({sh.weekday}) • {sh.startTime} às{' '}
-                                        {sh.endTime}
-                                      </strong>
-                                      <span
-                                        style={{ color: cInfo.hex }}
-                                        className="font-extrabold text-[10px]"
-                                      >
-                                        {sh.functionName} ({sh.regime})
-                                      </span>
-                                    </div>
-                                    <span className="px-2 py-1 rounded-lg bg-slate-900 text-white font-black text-[10px] shrink-0">
-                                      {sh.hours}h
-                                    </span>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </React.Fragment>
-              );
-            })}
-          </tbody>
-        </table>
+            <div className="flex justify-end">
+              <button
+                type="submit"
+                className="bg-slate-900 hover:bg-slate-800 text-white rounded-xl px-5 py-2.5 font-bold"
+              >
+                + Salvar Adicional / Bonificação
+              </button>
+            </div>
+          </form>
+        )}
       </div>
     </div>
   );

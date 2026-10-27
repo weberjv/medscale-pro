@@ -6,7 +6,7 @@ import {
   CheckCircle, AlertTriangle, ArrowLeftRight, RotateCcw, Copy,
   Sparkles, BarChart3, Scissors, UserPlus, ArrowUp, ArrowDown,
   Edit3, X, Save, Palette, ChevronLeft, ChevronRight, Search,
-  Umbrella, RefreshCw, DollarSign
+  Umbrella, RefreshCw, DollarSign, BookmarkCheck, Wand2, CalendarDays
 } from 'lucide-react';
 import { FUNCTION_COLOR_PALETTE } from './StaffAndFinanceViews';
 
@@ -96,15 +96,35 @@ export default function ScheduleAndMapViews(props: any) {
     return safeDoctors.find((d: any) => Number(d?.id) === Number(id)) || null;
   };
 
+  // Verifica se o plantão possui médico efetivamente alocado (entra nos PDFs, Heatmap e Folha PJ)
   const isShiftCovered = (s: any): boolean => {
-    if (!s || s.isDispensedVacant) return false;
+    if (!s || s.isDispensedVacant || s.isPlannedOpenExtra) return false;
     if (s.isManualUnregisteredDoctor && String(s.manualDoctorName || '').trim()) {
       return true;
     }
     return Boolean(s.doctorId);
   };
 
+  // Verifica se o plantão deve aparecer na Grade Semanal da tela (inclui Vagas Extras Planejadas em aberto para o Gestor)
+  const isShiftVisibleOnWeeklyGrid = (s: any): boolean => {
+    if (!s || s.isDispensedVacant) return false;
+    if (isAdmin && s.isPlannedOpenExtra) return true;
+    return isShiftCovered(s);
+  };
+
   const resolveShiftDoctorInfo = (s: any) => {
+    if (s?.isPlannedOpenExtra) {
+      return {
+        id: `planned_${s.id}`,
+        name: '⚡ Extra Planejado (A Alocar)',
+        crm: 'Vaga Planejada',
+        specialty: 'A Alocar',
+        role: s.category || allFunctionNames[0] || 'Plantonista',
+        remunerationLevel: 1,
+        isManual: false,
+        isPlannedOpen: true
+      };
+    }
     if (s?.isManualUnregisteredDoctor && String(s?.manualDoctorName || '').trim()) {
       return {
         id: `manual_${s.id}`,
@@ -113,12 +133,13 @@ export default function ScheduleAndMapViews(props: any) {
         specialty: 'Alocação Manual',
         role: s.category || allFunctionNames[0] || 'Plantonista',
         remunerationLevel: Number(s.manualDoctorLevel || 1),
-        isManual: true
+        isManual: true,
+        isPlannedOpen: false
       };
     }
     const found = resolveDoctor(s?.doctorId);
     if (found) {
-      return { ...found, isManual: false };
+      return { ...found, isManual: false, isPlannedOpen: false };
     }
     return {
       id: s?.doctorId || 0,
@@ -127,7 +148,8 @@ export default function ScheduleAndMapViews(props: any) {
       specialty: 'Clínica Médica',
       role: s?.category || allFunctionNames[0] || 'Plantonista',
       remunerationLevel: 1,
-      isManual: false
+      isManual: false,
+      isPlannedOpen: false
     };
   };
 
@@ -243,7 +265,7 @@ export default function ScheduleAndMapViews(props: any) {
   };
 
   // ============================================================================
-  // DATAS, NAVEGADOR POR MESES / SEMANAS / DIAS E FILTRO POR MÉDICO
+  // DATAS, NAVEGADOR POR MESES / SEMANAS / DIAS E CALENDÁRIO DO MÉDICO
   // ============================================================================
   const defaultRefDate =
     safeShifts.length > 0 && safeShifts[0]?.date
@@ -251,7 +273,10 @@ export default function ScheduleAndMapViews(props: any) {
       : new Date().toISOString().split('T')[0];
 
   const [selectedDate, setSelectedDate] = useState<string>(defaultRefDate);
-  const [displayMode, setDisplayMode] = useState<'both' | 'weekly' | 'heatmap' | 'list'>('both');
+  const [doctorCalendarMonth, setDoctorCalendarMonth] = useState<string>(
+    defaultRefDate.slice(0, 7)
+  );
+  const [displayMode, setDisplayMode] = useState<'both' | 'weekly' | 'heatmap'>('both');
   const [filterCategory, setFilterCategory] = useState<string>('Todas');
   const [filterDoctorId, setFilterDoctorId] = useState<string>('Todos');
   const [searchDoctorText, setSearchDoctorText] = useState<string>('');
@@ -286,7 +311,6 @@ export default function ScheduleAndMapViews(props: any) {
     { label: 'Domingo', short: 'Dom', date: addDaysStr(weekMonday, 6) }
   ];
 
-  // Navegação por Meses, Semanas e Dias
   const handleNavigateMonth = (offsetMonths: number) => {
     setSelectedDate(prev => {
       const d = new Date(`${prev}T12:00:00`);
@@ -299,6 +323,12 @@ export default function ScheduleAndMapViews(props: any) {
   const handleSelectMonthInput = (yearMonthStr: string) => {
     if (!yearMonthStr || !yearMonthStr.includes('-')) return;
     setSelectedDate(`${yearMonthStr}-01`);
+  };
+
+  const handleNavigateDoctorCalendarMonth = (offsetMonths: number) => {
+    const [yr, mo] = doctorCalendarMonth.split('-').map(Number);
+    const d = new Date(yr || 2026, (mo || 10) - 1 + offsetMonths, 1, 12, 0, 0);
+    setDoctorCalendarMonth(d.toISOString().slice(0, 7));
   };
 
   const handleNavigateWeek = (offsetWeeks: number) => {
@@ -328,9 +358,10 @@ export default function ScheduleAndMapViews(props: any) {
     return `${parts[2]}/${parts[1]}`;
   };
 
-  const getMonthYearPtLabel = (dateStr: string) => {
-    const d = new Date(`${dateStr}T12:00:00`);
-    if (isNaN(d.getTime())) return dateStr.slice(0, 7);
+  const getMonthYearPtLabel = (dateOrYmStr: string) => {
+    const fullStr = dateOrYmStr.length === 7 ? `${dateOrYmStr}-01` : dateOrYmStr;
+    const d = new Date(`${fullStr}T12:00:00`);
+    if (isNaN(d.getTime())) return dateOrYmStr.slice(0, 7);
     return d.toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' });
   };
 
@@ -360,9 +391,18 @@ export default function ScheduleAndMapViews(props: any) {
     });
   };
 
-  // Estado para alocação de novo plantão
+  const getRegimeShortBadge = (shiftType?: string, isPlannedOpen?: boolean) => {
+    if (isPlannedOpen) return 'A Alocar';
+    if (shiftType === 'Escala Periódica') return 'Periódica (Incluso Cota)';
+    if (shiftType === 'Fixo') return 'Fixo (Cota)';
+    return 'Por CH / Extra';
+  };
+
+  // ============================================================================
+  // ESTADOS DE ALOCAÇÃO E EDIÇÃO DE PLANTÃO (COM OS 3 REGIMES + VAGA PLANEJADA)
+  // ============================================================================
   const [newShiftForm, setNewShiftForm] = useState({
-    allocationMode: 'registered' as 'registered' | 'manual',
+    allocationMode: 'registered' as 'registered' | 'manual' | 'planned_open',
     doctorId: safeActiveDoctors[0]?.id || 1,
     manualDoctorName: '',
     manualDoctorCrm: '',
@@ -371,15 +411,14 @@ export default function ScheduleAndMapViews(props: any) {
     startTime: '07:00',
     endTime: '19:00',
     category: allFunctionNames[0] || 'Plantonista',
-    shiftType: 'Fixo',
+    shiftType: 'Fixo' as 'Fixo' | 'Coringa/Extra' | 'Escala Periódica',
     repeatWeeklyInMonth: false,
     repeatWeeksCount: 4
   });
 
-  // Estado para Edição de Plantão Já Alocado
   const [editingShiftObj, setEditingShiftObj] = useState<any | null>(null);
   const [editShiftForm, setEditShiftForm] = useState({
-    allocationMode: 'registered' as 'registered' | 'manual',
+    allocationMode: 'registered' as 'registered' | 'manual' | 'planned_open',
     doctorId: 1,
     manualDoctorName: '',
     manualDoctorCrm: '',
@@ -388,7 +427,8 @@ export default function ScheduleAndMapViews(props: any) {
     startTime: '07:00',
     endTime: '19:00',
     category: allFunctionNames[0] || 'Plantonista',
-    shiftType: 'Fixo'
+    shiftType: 'Fixo' as 'Fixo' | 'Coringa/Extra' | 'Escala Periódica',
+    additionals: [] as string[]
   });
 
   // Estado para o Modal Rápido de Troca / Passagem / Permuta / Dispensa
@@ -405,6 +445,14 @@ export default function ScheduleAndMapViews(props: any) {
     permutedShiftInfo: '',
     dispenseMode: 'vacant' as 'vacant' | 'substitute',
     financialDispenseType: 'abonada' as 'abonada' | 'desconto',
+    titularDiscountMode: 'none' as
+      | 'none'
+      | 'full'
+      | 'level_diff'
+      | 'fraction'
+      | 'custom',
+    titularFractionPercent: 50,
+    titularCustomDiscountAmount: 0,
     substituteBillingMode: 'payroll_extra' as 'payroll_extra' | 'direct_settlement',
     reason: '',
     autoApproveNow: true
@@ -415,7 +463,7 @@ export default function ScheduleAndMapViews(props: any) {
 
   const handleOpenQuickSwapFromCard = (shiftItem: any, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
-    if (!shiftItem) return;
+    if (!shiftItem || shiftItem.isPlannedOpenExtra) return;
     const otherDoc =
       safeActiveDoctors.find((d: any) => Number(d.id) !== Number(shiftItem.doctorId)) ||
       safeActiveDoctors[0];
@@ -438,6 +486,9 @@ export default function ScheduleAndMapViews(props: any) {
       permutedShiftInfo: '',
       dispenseMode: 'vacant',
       financialDispenseType: 'abonada',
+      titularDiscountMode: 'none',
+      titularFractionPercent: 50,
+      titularCustomDiscountAmount: 0,
       substituteBillingMode: 'payroll_extra',
       reason: '',
       autoApproveNow: Boolean(isAdmin)
@@ -461,11 +512,12 @@ export default function ScheduleAndMapViews(props: any) {
   const handleOpenEditShiftModal = (shiftItem: any, e?: React.MouseEvent) => {
     if (e) e.stopPropagation();
     if (!isAdmin || !shiftItem) return;
+    const isPlanned = Boolean(shiftItem.isPlannedOpenExtra);
     const isMan = Boolean(shiftItem.isManualUnregisteredDoctor);
     const resolvedFn = resolveExactFunctionName(shiftItem);
     setEditingShiftObj(shiftItem);
     setEditShiftForm({
-      allocationMode: isMan ? 'manual' : 'registered',
+      allocationMode: isPlanned ? 'registered' : isMan ? 'manual' : 'registered',
       doctorId: Number(shiftItem.doctorId || safeActiveDoctors[0]?.id || 1),
       manualDoctorName: shiftItem.manualDoctorName || '',
       manualDoctorCrm: shiftItem.manualDoctorCrm || '',
@@ -474,7 +526,10 @@ export default function ScheduleAndMapViews(props: any) {
       startTime: shiftItem.startTime || '07:00',
       endTime: shiftItem.endTime || '19:00',
       category: resolvedFn,
-      shiftType: shiftItem.shiftType || shiftItem.modality || 'Fixo'
+      shiftType: (shiftItem.shiftType ||
+        shiftItem.modality ||
+        (isPlanned ? 'Coringa/Extra' : 'Fixo')) as any,
+      additionals: Array.isArray(shiftItem.additionals) ? shiftItem.additionals : []
     });
   };
 
@@ -482,6 +537,7 @@ export default function ScheduleAndMapViews(props: any) {
     e.preventDefault();
     if (!isAdmin || !editingShiftObj) return;
 
+    const isPlanned = editShiftForm.allocationMode === 'planned_open';
     const isMan = editShiftForm.allocationMode === 'manual';
     if (isMan && !editShiftForm.manualDoctorName.trim()) {
       alert('Informe o nome do plantonista para guardar a edição.');
@@ -493,10 +549,29 @@ export default function ScheduleAndMapViews(props: any) {
     safeSetShifts((prev: any[]) =>
       (Array.isArray(prev) ? prev : []).map((s: any) => {
         if (String(s?.id) !== String(editingShiftObj.id)) return s;
+        if (isPlanned) {
+          return {
+            ...s,
+            doctorId: null,
+            isPlannedOpenExtra: true,
+            isDispensedVacant: false,
+            isManualUnregisteredDoctor: false,
+            manualDoctorName: '',
+            date: editShiftForm.date,
+            startTime: editShiftForm.startTime,
+            endTime: editShiftForm.endTime,
+            hours: hrs,
+            category: editShiftForm.category,
+            shiftType: 'Coringa/Extra',
+            modality: 'Coringa/Extra',
+            additionals: editShiftForm.additionals
+          };
+        }
         if (isMan) {
           return {
             ...s,
             doctorId: null,
+            isPlannedOpenExtra: false,
             isDispensedVacant: false,
             isManualUnregisteredDoctor: true,
             manualDoctorName: editShiftForm.manualDoctorName.trim(),
@@ -508,12 +583,14 @@ export default function ScheduleAndMapViews(props: any) {
             hours: hrs,
             category: editShiftForm.category,
             shiftType: 'Coringa/Extra',
-            modality: 'Coringa/Extra'
+            modality: 'Coringa/Extra',
+            additionals: editShiftForm.additionals
           };
         }
         return {
           ...s,
           doctorId: Number(editShiftForm.doctorId),
+          isPlannedOpenExtra: false,
           isDispensedVacant: false,
           isManualUnregisteredDoctor: false,
           manualDoctorName: '',
@@ -523,16 +600,19 @@ export default function ScheduleAndMapViews(props: any) {
           hours: hrs,
           category: editShiftForm.category,
           shiftType: editShiftForm.shiftType,
-          modality: editShiftForm.shiftType
+          modality: editShiftForm.shiftType,
+          additionals: editShiftForm.additionals
         };
       })
     );
 
-    const docLabel = isMan
+    const docLabel = isPlanned
+      ? 'Vaga Extra Planejada (A Alocar)'
+      : isMan
       ? editShiftForm.manualDoctorName.trim()
       : resolveDoctor(editShiftForm.doctorId)?.name || 'Médico';
     safeRecordAction(
-      `Plantão editado pelo gestor: ${docLabel} (${editShiftForm.startTime}-${editShiftForm.endTime} • ${editShiftForm.category}) em ${formatBrDate(
+      `Plantão atualizado pelo gestor: ${docLabel} (${editShiftForm.startTime}-${editShiftForm.endTime} • ${editShiftForm.category}) em ${formatBrDate(
         editShiftForm.date
       )}`
     );
@@ -549,7 +629,7 @@ export default function ScheduleAndMapViews(props: any) {
     if (!isAdmin) return;
 
     const dayShiftsOrdered = sortShiftsByManagerOrArrival(
-      safeShifts.filter((s: any) => s?.date === dateStr && isShiftCovered(s))
+      safeShifts.filter((s: any) => s?.date === dateStr && isShiftVisibleOnWeeklyGrid(s))
     );
 
     const currentIndex = dayShiftsOrdered.findIndex(
@@ -604,8 +684,281 @@ export default function ScheduleAndMapViews(props: any) {
   };
 
   // ============================================================================
-  // MOTOR DE EXECUÇÃO E REVERSÃO DE TROCAS, PERMUTAS E DISPENSAS NA ESCALA OFICIAL
+  // MOTOR DE "ESCALA PADRÃO" (MOLDE BASE DE FIXOS + VAGAS EXTRAS PLANEJADAS)
   // ============================================================================
+  const savedStandardTemplate: any[] = Array.isArray(config?.standardWeeklyScheduleTemplate)
+    ? config.standardWeeklyScheduleTemplate
+    : [];
+
+  // 1. Salvar os plantões Fixos, Escala Periódica e Vagas Extras Planejadas da semana atual como Escala Padrão
+  const handleSaveCurrentWeekAsStandardTemplate = () => {
+    if (!isAdmin) return;
+    const currMonday = weekDays[0].date;
+    const currSunday = weekDays[6].date;
+
+    const weekCandidateShifts = safeShifts.filter(
+      (s: any) =>
+        s?.date >= currMonday &&
+        s?.date <= currSunday &&
+        !s?.isDispensedVacant
+    );
+
+    if (weekCandidateShifts.length === 0) {
+      alert('Não há plantões nesta semana para salvar como Escala Padrão.');
+      return;
+    }
+
+    // Constrói os slots limpos para cada dia da semana (0 = Segunda ... 6 = Domingo)
+    const templateSlots: any[] = [];
+    weekDays.forEach((wd, dayIndex) => {
+      const dayShifts = sortShiftsByManagerOrArrival(
+        weekCandidateShifts.filter((s: any) => s?.date === wd.date)
+      );
+
+      dayShifts.forEach((s: any, orderIdx: number) => {
+        // Se o plantão sofreu uma troca pontual na semana, procura recuperar o médico titular original daquele turno fixo
+        const swapMatch = safeSwaps.find(
+          (sw: any) =>
+            sw?.status === 'Aprovado' &&
+            sw?.date === wd.date &&
+            String(sw?.shiftId) === String(s.id) &&
+            sw?.originalShiftSnapshot
+        );
+
+        const baseShift = swapMatch?.originalShiftSnapshot || s;
+        const regime = baseShift.shiftType || baseShift.modality || 'Fixo';
+        const isPlannedOpen = Boolean(baseShift.isPlannedOpenExtra);
+
+        // Mantém no Molde Padrão: Fixos, Escala Periódica e Vagas Extras Planejadas.
+        // Se for um plantão Extra já alocado, pergunta/converte em Vaga Extra Planejada ou mantém conforme escolha
+        templateSlots.push({
+          slotId: `std_${dayIndex}_${orderIdx}_${Date.now()}`,
+          dayOffsetFromMonday: dayIndex,
+          startTime: baseShift.startTime || '07:00',
+          endTime: baseShift.endTime || '19:00',
+          hours: calcDurationHours(
+            baseShift.startTime || '07:00',
+            baseShift.endTime || '19:00'
+          ),
+          category: resolveExactFunctionName(baseShift),
+          shiftType: regime,
+          isPlannedOpenExtra: isPlannedOpen,
+          doctorId: isPlannedOpen ? null : baseShift.doctorId || null,
+          isManualUnregisteredDoctor: isPlannedOpen
+            ? false
+            : Boolean(baseShift.isManualUnregisteredDoctor),
+          manualDoctorName: isPlannedOpen ? '' : baseShift.manualDoctorName || '',
+          manualDoctorLevel: Number(baseShift.manualDoctorLevel || 1),
+          displayOrder: orderIdx
+        });
+      });
+    });
+
+    safeSetConfig((prev: any) => ({
+      ...prev,
+      standardWeeklyScheduleTemplate: templateSlots,
+      standardTemplateSavedAt: new Date().toLocaleString('pt-BR')
+    }));
+
+    setCloneFeedbackMsg(
+      `📌 Escala Padrão guardada com sucesso (${templateSlots.length} turnos base de Seg a Dom)! Agora pode aplicá-la em qualquer semana ou mês.`
+    );
+    setTimeout(() => setCloneFeedbackMsg(''), 6000);
+    safeRecordAction(
+      `Escala Padrão (Molde Base Semanal com ${templateSlots.length} turnos) salva pelo gestor.`
+    );
+  };
+
+  // Verifica se um médico titular está em Férias/Licença numa data e se possui substituto cadastrado
+  const resolveDoctorOrVacationSubstituteForDate = (
+    titularDocId: any,
+    targetDateStr: string
+  ): { effectiveDoctorId: any; substitutedFromVacation: boolean } => {
+    if (!titularDocId) {
+      return { effectiveDoctorId: null, substitutedFromVacation: false };
+    }
+    const activeVac = safeVacations.find(
+      (v: any) =>
+        Number(v?.doctorId) === Number(titularDocId) &&
+        v?.status !== 'Recusado' &&
+        String(v?.startDate || '') <= targetDateStr &&
+        String(v?.endDate || '') >= targetDateStr
+    );
+
+    if (!activeVac) {
+      return { effectiveDoctorId: Number(titularDocId), substitutedFromVacation: false };
+    }
+
+    const subs: any[] = Array.isArray(activeVac.substitutions)
+      ? activeVac.substitutions
+      : [];
+    if (subs.length > 0 && subs[0]?.substituteDoctorId) {
+      return {
+        effectiveDoctorId: Number(subs[0].substituteDoctorId),
+        substitutedFromVacation: true
+      };
+    }
+
+    return { effectiveDoctorId: Number(titularDocId), substitutedFromVacation: false };
+  };
+
+  // 2. Aplicar a Escala Padrão na Semana Visualizada ou em Todas as Semanas do Mês Selecionado
+  const handleApplyStandardScheduleTemplate = (targetScope: 'week' | 'month') => {
+    if (!isAdmin) return;
+    if (savedStandardTemplate.length === 0) {
+      alert(
+        'Ainda não há uma Escala Padrão salva. Primeiro configure uma semana base e clique em "📌 Salvar como Escala Padrão".'
+      );
+      return;
+    }
+
+    const weeksToApplyMondays: string[] = [];
+    if (targetScope === 'week') {
+      weeksToApplyMondays.push(weekMonday);
+    } else {
+      const ym = selectedDate.slice(0, 7);
+      const firstDayOfMonth = `${ym}-01`;
+      const firstMonday = getMondayStr(firstDayOfMonth);
+      for (let w = 0; w < 5; w++) {
+        const mDate = addDaysStr(firstMonday, w * 7);
+        const sDate = addDaysStr(mDate, 6);
+        if (mDate.startsWith(ym) || sDate.startsWith(ym)) {
+          weeksToApplyMondays.push(mDate);
+        }
+      }
+    }
+
+    const generatedShifts: any[] = [];
+    let counter = 10;
+
+    weeksToApplyMondays.forEach(monStr => {
+      savedStandardTemplate.forEach(slot => {
+        const targetDate = addDaysStr(monStr, Number(slot.dayOffsetFromMonday || 0));
+
+        // Se for aplicação mensal, aplica apenas nos dias que pertencem ao mês selecionado
+        if (
+          targetScope === 'month' &&
+          !targetDate.startsWith(selectedDate.slice(0, 7))
+        ) {
+          return;
+        }
+
+        // Evita duplicar se exatamente o mesmo horário/função/médico já existir naquele dia
+        const alreadyExists = safeShifts.some(
+          (s: any) =>
+            s?.date === targetDate &&
+            s?.startTime === slot.startTime &&
+            s?.endTime === slot.endTime &&
+            resolveExactFunctionName(s) === slot.category &&
+            (slot.isPlannedOpenExtra
+              ? Boolean(s?.isPlannedOpenExtra)
+              : Number(s?.doctorId) === Number(slot.doctorId))
+        );
+        if (alreadyExists) return;
+
+        const vacCheck = resolveDoctorOrVacationSubstituteForDate(
+          slot.doctorId,
+          targetDate
+        );
+
+        counter += 1;
+        generatedShifts.push({
+          id: Date.now() + counter,
+          date: targetDate,
+          startTime: slot.startTime,
+          endTime: slot.endTime,
+          hours: slot.hours || calcDurationHours(slot.startTime, slot.endTime),
+          category: slot.category,
+          shiftType: slot.shiftType || 'Fixo',
+          modality: slot.shiftType || 'Fixo',
+          isPlannedOpenExtra: Boolean(slot.isPlannedOpenExtra),
+          doctorId: slot.isPlannedOpenExtra ? null : vacCheck.effectiveDoctorId,
+          isFromSwap: vacCheck.substitutedFromVacation,
+          isManualUnregisteredDoctor: Boolean(slot.isManualUnregisteredDoctor),
+          manualDoctorName: slot.manualDoctorName || '',
+          manualDoctorLevel: Number(slot.manualDoctorLevel || 1),
+          displayOrder: slot.displayOrder ?? counter,
+          additionals: []
+        });
+      });
+    });
+
+    if (generatedShifts.length === 0) {
+      alert(
+        'Todos os turnos da Escala Padrão já estão lançados neste período selecionado.'
+      );
+      return;
+    }
+
+    safeSetShifts((prev: any[]) => [
+      ...(Array.isArray(prev) ? prev : []),
+      ...generatedShifts
+    ]);
+
+    setCloneFeedbackMsg(
+      `🪄 Escala Padrão aplicada com sucesso (${generatedShifts.length} turnos gerados ${
+        targetScope === 'month'
+          ? `no mês ${selectedDate.slice(0, 7)}`
+          : `na semana de ${formatBrDate(weekDays[0].date)}`
+      })!`
+    );
+    setTimeout(() => setCloneFeedbackMsg(''), 6000);
+    safeRecordAction(
+      `Escala Padrão aplicada pelo gestor (${generatedShifts.length} plantões gerados).`
+    );
+  };
+
+  // ============================================================================
+  // MOTOR DE EXECUÇÃO, REGRAS FINANCEIRAS E REVERSÃO DE TROCAS NA ESCALA OFICIAL
+  // ============================================================================
+  // Sincroniza a regra financeira escolhida pelo gestor na troca diretamente com a Folha PJ
+  const syncSwapFinancialRuleToPayrollConfig = (swapItem: any) => {
+    if (!swapItem || !swapItem.requesterId || !swapItem.date) return;
+
+    // Determina a competência 26 a 25 correspondente à data do plantão (ou usa competenceMonth atual)
+    const [yr, mo, dy] = String(swapItem.date).split('-').map(Number);
+    let targetCompMonth = competenceMonth;
+    if (!isNaN(yr) && !isNaN(mo) && !isNaN(dy)) {
+      if (dy >= 26) {
+        const nextDate = new Date(yr, mo, 1, 12, 0, 0);
+        targetCompMonth = nextDate.toISOString().slice(0, 7);
+      } else {
+        targetCompMonth = `${yr}-${String(mo).padStart(2, '0')}`;
+      }
+    }
+
+    const reqId = Number(swapItem.requesterId);
+    const discountCfg = {
+      mode: swapItem.titularDiscountMode || 'none',
+      fractionPercent: Number(swapItem.titularFractionPercent ?? 50),
+      customAmount: Number(swapItem.titularCustomDiscountAmount ?? 0)
+    };
+
+    safeSetConfig((prev: any) => {
+      const allCustom = prev?.payrollCustomizations || {};
+      const monthObj = allCustom[targetCompMonth] || {};
+      const docObj = monthObj[reqId] || {};
+      const currSwapDiscounts = docObj.swapDiscounts || {};
+
+      return {
+        ...prev,
+        payrollCustomizations: {
+          ...allCustom,
+          [targetCompMonth]: {
+            ...monthObj,
+            [reqId]: {
+              ...docObj,
+              swapDiscounts: {
+                ...currSwapDiscounts,
+                [swapItem.id]: discountCfg
+              }
+            }
+          }
+        }
+      };
+    });
+  };
+
   const applySwapEffectOnShifts = (swapItem: any) => {
     const origShift =
       safeShifts.find((s: any) => String(s?.id) === String(swapItem.shiftId)) ||
@@ -856,7 +1209,7 @@ export default function ScheduleAndMapViews(props: any) {
   };
 
   // ============================================================================
-  // GERADOR PDF 1: HEATMAP VISUAL ASSISTENCIAL (ESCOLHENDO POR DIA OU PELA SEMANA)
+  // GERADOR PDF 1: HEATMAP VISUAL ASSISTENCIAL (POR DIA OU PELA SEMANA)
   // ============================================================================
   const handleDownloadHeatmapPDF = (scopeOverride?: 'day' | 'week') => {
     if (typeof window === 'undefined') return;
@@ -1355,12 +1708,13 @@ export default function ScheduleAndMapViews(props: any) {
   };
 
   // ============================================================================
-  // AÇÕES DE ESCALA (ALOCAR + SUPER CLONAGEM EM 3 MODOS)
+  // AÇÕES DE ESCALA (ALOCAR COM OS 3 REGIMES + VAGA EXTRA PLANEJADA + CLONAGEM)
   // ============================================================================
   const handleAddShiftWithRecurrence = (e: React.FormEvent) => {
     e.preventDefault();
     if (!isAdmin) return;
 
+    const isPlannedOpen = newShiftForm.allocationMode === 'planned_open';
     const isManual = newShiftForm.allocationMode === 'manual';
     if (isManual && !newShiftForm.manualDoctorName.trim()) {
       alert('Digite o nome do plantonista não cadastrado para alocar manualmente.');
@@ -1377,10 +1731,29 @@ export default function ScheduleAndMapViews(props: any) {
       const targetDate = addDaysStr(newShiftForm.date, i * 7);
       const existingCountOnDate = safeShifts.filter((s: any) => s?.date === targetDate).length;
 
-      if (isManual) {
+      if (isPlannedOpen) {
         createdShifts.push({
           id: Date.now() + i,
           doctorId: null,
+          isPlannedOpenExtra: true,
+          isDispensedVacant: false,
+          isManualUnregisteredDoctor: false,
+          manualDoctorName: '',
+          date: targetDate,
+          startTime: newShiftForm.startTime,
+          endTime: newShiftForm.endTime,
+          hours: hrs,
+          category: newShiftForm.category,
+          shiftType: 'Coringa/Extra',
+          modality: 'Coringa/Extra',
+          displayOrder: existingCountOnDate + i,
+          additionals: []
+        });
+      } else if (isManual) {
+        createdShifts.push({
+          id: Date.now() + i,
+          doctorId: null,
+          isPlannedOpenExtra: false,
           isDispensedVacant: false,
           isManualUnregisteredDoctor: true,
           manualDoctorName: newShiftForm.manualDoctorName.trim(),
@@ -1400,6 +1773,7 @@ export default function ScheduleAndMapViews(props: any) {
         createdShifts.push({
           id: Date.now() + i,
           doctorId: Number(newShiftForm.doctorId),
+          isPlannedOpenExtra: false,
           isDispensedVacant: false,
           isManualUnregisteredDoctor: false,
           date: targetDate,
@@ -1417,7 +1791,13 @@ export default function ScheduleAndMapViews(props: any) {
 
     safeSetShifts((prev: any[]) => [...(Array.isArray(prev) ? prev : []), ...createdShifts]);
 
-    if (isManual) {
+    if (isPlannedOpen) {
+      safeRecordAction(
+        `Vaga de Plantão Extra Planejada (A Alocar) criada em ${formatBrDate(
+          newShiftForm.date
+        )} (${newShiftForm.category})`
+      );
+    } else if (isManual) {
       safeRecordAction(
         `Plantonista alocado manualmente (${newShiftForm.manualDoctorName.trim()}) inserido na escala em ${formatBrDate(
           newShiftForm.date
@@ -1432,10 +1812,12 @@ export default function ScheduleAndMapViews(props: any) {
       const doc = resolveDoctor(newShiftForm.doctorId);
       safeRecordAction(
         totalOccurrences > 1
-          ? `Alocada recorrência semanal (${totalOccurrences} semanas a cada 7 dias) para ${
+          ? `Alocada recorrência semanal (${totalOccurrences} semanas) para ${
               doc?.name || 'Médico'
-            } em ${newShiftForm.category}`
-          : `Plantão alocado para ${doc?.name || 'Médico'} em ${formatBrDate(newShiftForm.date)}`
+            } em ${newShiftForm.category} [${newShiftForm.shiftType}]`
+          : `Plantão alocado para ${doc?.name || 'Médico'} em ${formatBrDate(
+              newShiftForm.date
+            )} [${newShiftForm.shiftType}]`
       );
     }
   };
@@ -1445,7 +1827,7 @@ export default function ScheduleAndMapViews(props: any) {
     const prevMonday = addDaysStr(weekMonday, -7);
     const prevSunday = addDaysStr(weekMonday, -1);
     const prevWeekShifts = safeShifts.filter(
-      (s: any) => s?.date >= prevMonday && s?.date <= prevSunday && isShiftCovered(s)
+      (s: any) => s?.date >= prevMonday && s?.date <= prevSunday && isShiftVisibleOnWeeklyGrid(s)
     );
 
     if (prevWeekShifts.length === 0) {
@@ -1472,7 +1854,7 @@ export default function ScheduleAndMapViews(props: any) {
     const currMonday = weekDays[0].date;
     const currSunday = weekDays[6].date;
     const currWeekShifts = safeShifts.filter(
-      (s: any) => s?.date >= currMonday && s?.date <= currSunday && isShiftCovered(s)
+      (s: any) => s?.date >= currMonday && s?.date <= currSunday && isShiftVisibleOnWeeklyGrid(s)
     );
 
     if (currWeekShifts.length === 0) {
@@ -1503,7 +1885,7 @@ export default function ScheduleAndMapViews(props: any) {
     const currMonday = weekDays[0].date;
     const currSunday = weekDays[6].date;
     const currWeekShifts = safeShifts.filter(
-      (s: any) => s?.date >= currMonday && s?.date <= currSunday && isShiftCovered(s)
+      (s: any) => s?.date >= currMonday && s?.date <= currSunday && isShiftVisibleOnWeeklyGrid(s)
     );
 
     if (currWeekShifts.length === 0) {
@@ -1545,21 +1927,6 @@ export default function ScheduleAndMapViews(props: any) {
     );
   };
 
-  const handleToggleShiftAdditional = (shiftId: any, addId: string) => {
-    if (!isAdmin) return;
-    safeSetShifts((prev: any[]) =>
-      (Array.isArray(prev) ? prev : []).map((s: any) => {
-        if (String(s?.id) !== String(shiftId)) return s;
-        const curr = Array.isArray(s.additionals) ? s.additionals : [];
-        const exists = curr.includes(addId);
-        return {
-          ...s,
-          additionals: exists ? curr.filter((x: string) => x !== addId) : [...curr, addId]
-        };
-      })
-    );
-  };
-
   // ============================================================================
   // ESTADOS E FUNÇÕES DE TROCAS, PASSAGENS, PERMUTAS & DISPENSAS GERENCIAIS
   // ============================================================================
@@ -1584,6 +1951,14 @@ export default function ScheduleAndMapViews(props: any) {
     permutedShiftInfo: '',
     dispenseMode: 'vacant' as 'vacant' | 'substitute',
     financialDispenseType: 'abonada' as 'abonada' | 'desconto',
+    titularDiscountMode: 'none' as
+      | 'none'
+      | 'full'
+      | 'level_diff'
+      | 'fraction'
+      | 'custom',
+    titularFractionPercent: 50,
+    titularCustomDiscountAmount: 0,
     substituteBillingMode: 'payroll_extra' as 'payroll_extra' | 'direct_settlement',
     reason: ''
   });
@@ -1677,6 +2052,9 @@ export default function ScheduleAndMapViews(props: any) {
       permutedShiftInfo: autoPermutedDesc,
       dispenseMode: isDispense ? swapForm.dispenseMode : undefined,
       financialDispenseType: isDispense ? swapForm.financialDispenseType : undefined,
+      titularDiscountMode: swapForm.titularDiscountMode || 'none',
+      titularFractionPercent: Number(swapForm.titularFractionPercent ?? 50),
+      titularCustomDiscountAmount: Number(swapForm.titularCustomDiscountAmount ?? 0),
       substituteBillingMode: swapForm.substituteBillingMode || 'payroll_extra',
       segments: swapForm.isPartialByTimeRange
         ? swapSegments.map(seg => ({
@@ -1700,6 +2078,7 @@ export default function ScheduleAndMapViews(props: any) {
       newSwapObj.status = 'Aprovado';
       newSwapObj.originalShiftSnapshot = res.snapshotA;
       newSwapObj.createdShiftIds = res.generatedIds;
+      syncSwapFinancialRuleToPayrollConfig(newSwapObj);
     }
 
     safeSetSwaps((prev: any[]) => [newSwapObj, ...(Array.isArray(prev) ? prev : [])]);
@@ -1751,6 +2130,9 @@ export default function ScheduleAndMapViews(props: any) {
       permutedShiftInfo: autoPermutedDesc,
       dispenseMode: isDispense ? quickSwapForm.dispenseMode : undefined,
       financialDispenseType: isDispense ? quickSwapForm.financialDispenseType : undefined,
+      titularDiscountMode: quickSwapForm.titularDiscountMode || 'none',
+      titularFractionPercent: Number(quickSwapForm.titularFractionPercent ?? 50),
+      titularCustomDiscountAmount: Number(quickSwapForm.titularCustomDiscountAmount ?? 0),
       substituteBillingMode: quickSwapForm.substituteBillingMode || 'payroll_extra',
       segments: isPartial
         ? quickSwapSegments.map(seg => ({
@@ -1772,6 +2154,7 @@ export default function ScheduleAndMapViews(props: any) {
       newSwapObj.originalShiftSnapshot = res.snapshotA;
       newSwapObj.originalPermutedShiftSnapshot = res.snapshotB;
       newSwapObj.createdShiftIds = res.generatedIds;
+      syncSwapFinancialRuleToPayrollConfig(newSwapObj);
     }
 
     safeSetSwaps((prev: any[]) => [newSwapObj, ...(Array.isArray(prev) ? prev : [])]);
@@ -1790,18 +2173,24 @@ export default function ScheduleAndMapViews(props: any) {
     setQuickSwapShiftObj(null);
   };
 
-  const handleManagerUpdatePendingSwap = (swapId: number, updater: (sw: any) => any) => {
+  const handleManagerUpdateSwap = (swapId: number, updater: (sw: any) => any) => {
     if (!isAdmin) return;
     safeSetSwaps((prev: any[]) =>
-      (Array.isArray(prev) ? prev : []).map((sw: any) =>
-        Number(sw?.id) === Number(swapId) ? updater(sw) : sw
-      )
+      (Array.isArray(prev) ? prev : []).map((sw: any) => {
+        if (Number(sw?.id) !== Number(swapId)) return sw;
+        const updated = updater(sw);
+        if (updated.status === 'Aprovado') {
+          syncSwapFinancialRuleToPayrollConfig(updated);
+        }
+        return updated;
+      })
     );
   };
 
   const handleApproveSwap = (swapItem: any) => {
     if (!isAdmin) return;
     const res = applySwapEffectOnShifts(swapItem);
+    syncSwapFinancialRuleToPayrollConfig(swapItem);
 
     safeSetSwaps((prev: any[]) =>
       (Array.isArray(prev) ? prev : []).map((sw: any) =>
@@ -1818,7 +2207,7 @@ export default function ScheduleAndMapViews(props: any) {
     );
 
     safeRecordAction(
-      `${swapItem.type || 'Troca/Passagem'} #${swapItem.id} homologada pelo gestor e aplicada na escala oficial.`
+      `${swapItem.type || 'Troca/Passagem'} #${swapItem.id} homologada pelo gestor (Regra financeira aplicada na Folha PJ).`
     );
   };
 
@@ -1971,22 +2360,9 @@ export default function ScheduleAndMapViews(props: any) {
     safeRecordAction(`Registo de troca/passagem #${swapId} excluído pelo gestor.`);
   };
 
-  const handleClearAllTestSwapLogs = () => {
-    if (!isAdmin) return;
-    if (
-      !confirm(
-        'Deseja apagar todos os logs/registos antigos de Trocas & Passagens que estão listados atualmente?'
-      )
-    ) {
-      return;
-    }
-    safeSetSwaps([]);
-    safeSetConfig((prev: any) => ({ ...prev, demoSwapsCleared: true }));
-    safeRecordAction('Todos os registos antigos de Trocas & Passagens foram limpos pelo gestor.');
-  };
-
   // ============================================================================
   // 1. VIEW: MEU PAINEL / DASHBOARD
+  // (COM CALENDÁRIO MENSAL INTERATIVO DOS PLANTÕES NO LOGIN DO MÉDICO)
   // ============================================================================
   if (currentView === 'dashboard') {
     const pendingSwapsCount = safeSwaps.filter(
@@ -2010,6 +2386,30 @@ export default function ScheduleAndMapViews(props: any) {
       (sw: any) =>
         Number(sw?.requesterId) === Number(currentUser?.id) &&
         sw?.status === 'Revisão Solicitada pelo Gestor'
+    );
+
+    // Construção das células do Calendário Mensal do Médico
+    const [calYr, calMo] = doctorCalendarMonth.split('-').map(Number);
+    const firstDayDate = new Date(calYr || 2026, (calMo || 10) - 1, 1, 12, 0, 0);
+    const daysInMonthCount = new Date(calYr || 2026, calMo || 10, 0).getDate();
+    // 0 = Seg ... 6 = Dom
+    const startWeekdayOffset = (firstDayDate.getDay() + 6) % 7;
+
+    const calendarCells: { dayNum: number | null; dateStr: string; shifts: any[] }[] = [];
+    for (let b = 0; b < startWeekdayOffset; b++) {
+      calendarCells.push({ dayNum: null, dateStr: `empty_start_${b}`, shifts: [] });
+    }
+    for (let dayN = 1; dayN <= daysInMonthCount; dayN++) {
+      const dIso = `${calYr}-${String(calMo).padStart(2, '0')}-${String(dayN).padStart(
+        2,
+        '0'
+      )}`;
+      const myDayShifts = myUpcomingShifts.filter((s: any) => s?.date === dIso);
+      calendarCells.push({ dayNum: dayN, dateStr: dIso, shifts: myDayShifts });
+    }
+
+    const myShiftsInSelectedMonth = myUpcomingShifts.filter((s: any) =>
+      String(s?.date || '').startsWith(doctorCalendarMonth)
     );
 
     const visualIndicators = Array.isArray(config?.visualManagementIndicators)
@@ -2136,7 +2536,7 @@ export default function ScheduleAndMapViews(props: any) {
                 {safeShifts.filter(s => isShiftCovered(s)).length} plantões
               </div>
               <span className="text-xs font-bold text-blue-700 underline mt-2 inline-block">
-                Heatmap 07h-06h e Escala Semanal
+                Escala Padrão, Semanal & Heatmap
               </span>
             </div>
 
@@ -2151,7 +2551,7 @@ export default function ScheduleAndMapViews(props: any) {
                 {pendingSwapsCount} pendentes
               </div>
               <span className="text-xs font-bold text-amber-800 underline mt-2 inline-block">
-                Gerir trocas, permutas e liberações
+                Homologar com Regra Financeira
               </span>
             </div>
 
@@ -2172,55 +2572,174 @@ export default function ScheduleAndMapViews(props: any) {
           </div>
         )}
 
+        {/* PAINEL DO MÉDICO: CALENDÁRIO MENSAL DOS PLANTÕES ALOCADOS + RESUMO */}
         {!isAdmin && (
-          <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3 text-xs">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-2">
-                <Calendar size={17} className="text-blue-600" />
-                Meus Plantões Alocados na Escala ({myUpcomingShifts.length})
-              </h3>
-              <button
-                type="button"
-                onClick={() => safeNavigate('schedule')}
-                className="text-blue-600 font-extrabold hover:underline"
-              >
-                Abrir Escala Semanal & Viajar entre Meses/Semanas →
-              </button>
+          <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4 text-xs">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
+              <div>
+                <h3 className="text-sm sm:text-base font-black text-slate-900 flex items-center gap-2">
+                  <CalendarDays size={19} className="text-blue-600" />
+                  Meu Calendário Mensal de Plantões —{' '}
+                  <span className="capitalize text-blue-700">
+                    {getMonthYearPtLabel(doctorCalendarMonth)}
+                  </span>
+                </h3>
+                <p className="text-[11px] text-slate-500 mt-0.5">
+                  Visualize todos os seus plantões no mês ({myShiftsInSelectedMonth.length}{' '}
+                  turno(s) neste mês) ou clique em qualquer dia para abrir a escala completa.
+                </p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleNavigateDoctorCalendarMonth(-1)}
+                  className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-extrabold flex items-center gap-1"
+                >
+                  <ChevronLeft size={14} /> Mês Ant.
+                </button>
+                <input
+                  type="month"
+                  value={doctorCalendarMonth}
+                  onChange={e => setDoctorCalendarMonth(e.target.value)}
+                  className="border border-slate-300 rounded-xl px-2.5 py-1 font-extrabold text-slate-900"
+                />
+                <button
+                  type="button"
+                  onClick={() => handleNavigateDoctorCalendarMonth(1)}
+                  className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-800 font-extrabold flex items-center gap-1"
+                >
+                  Próx. Mês <ChevronRight size={14} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => safeNavigate('schedule')}
+                  className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-1.5 rounded-xl font-bold shadow-xs"
+                >
+                  Abrir Escala Semanal →
+                </button>
+              </div>
             </div>
-            {myUpcomingShifts.length === 0 ? (
-              <p className="text-slate-400 italic">Nenhum plantão alocado no momento.</p>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
-                {myUpcomingShifts.slice(0, 6).map((s: any) => {
-                  const fn = resolveExactFunctionName(s);
-                  const cInfo = getFunctionColorInfo(fn);
-                  return (
-                    <div
-                      key={s.id}
-                      style={{
-                        borderLeft: `4.5px solid ${cInfo.hex}`,
-                        backgroundColor: cInfo.softBgHex
-                      }}
-                      className="p-3 rounded-xl border border-slate-200 flex items-center justify-between"
-                    >
-                      <div>
-                        <strong className="text-slate-900 block">{formatBrDate(s.date)}</strong>
+
+            {/* Grade do Calendário Mensal do Médico */}
+            <div className="overflow-x-auto">
+              <div className="min-w-[680px]">
+                <div className="grid grid-cols-7 bg-slate-900 text-white rounded-t-xl text-[10px] font-black uppercase text-center py-2">
+                  <div>Seg</div>
+                  <div>Ter</div>
+                  <div>Qua</div>
+                  <div>Qui</div>
+                  <div>Sex</div>
+                  <div>Sáb</div>
+                  <div>Dom</div>
+                </div>
+                <div className="grid grid-cols-7 border-l border-t border-slate-200">
+                  {calendarCells.map(cell => {
+                    if (cell.dayNum === null) {
+                      return (
+                        <div
+                          key={cell.dateStr}
+                          className="min-h-[82px] bg-slate-50/60 border-r border-b border-slate-200"
+                        />
+                      );
+                    }
+                    const hasMyShift = cell.shifts.length > 0;
+                    return (
+                      <div
+                        key={cell.dateStr}
+                        onClick={() => {
+                          setSelectedDate(cell.dateStr);
+                          safeNavigate('schedule');
+                        }}
+                        className={`min-h-[82px] p-1.5 border-r border-b border-slate-200 cursor-pointer transition-all flex flex-col justify-between ${
+                          hasMyShift
+                            ? 'bg-blue-50/40 hover:bg-blue-50'
+                            : 'bg-white hover:bg-slate-50'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <span
+                            className={`w-6 h-6 rounded-full flex items-center justify-center font-black text-[11px] ${
+                              hasMyShift
+                                ? 'bg-blue-600 text-white'
+                                : 'text-slate-600'
+                            }`}
+                          >
+                            {cell.dayNum}
+                          </span>
+                          {hasMyShift && (
+                            <span className="text-[9px] font-extrabold text-blue-700">
+                              {cell.shifts.length} pl.
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="space-y-1 mt-1">
+                          {cell.shifts.map((s: any) => {
+                            const fn = resolveExactFunctionName(s);
+                            const cInfo = getFunctionColorInfo(fn);
+                            return (
+                              <div
+                                key={s.id}
+                                style={{
+                                  backgroundColor: cInfo.hex,
+                                  color: '#ffffff'
+                                }}
+                                className="px-1.5 py-0.5 rounded text-[9.5px] font-extrabold truncate leading-tight shadow-2xs"
+                                title={`${s.startTime}-${s.endTime} • ${fn}`}
+                              >
+                                {s.startTime}-{s.endTime} • {fn}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+
+            {/* Lista rápida dos plantões do mês abaixo do calendário */}
+            {myShiftsInSelectedMonth.length > 0 && (
+              <div className="pt-2 border-t border-slate-100">
+                <span className="block text-[10px] font-extrabold uppercase text-slate-400 mb-2">
+                  Detalhamento dos Meus Plantões em {getMonthYearPtLabel(doctorCalendarMonth)}:
+                </span>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                  {myShiftsInSelectedMonth.map((s: any) => {
+                    const fn = resolveExactFunctionName(s);
+                    const cInfo = getFunctionColorInfo(fn);
+                    return (
+                      <div
+                        key={s.id}
+                        style={{
+                          borderLeft: `4.5px solid ${cInfo.hex}`,
+                          backgroundColor: cInfo.softBgHex
+                        }}
+                        className="p-2.5 rounded-xl border border-slate-200 flex items-center justify-between"
+                      >
+                        <div>
+                          <strong className="text-slate-900 block">
+                            {formatBrDate(s.date)}
+                          </strong>
+                          <span
+                            style={{ color: cInfo.textHex }}
+                            className="font-bold text-[11px]"
+                          >
+                            {fn}
+                          </span>
+                        </div>
                         <span
-                          style={{ color: cInfo.textHex }}
-                          className="font-bold text-[11px]"
+                          style={{ backgroundColor: cInfo.hex }}
+                          className="px-2.5 py-1 rounded-lg text-white font-extrabold"
                         >
-                          {fn}
+                          {s.startTime} - {s.endTime}
                         </span>
                       </div>
-                      <span
-                        style={{ backgroundColor: cInfo.hex }}
-                        className="px-2.5 py-1 rounded-lg text-white font-extrabold"
-                      >
-                        {s.startTime} - {s.endTime}
-                      </span>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
               </div>
             )}
           </div>
@@ -2262,6 +2781,7 @@ export default function ScheduleAndMapViews(props: any) {
 
   // ============================================================================
   // 2. VIEW: TROCAS, PASSAGENS, PERMUTAS BILATERAIS & LIBERAÇÃO/DISPENSA GERENCIAL
+  // (SEM O BOTÃO DE LIMPAR REGISTOS ANTIGOS + REGRA FINANCEIRA NA HOMOLOGAÇÃO)
   // ============================================================================
   if (currentView === 'swaps') {
     const baseSwaps = isAdmin
@@ -2317,26 +2837,14 @@ export default function ScheduleAndMapViews(props: any) {
 
     return (
       <div className="space-y-6 text-slate-800">
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col lg:flex-row lg:items-center justify-between gap-4">
-          <div>
-            <h2 className="text-xl sm:text-2xl font-bold text-slate-900 flex items-center gap-2">
-              <ArrowLeftRight className="text-blue-600" size={24} />
-              Central de Trocas, Permutas Bilaterais, Passagens & Liberação/Dispensa
-            </h2>
-            <p className="text-xs text-slate-500 mt-1">
-              Quando o gestor desfaz ou solicita revisão, o plantonista titular retorna automaticamente ao plantão na escala e recebe o pedido de ajuste. Permutas aprovadas atualizam ambos os plantões na escala.
-            </p>
-          </div>
-
-          {isAdmin && safeSwaps.length > 0 && (
-            <button
-              type="button"
-              onClick={handleClearAllTestSwapLogs}
-              className="bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-300 px-4 py-2.5 rounded-xl text-xs font-extrabold flex items-center gap-1.5 shrink-0"
-            >
-              <Trash2 size={15} className="text-amber-800" /> 🧹 Limpar Registos Antigos ({safeSwaps.length})
-            </button>
-          )}
+        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
+          <h2 className="text-xl sm:text-2xl font-bold text-slate-900 flex items-center gap-2">
+            <ArrowLeftRight className="text-blue-600" size={24} />
+            Central de Trocas, Permutas Bilaterais, Passagens & Liberação/Dispensa
+          </h2>
+          <p className="text-xs text-slate-500 mt-1">
+            Ao homologar uma troca ou passagem, selecione a regra financeira do Titular e do Substituto para aplicação automática na Folha PJ.
+          </p>
         </div>
 
         {/* BARRA DE AUDITORIA E BUSCA POR DATA / SEMANA / MÉDICO */}
@@ -2663,36 +3171,6 @@ export default function ScheduleAndMapViews(props: any) {
             </div>
           )}
 
-          {isAdmin && swapForm.type === 'Passagem de Plantão' && (
-            <div className="p-3.5 rounded-xl bg-emerald-50/60 border border-emerald-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <DollarSign size={16} className="text-emerald-700 shrink-0" />
-                <span className="font-extrabold text-emerald-950">
-                  Regra Financeira na Folha PJ para o Médico Substituto que assume esta passagem:
-                </span>
-              </div>
-              <select
-                value={swapForm.substituteBillingMode}
-                onChange={e =>
-                  setSwapForm({
-                    ...swapForm,
-                    substituteBillingMode: e.target.value as
-                      | 'payroll_extra'
-                      | 'direct_settlement'
-                  })
-                }
-                className="border border-emerald-400 rounded-xl px-3 py-1.5 bg-white font-extrabold text-emerald-950"
-              >
-                <option value="payroll_extra">
-                  Pagar Substituto na Folha PJ (Entra como Plantão Extra/Avulso)
-                </option>
-                <option value="direct_settlement">
-                  Acerto Direto entre Médicos (Não gerar pagamento duplicado na Folha PJ)
-                </option>
-              </select>
-            </div>
-          )}
-
           {swapForm.isPartialByTimeRange && (
             <div className="p-4 rounded-2xl bg-indigo-50/60 border border-indigo-200 space-y-3">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
@@ -2883,7 +3361,7 @@ export default function ScheduleAndMapViews(props: any) {
                           onClick={() => handleApproveSwap(sw)}
                           className="bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-1.5 rounded-xl font-bold flex items-center gap-1 shadow-sm"
                         >
-                          <CheckCircle size={14} /> Homologar / Validar na Escala
+                          <CheckCircle size={14} /> Homologar c/ Regra Financeira
                         </button>
                       )}
 
@@ -2929,6 +3407,93 @@ export default function ScheduleAndMapViews(props: any) {
                       )}
                     </div>
                   </div>
+
+                  {/* PAINEL DE DEFINIÇÃO DA REGRA FINANCEIRA PELO GESTOR AO HOMOLOGAR */}
+                  {isAdmin && sw.type !== 'Liberação / Dispensa Gerencial' && (
+                    <div className="p-3 rounded-xl bg-emerald-50/70 border border-emerald-200 grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-[10px] font-extrabold uppercase text-rose-900 mb-1">
+                          💰 1. Regra Financeira p/ Titular Solicitante ({reqDoc?.name || 'Titular'}):
+                        </label>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <select
+                            value={sw.titularDiscountMode || 'none'}
+                            onChange={e =>
+                              handleManagerUpdateSwap(sw.id, curr => ({
+                                ...curr,
+                                titularDiscountMode: e.target.value
+                              }))
+                            }
+                            className="flex-1 border border-rose-300 rounded-lg px-2 py-1 bg-white font-bold text-rose-950"
+                          >
+                            <option value="none">Sem Desconto na Cota Fixa (R$ 0)</option>
+                            <option value="full">Desconto Integral do Plantão (100%)</option>
+                            <option value="level_diff">
+                              Descontar Diferença p/ Nível Inferior
+                            </option>
+                            <option value="fraction">Descontar Fração (%)</option>
+                            <option value="custom">Descontar Valor Parcial Digitado (R$)</option>
+                          </select>
+
+                          {sw.titularDiscountMode === 'fraction' && (
+                            <input
+                              type="number"
+                              min={0}
+                              max={100}
+                              value={sw.titularFractionPercent ?? 50}
+                              onChange={e =>
+                                handleManagerUpdateSwap(sw.id, curr => ({
+                                  ...curr,
+                                  titularFractionPercent: Number(e.target.value)
+                                }))
+                              }
+                              className="w-14 border border-rose-400 rounded-lg px-1.5 py-1 bg-white font-black text-center"
+                              title="Percentual de desconto (%)"
+                            />
+                          )}
+
+                          {sw.titularDiscountMode === 'custom' && (
+                            <input
+                              type="number"
+                              min={0}
+                              value={sw.titularCustomDiscountAmount ?? 0}
+                              onChange={e =>
+                                handleManagerUpdateSwap(sw.id, curr => ({
+                                  ...curr,
+                                  titularCustomDiscountAmount: Number(e.target.value)
+                                }))
+                              }
+                              className="w-20 border border-rose-400 rounded-lg px-2 py-1 bg-white font-black"
+                              placeholder="R$"
+                            />
+                          )}
+                        </div>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] font-extrabold uppercase text-emerald-950 mb-1">
+                          💰 2. Regra Financeira p/ Substituto ({targDoc?.name || 'Substituto'}):
+                        </label>
+                        <select
+                          value={sw.substituteBillingMode || 'payroll_extra'}
+                          onChange={e =>
+                            handleManagerUpdateSwap(sw.id, curr => ({
+                              ...curr,
+                              substituteBillingMode: e.target.value
+                            }))
+                          }
+                          className="w-full border border-emerald-400 rounded-lg px-2 py-1 bg-white font-bold text-emerald-950"
+                        >
+                          <option value="payroll_extra">
+                            Pagar Substituto na Folha PJ (Entra como CH / Extra)
+                          </option>
+                          <option value="direct_settlement">
+                            Acerto Direto / Permuta (Sem pagamento extra na Folha PJ)
+                          </option>
+                        </select>
+                      </div>
+                    </div>
+                  )}
 
                   <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
                     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -3132,10 +3697,9 @@ export default function ScheduleAndMapViews(props: any) {
 
   // ============================================================================
   // 3. VIEW: ESCALA OFICIAL SEMANAL & MATRIZ HEATMAP 24H (SCHEDULE / HEATMAP)
-  // (COM NAVEGADOR POR MESES, FILTRO POR MÉDICO E DOWNLOAD HEATMAP POR DIA OU SEMANA)
   // ============================================================================
   const filteredShifts = safeShifts.filter((s: any) => {
-    if (!isShiftCovered(s)) return false;
+    if (!isShiftVisibleOnWeeklyGrid(s)) return false;
     const exactFn = resolveExactFunctionName(s);
     if (filterCategory !== 'Todas' && exactFn !== filterCategory && s?.category !== filterCategory) {
       return false;
@@ -3144,11 +3708,8 @@ export default function ScheduleAndMapViews(props: any) {
 
     const docInfo = resolveShiftDoctorInfo(s);
     if (filterDoctorId !== 'Todos') {
-      if (filterDoctorId.startsWith('manual__')) {
-        const manName = filterDoctorId.replace('manual__', '');
-        if (!docInfo.isManual || docInfo.name.toLowerCase() !== manName.toLowerCase()) {
-          return false;
-        }
+      if (filterDoctorId === 'planned_open') {
+        if (!s?.isPlannedOpenExtra) return false;
       } else if (Number(s?.doctorId) !== Number(filterDoctorId)) {
         return false;
       }
@@ -3195,13 +3756,13 @@ export default function ScheduleAndMapViews(props: any) {
 
   return (
     <div className="space-y-6 text-slate-800">
-      {/* Barra Superior de Controlo e Exportação PDF (Escala 8 Pág. + Heatmap por Dia ou Semana) */}
+      {/* Barra Superior de Controlo e Exportação PDF */}
       <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
             <h2 className="text-xl sm:text-2xl font-bold text-slate-900 flex items-center gap-2">
               <Calendar className="text-blue-600" size={24} />
-              Escala Semanal (Seg-Dom) & Matriz Heatmap Assistencial 24h
+              Escala Semanal (Seg-Dom), Escala Padrão & Matriz Heatmap 24h
             </h2>
             <p className="text-xs text-slate-500 mt-0.5 capitalize">
               Mês de referência: <strong>{getMonthYearPtLabel(selectedDate)}</strong> • Semana exibida:{' '}
@@ -3220,7 +3781,6 @@ export default function ScheduleAndMapViews(props: any) {
               <Printer size={15} /> Baixar Escala em PDF (Semanal + 7 Dias)
             </button>
 
-            {/* Download do Heatmap escolhendo se Por Dia ou Pela Semana */}
             <div className="inline-flex items-center rounded-xl bg-indigo-50 p-1 border border-indigo-200">
               <select
                 value={heatmapDownloadScope}
@@ -3246,10 +3806,9 @@ export default function ScheduleAndMapViews(props: any) {
           </div>
         </div>
 
-        {/* NAVEGADOR POR MESES + SEMANAS + SUPER CLONAGEM DO GESTOR */}
+        {/* NAVEGADOR POR MESES + SEMANAS + ESCALA PADRÃO + SUPER CLONAGEM */}
         <div className="p-3.5 rounded-2xl bg-slate-900 text-white space-y-3 text-xs">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-            {/* Bloco 1: Navegador por Meses */}
             <div className="flex flex-wrap items-center gap-1.5 bg-slate-800/90 p-1.5 rounded-xl border border-slate-700">
               <span className="text-[10px] font-extrabold uppercase text-blue-300 px-2">
                 Mês:
@@ -3258,7 +3817,6 @@ export default function ScheduleAndMapViews(props: any) {
                 type="button"
                 onClick={() => handleNavigateMonth(-1)}
                 className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-700 font-extrabold flex items-center gap-1"
-                title="Ir para o mês anterior"
               >
                 <ChevronLeft size={14} /> Mês Ant.
               </button>
@@ -3272,13 +3830,11 @@ export default function ScheduleAndMapViews(props: any) {
                 type="button"
                 onClick={() => handleNavigateMonth(1)}
                 className="px-2.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-700 font-extrabold flex items-center gap-1"
-                title="Ir para o próximo mês"
               >
                 Próx. Mês <ChevronRight size={14} />
               </button>
             </div>
 
-            {/* Bloco 2: Navegador por Semanas e Data */}
             <div className="flex flex-wrap items-center gap-1.5">
               <button
                 type="button"
@@ -3316,33 +3872,61 @@ export default function ScheduleAndMapViews(props: any) {
             </div>
           </div>
 
-          {/* Bloco 3: 3 Modos de Clonagem Rápida (Exclusivo Gestor) */}
+          {/* Barra do Gestor: Escala Padrão (Molde Base) + Clonagem Rápida */}
           {isAdmin && (
-            <div className="pt-2 border-t border-slate-800 flex flex-wrap items-center justify-between gap-2">
-              <span className="text-[10px] font-extrabold uppercase text-amber-400">
-                ⚡ Clonagem de Escala:
-              </span>
+            <div className="pt-2.5 border-t border-slate-800 flex flex-col xl:flex-row xl:items-center justify-between gap-2.5">
               <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[10px] font-extrabold uppercase text-emerald-400 mr-1">
+                  📌 Escala Padrão ({savedStandardTemplate.length} turnos base):
+                </span>
+                <button
+                  type="button"
+                  onClick={handleSaveCurrentWeekAsStandardTemplate}
+                  className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black flex items-center gap-1 text-[11px]"
+                  title="Salva os plantonistas fixos e vagas extras planejadas desta semana como Escala Padrão"
+                >
+                  <BookmarkCheck size={13} /> Salvar Semana como Escala Padrão
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleApplyStandardScheduleTemplate('week')}
+                  className="px-2.5 py-1.5 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold flex items-center gap-1 text-[11px]"
+                >
+                  <Wand2 size={12} /> Aplicar Padrão na Semana
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleApplyStandardScheduleTemplate('month')}
+                  className="px-2.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-black flex items-center gap-1 text-[11px]"
+                >
+                  <Wand2 size={12} /> Aplicar Escala Padrão no Mês ({selectedDate.slice(0, 7)})
+                </button>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="text-[10px] font-extrabold uppercase text-amber-400">
+                  Clonar:
+                </span>
                 <button
                   type="button"
                   onClick={handleCloneFromPreviousWeek}
-                  className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-blue-700 text-slate-100 border border-slate-700 font-bold flex items-center gap-1 text-[11px]"
+                  className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold flex items-center gap-1 text-[11px]"
                 >
-                  <Copy size={12} /> 📥 Clonar Semana Anterior
+                  <Copy size={11} /> Semana Ant.
                 </button>
                 <button
                   type="button"
                   onClick={handleCloneToNextWeek}
-                  className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-emerald-700 text-slate-100 border border-slate-700 font-bold flex items-center gap-1 text-[11px]"
+                  className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-bold flex items-center gap-1 text-[11px]"
                 >
-                  <Copy size={12} /> 📤 Clonar p/ Próxima Semana
+                  <Copy size={11} /> Próx. Semana
                 </button>
                 <button
                   type="button"
                   onClick={handleCloneToNextMonth}
                   className="px-2.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-black flex items-center gap-1 text-[11px]"
                 >
-                  <Copy size={12} /> 📅 Clonar p/ Próximo Mês
+                  <Copy size={11} /> Próx. Mês
                 </button>
               </div>
             </div>
@@ -3381,38 +3965,37 @@ export default function ScheduleAndMapViews(props: any) {
         {/* BARRA DE FILTROS: POR FUNÇÃO E POR MÉDICO (SELETOR A-Z + BUSCA POR NOME) */}
         <div className="pt-2 border-t border-slate-100 flex flex-col xl:flex-row xl:items-center justify-between gap-3 text-xs">
           <div className="flex flex-wrap items-center gap-2">
-            <div>
-              <select
-                value={filterCategory}
-                onChange={e => setFilterCategory(e.target.value)}
-                className="border border-slate-300 rounded-xl px-3 py-1.5 bg-white font-bold"
-              >
-                <option value="Todas">Todas as Funções</option>
-                {allFunctionNames.map(fn => (
-                  <option key={fn} value={fn}>
-                    Função: {fn}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <select
+              value={filterCategory}
+              onChange={e => setFilterCategory(e.target.value)}
+              className="border border-slate-300 rounded-xl px-3 py-1.5 bg-white font-bold"
+            >
+              <option value="Todas">Todas as Funções</option>
+              {allFunctionNames.map(fn => (
+                <option key={fn} value={fn}>
+                  Função: {fn}
+                </option>
+              ))}
+            </select>
 
-            {/* Filtro por Médico (Ordem Alfabética A-Z) */}
-            <div>
-              <select
-                value={filterDoctorId}
-                onChange={e => setFilterDoctorId(e.target.value)}
-                className="border border-slate-300 rounded-xl px-3 py-1.5 bg-white font-bold text-slate-900"
-              >
-                <option value="Todos">Todos os Médicos (A-Z)</option>
-                {safeActiveDoctors.map((d: any) => (
-                  <option key={d.id} value={String(d.id)}>
-                    👨‍⚕️ {d.name}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <select
+              value={filterDoctorId}
+              onChange={e => setFilterDoctorId(e.target.value)}
+              className="border border-slate-300 rounded-xl px-3 py-1.5 bg-white font-bold text-slate-900"
+            >
+              <option value="Todos">Todos os Médicos (A-Z)</option>
+              {isAdmin && (
+                <option value="planned_open">
+                  ⚡ Apenas Vagas Extras Planejadas (A Alocar)
+                </option>
+              )}
+              {safeActiveDoctors.map((d: any) => (
+                <option key={d.id} value={String(d.id)}>
+                  👨‍⚕️ {d.name}
+                </option>
+              ))}
+            </select>
 
-            {/* Busca Rápida por Nome do Médico */}
             <div className="relative">
               <input
                 type="text"
@@ -3477,24 +4060,11 @@ export default function ScheduleAndMapViews(props: any) {
             >
               Apenas Heatmap 24h
             </button>
-            {isAdmin && (
-              <button
-                type="button"
-                onClick={() => setDisplayMode('list')}
-                className={`px-3 py-1.5 rounded-xl font-bold ${
-                  displayMode === 'list'
-                    ? 'bg-blue-600 text-white'
-                    : 'bg-slate-100 text-slate-700'
-                }`}
-              >
-                📋 Lista & Adicionais
-              </button>
-            )}
           </div>
         </div>
       </div>
 
-      {/* Formulário do Gestor para Alocar Plantão */}
+      {/* Formulário do Gestor para Alocar Plantão (Com os 3 Regimes + Vaga Extra Planejada em Aberto) */}
       {isAdmin && (
         <form
           onSubmit={handleAddShiftWithRecurrence}
@@ -3503,10 +4073,10 @@ export default function ScheduleAndMapViews(props: any) {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-2.5">
             <h3 className="font-extrabold text-sm text-slate-900 flex items-center gap-2">
               <Plus size={16} className="text-blue-600" />
-              Alocar Plantão na Escala Oficial (Plantonistas em Ordem Alfabética A-Z)
+              Alocar Plantão na Escala Oficial (Fixo, Por CH/Extra, Escala Periódica ou Vaga Extra Planejada)
             </h3>
 
-            <div className="inline-flex rounded-xl bg-slate-100 p-1 font-extrabold text-[11px]">
+            <div className="inline-flex flex-wrap rounded-xl bg-slate-100 p-1 font-extrabold text-[11px] gap-1">
               <button
                 type="button"
                 onClick={() =>
@@ -3525,6 +4095,23 @@ export default function ScheduleAndMapViews(props: any) {
                 onClick={() =>
                   setNewShiftForm({
                     ...newShiftForm,
+                    allocationMode: 'planned_open',
+                    shiftType: 'Coringa/Extra'
+                  })
+                }
+                className={`px-3 py-1.5 rounded-lg transition-all flex items-center gap-1.5 ${
+                  newShiftForm.allocationMode === 'planned_open'
+                    ? 'bg-purple-600 text-white shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                ⚡ Vaga Extra Planejada (Ainda Não Alocada)
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  setNewShiftForm({
+                    ...newShiftForm,
                     allocationMode: 'manual',
                     shiftType: 'Coringa/Extra'
                   })
@@ -3535,7 +4122,7 @@ export default function ScheduleAndMapViews(props: any) {
                     : 'text-slate-600 hover:text-slate-900'
                 }`}
               >
-                <UserPlus size={13} /> ✍️ Plantonista Não Cadastrado (Manual)
+                <UserPlus size={13} /> ✍️ Plantonista Manual
               </button>
             </div>
           </div>
@@ -3559,6 +4146,10 @@ export default function ScheduleAndMapViews(props: any) {
                     </option>
                   ))}
                 </select>
+              </div>
+            ) : newShiftForm.allocationMode === 'planned_open' ? (
+              <div className="sm:col-span-2 p-2.5 rounded-xl bg-purple-50 border-2 border-dashed border-purple-300 text-purple-950 font-bold text-[11px]">
+                ⚡ <strong>Vaga Extra Planejada (Em Aberto):</strong> Será criada na escala para compor o molde padrão. Clique em ✏️ no cartão quando quiser alocar o médico.
               </div>
             ) : (
               <div className="sm:col-span-2 grid grid-cols-1 sm:grid-cols-3 gap-2 p-2.5 rounded-xl bg-amber-50/70 border border-amber-300">
@@ -3652,21 +4243,29 @@ export default function ScheduleAndMapViews(props: any) {
             </div>
 
             <div>
-              <label className="block font-bold mb-1">Regime do Turno</label>
+              <label className="block font-extrabold text-blue-900 mb-1">
+                Forma de Remuneração / Regime *
+              </label>
               <select
                 value={
-                  newShiftForm.allocationMode === 'manual'
+                  newShiftForm.allocationMode !== 'registered'
                     ? 'Coringa/Extra'
                     : newShiftForm.shiftType
                 }
-                disabled={newShiftForm.allocationMode === 'manual'}
+                disabled={newShiftForm.allocationMode !== 'registered'}
                 onChange={e =>
-                  setNewShiftForm({ ...newShiftForm, shiftType: e.target.value })
+                  setNewShiftForm({
+                    ...newShiftForm,
+                    shiftType: e.target.value as any
+                  })
                 }
-                className="w-full border rounded-xl px-2.5 py-2 bg-white font-bold"
+                className="w-full border-2 border-blue-300 rounded-xl px-2.5 py-2 bg-blue-50/40 font-extrabold text-blue-950"
               >
-                <option value="Fixo">Fixo (Cota Mensal)</option>
-                <option value="Coringa/Extra">Coringa / Extra Avulso</option>
+                <option value="Fixo">Fixo (Por Cota Fixa Mensal)</option>
+                <option value="Coringa/Extra">Por CH / Extra (Por Carga Horária)</option>
+                <option value="Escala Periódica">
+                  Por Escala Periódica (Incluso na Cota Fixa)
+                </option>
               </select>
             </div>
           </div>
@@ -3731,7 +4330,7 @@ export default function ScheduleAndMapViews(props: any) {
               </h3>
               <p className="text-[11px] text-slate-500">
                 {isAdmin
-                  ? 'Use ▲/▼ para ordenar, 🔄 para registar Troca/Permuta/Dispensa, ✏️ para editar o turno ou 🗑️ para excluir.'
+                  ? 'Use ▲/▼ para ordenar, 🔄 para registar Troca/Permuta/Dispensa, ✏️ para editar o turno (ou alocar médico em vaga planejada) e 🗑️ para excluir.'
                   : 'Clique no ícone 🔄 no seu plantão para solicitar troca/permuta/passagem ou clique na data do topo para ver o Heatmap 24h.'}
               </p>
             </div>
@@ -3740,7 +4339,9 @@ export default function ScheduleAndMapViews(props: any) {
           <div className="grid grid-cols-7 min-w-[1060px] divide-x divide-slate-200 text-xs">
             {weekDays.map(wd => {
               const dayList = sortShiftsByManagerOrArrival(
-                filteredShifts.filter((s: any) => s?.date === wd.date && isShiftCovered(s))
+                filteredShifts.filter(
+                  (s: any) => s?.date === wd.date && isShiftVisibleOnWeeklyGrid(s)
+                )
               );
               const isSelectedDay = wd.date === selectedDate;
 
@@ -3774,22 +4375,38 @@ export default function ScheduleAndMapViews(props: any) {
                         const fnName = resolveExactFunctionName(s, doc);
                         const colorInfo = getFunctionColorInfo(fnName);
                         const hasSwap = isShiftInvolvedInApprovedSwap(s);
+                        const isPlannedOpen = Boolean(s.isPlannedOpenExtra);
                         const canRequestSwapOnCard =
-                          isAdmin || Number(s?.doctorId) === Number(currentUser?.id);
+                          !isPlannedOpen &&
+                          (isAdmin || Number(s?.doctorId) === Number(currentUser?.id));
 
                         return (
                           <div
                             key={s.id}
-                            style={{
-                              borderColor: colorInfo.borderHex,
-                              borderLeft: `5px solid ${colorInfo.hex}`,
-                              backgroundColor: colorInfo.softBgHex
-                            }}
-                            className="p-2.5 rounded-xl border shadow-xs space-y-1.5 transition-all"
+                            style={
+                              isPlannedOpen
+                                ? {
+                                    borderColor: '#9333ea',
+                                    borderLeft: `5px dashed #9333ea`,
+                                    backgroundColor: '#faf5ff'
+                                  }
+                                : {
+                                    borderColor: colorInfo.borderHex,
+                                    borderLeft: `5px solid ${colorInfo.hex}`,
+                                    backgroundColor: colorInfo.softBgHex
+                                  }
+                            }
+                            className={`p-2.5 rounded-xl border shadow-xs space-y-1.5 transition-all ${
+                              isPlannedOpen ? 'border-dashed' : ''
+                            }`}
                           >
                             <div className="flex items-center justify-between gap-1">
                               <span
-                                style={{ backgroundColor: colorInfo.hex }}
+                                style={{
+                                  backgroundColor: isPlannedOpen
+                                    ? '#7e22ce'
+                                    : colorInfo.hex
+                                }}
                                 className="px-1.5 py-0.5 rounded text-white font-black text-[10px]"
                               >
                                 {s.startTime}-{s.endTime}
@@ -3848,7 +4465,11 @@ export default function ScheduleAndMapViews(props: any) {
                                       type="button"
                                       onClick={e => handleOpenEditShiftModal(s, e)}
                                       className="p-0.5 text-blue-700 hover:bg-blue-100 rounded"
-                                      title="Editar médico, horário ou função deste plantão"
+                                      title={
+                                        isPlannedOpen
+                                          ? 'Alocar médico nesta vaga extra planejada'
+                                          : 'Editar médico, horário, regime ou adicionais deste plantão'
+                                      }
                                     >
                                       <Edit3 size={11} />
                                     </button>
@@ -3865,7 +4486,11 @@ export default function ScheduleAndMapViews(props: any) {
                               </div>
                             </div>
 
-                            <strong className="block text-slate-900 font-extrabold leading-tight">
+                            <strong
+                              className={`block font-extrabold leading-tight ${
+                                isPlannedOpen ? 'text-purple-900' : 'text-slate-900'
+                              }`}
+                            >
                               {doc?.name || 'Médico'} {hasSwap ? '🔄' : ''}
                             </strong>
 
@@ -3880,9 +4505,7 @@ export default function ScheduleAndMapViews(props: any) {
                               <span className="font-bold text-slate-600 shrink-0">
                                 {doc.isManual
                                   ? 'Manual'
-                                  : s.shiftType === 'Fixo'
-                                  ? 'Fixo'
-                                  : 'Extra'}
+                                  : getRegimeShortBadge(s.shiftType, isPlannedOpen)}
                               </span>
                             </div>
                           </div>
@@ -4221,123 +4844,6 @@ export default function ScheduleAndMapViews(props: any) {
         </div>
       )}
 
-      {/* BLOCO 3: LISTAGEM GERAL DE PLANTÕES & ADICIONAIS POR TURNO (EXCLUSIVO GESTOR) */}
-      {isAdmin && (displayMode === 'both' || displayMode === 'list') && (
-        <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4 text-xs">
-          <div className="flex items-center justify-between">
-            <h3 className="text-sm font-black text-slate-900 uppercase">
-              Listagem Geral de Plantões & Adicionais por Turno ({filteredShifts.length})
-            </h3>
-            <span className="text-[11px] font-bold text-slate-500">
-              Visível apenas para o perfil de Gestor
-            </span>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {sortShiftsByManagerOrArrival(filteredShifts).map((s: any) => {
-              const doc = resolveShiftDoctorInfo(s);
-              const fnName = resolveExactFunctionName(s, doc);
-              const shiftAdds: string[] = Array.isArray(s.additionals)
-                ? s.additionals
-                : [];
-              const cInfo = getFunctionColorInfo(fnName);
-
-              return (
-                <div
-                  key={s.id}
-                  style={{
-                    borderLeft: `5px solid ${cInfo.hex}`,
-                    backgroundColor: cInfo.softBgHex
-                  }}
-                  className="p-4 rounded-2xl border border-slate-200 space-y-2.5"
-                >
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <div className="flex items-center gap-2">
-                      <span className="px-2.5 py-1 rounded-lg bg-slate-900 text-white font-extrabold">
-                        {s.date}
-                      </span>
-                      <span
-                        style={{ backgroundColor: cInfo.hex }}
-                        className="px-2.5 py-1 rounded-lg text-white font-extrabold"
-                      >
-                        {s.startTime} às {s.endTime} ({s.hours || 12}h)
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        type="button"
-                        onClick={e => handleOpenQuickSwapFromCard(s, e)}
-                        className="px-2.5 py-1 rounded-lg bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-200 font-bold flex items-center gap-1"
-                      >
-                        <ArrowLeftRight size={12} /> Troca/Dispensa
-                      </button>
-                      <button
-                        type="button"
-                        onClick={e => handleOpenEditShiftModal(s, e)}
-                        className="px-2.5 py-1 rounded-lg bg-white hover:bg-blue-50 text-blue-700 border border-blue-200 font-bold flex items-center gap-1"
-                      >
-                        <Edit3 size={13} /> Editar
-                      </button>
-                      <button
-                        type="button"
-                        onClick={e => handleDeleteShift(s.id, e)}
-                        className="p-1.5 rounded-lg bg-red-50 hover:bg-red-100 text-red-600"
-                        title="Excluir plantão"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <span
-                      style={{ backgroundColor: cInfo.hex }}
-                      className="px-2.5 py-0.5 rounded-full text-white font-extrabold"
-                    >
-                      {fnName}
-                    </span>
-                    <span className="px-2.5 py-0.5 rounded-full bg-white border border-slate-200 text-slate-800 font-bold">
-                      {doc.isManual ? 'Plantonista Alocado Manualmente' : s.shiftType || 'Fixo'}
-                    </span>
-                  </div>
-
-                  <div>
-                    <strong className="text-sm font-black text-slate-900">
-                      {doc.isManual
-                        ? `Plantonista alocado manualmente (${doc.name})`
-                        : doc?.name || 'Vaga em Aberto'}
-                    </strong>
-                  </div>
-
-                  {shiftAdditionalsCatalog.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5 pt-1">
-                      {shiftAdditionalsCatalog.map((add: any) => {
-                        const active = shiftAdds.includes(add.id);
-                        return (
-                          <button
-                            key={add.id}
-                            type="button"
-                            onClick={() => handleToggleShiftAdditional(s.id, add.id)}
-                            className={`px-2.5 py-1 rounded-lg font-bold border transition-all text-[11px] ${
-                              active
-                                ? 'bg-amber-500 text-white border-amber-600'
-                                : 'bg-white text-slate-600 border-slate-300'
-                            }`}
-                          >
-                            {active ? '✓ ' : '+ '}
-                            {add.name}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
       {/* ==========================================================================
           MODAL RÁPIDO DE TROCA, PERMUTA BILATERAL, PASSAGEM OU DISPENSA GERENCIAL
          ========================================================================== */}
@@ -4365,7 +4871,7 @@ export default function ScheduleAndMapViews(props: any) {
               </button>
             </div>
 
-            <form onSubmit={handleSaveQuickSwapFromModal} className="p-6 space-y-4">
+            <form onSubmit={handleSaveQuickSwapFromModal} className="p-6 space-y-4 max-h-[82vh] overflow-y-auto">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block font-bold mb-1">
@@ -4548,30 +5054,55 @@ export default function ScheduleAndMapViews(props: any) {
                 </div>
               )}
 
-              {isAdmin && quickSwapForm.type === 'Passagem de Plantão' && (
-                <div>
-                  <label className="block font-bold text-emerald-900 mb-1">
-                    Ponte Financeira do Médico Substituto na Folha PJ:
-                  </label>
-                  <select
-                    value={quickSwapForm.substituteBillingMode}
-                    onChange={e =>
-                      setQuickSwapForm({
-                        ...quickSwapForm,
-                        substituteBillingMode: e.target.value as
-                          | 'payroll_extra'
-                          | 'direct_settlement'
-                      })
-                    }
-                    className="w-full border border-emerald-300 rounded-xl px-3 py-2 bg-emerald-50/40 font-bold text-emerald-950"
-                  >
-                    <option value="payroll_extra">
-                      Pagar Substituto na Folha PJ (Como Plantão Extra/Avulso)
-                    </option>
-                    <option value="direct_settlement">
-                      Acerto Direto entre Médicos (Sem impacto na Folha do Substituto)
-                    </option>
-                  </select>
+              {/* Seleção da Regra Financeira pelo Gestor já no Modal Rápido */}
+              {isAdmin && quickSwapForm.type !== 'Liberação / Dispensa Gerencial' && (
+                <div className="p-3.5 rounded-2xl bg-emerald-50/70 border border-emerald-200 space-y-2.5">
+                  <div>
+                    <label className="block font-extrabold text-rose-900 mb-1">
+                      💰 1. Regra Financeira na Folha PJ p/ o Titular Solicitante:
+                    </label>
+                    <select
+                      value={quickSwapForm.titularDiscountMode}
+                      onChange={e =>
+                        setQuickSwapForm({
+                          ...quickSwapForm,
+                          titularDiscountMode: e.target.value as any
+                        })
+                      }
+                      className="w-full border border-rose-300 rounded-xl px-3 py-1.5 bg-white font-bold text-rose-950"
+                    >
+                      <option value="none">Sem Desconto na Cota Fixa (R$ 0)</option>
+                      <option value="full">Desconto Integral do Plantão (100%)</option>
+                      <option value="level_diff">Descontar Diferença p/ Nível Inferior</option>
+                      <option value="fraction">Descontar Fração (%)</option>
+                      <option value="custom">Descontar Valor Parcial (R$)</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block font-extrabold text-emerald-950 mb-1">
+                      💰 2. Regra Financeira na Folha PJ p/ o Médico Substituto:
+                    </label>
+                    <select
+                      value={quickSwapForm.substituteBillingMode}
+                      onChange={e =>
+                        setQuickSwapForm({
+                          ...quickSwapForm,
+                          substituteBillingMode: e.target.value as
+                            | 'payroll_extra'
+                            | 'direct_settlement'
+                        })
+                      }
+                      className="w-full border border-emerald-300 rounded-xl px-3 py-1.5 bg-white font-bold text-emerald-950"
+                    >
+                      <option value="payroll_extra">
+                        Pagar Substituto na Folha PJ (Como Plantão CH / Extra)
+                      </option>
+                      <option value="direct_settlement">
+                        Acerto Direto entre Médicos (Sem impacto na Folha do Substituto)
+                      </option>
+                    </select>
+                  </div>
                 </div>
               )}
 
@@ -4678,7 +5209,7 @@ export default function ScheduleAndMapViews(props: any) {
                     className="w-4 h-4 accent-emerald-600"
                   />
                   <span>
-                    ✓ Homologar imediatamente e já atualizar a Escala Oficial
+                    ✓ Homologar imediatamente e já aplicar na Escala e na Folha PJ
                   </span>
                 </label>
               )}
@@ -4712,10 +5243,10 @@ export default function ScheduleAndMapViews(props: any) {
             <div className="bg-slate-900 text-white px-6 py-4 flex items-center justify-between">
               <div>
                 <h3 className="text-base font-black">
-                  Editar Plantão Alocado na Escala
+                  Editar Plantão / Alocar Vaga na Escala
                 </h3>
                 <p className="text-[11px] text-slate-400">
-                  Altere o médico (A-Z), o horário, a data ou a função sem precisar excluir e recadastrar.
+                  Altere o médico (A-Z), o horário, a função, o regime de remuneração ou os adicionais do turno.
                 </p>
               </div>
               <button
@@ -4727,8 +5258,8 @@ export default function ScheduleAndMapViews(props: any) {
               </button>
             </div>
 
-            <form onSubmit={handleSaveEditedShift} className="p-6 space-y-4">
-              <div className="inline-flex rounded-xl bg-slate-100 p-1 font-extrabold text-[11px] w-full">
+            <form onSubmit={handleSaveEditedShift} className="p-6 space-y-4 max-h-[82vh] overflow-y-auto">
+              <div className="inline-flex rounded-xl bg-slate-100 p-1 font-extrabold text-[11px] w-full gap-1">
                 <button
                   type="button"
                   onClick={() =>
@@ -4740,7 +5271,24 @@ export default function ScheduleAndMapViews(props: any) {
                       : 'text-slate-600'
                   }`}
                 >
-                  👤 Médico do Corpo Clínico (A-Z)
+                  👤 Médico Corpo Clínico
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    setEditShiftForm({
+                      ...editShiftForm,
+                      allocationMode: 'planned_open',
+                      shiftType: 'Coringa/Extra'
+                    })
+                  }
+                  className={`flex-1 py-1.5 rounded-lg transition-all ${
+                    editShiftForm.allocationMode === 'planned_open'
+                      ? 'bg-purple-600 text-white'
+                      : 'text-slate-600'
+                  }`}
+                >
+                  ⚡ Vaga Extra Planejada
                 </button>
                 <button
                   type="button"
@@ -4757,7 +5305,7 @@ export default function ScheduleAndMapViews(props: any) {
                       : 'text-slate-600'
                   }`}
                 >
-                  ✍️ Plantonista Manual (Não Cadastrado)
+                  ✍️ Plantonista Manual
                 </button>
               </div>
 
@@ -4782,6 +5330,10 @@ export default function ScheduleAndMapViews(props: any) {
                       </option>
                     ))}
                   </select>
+                </div>
+              ) : editShiftForm.allocationMode === 'planned_open' ? (
+                <div className="p-3 rounded-xl bg-purple-50 border border-dashed border-purple-300 text-purple-950 font-bold">
+                  ⚡ Esta vaga ficará aberta na grade semanal como <strong>Extra Planejado (A Alocar)</strong> até que um médico seja selecionado.
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3 rounded-xl bg-amber-50 border border-amber-200">
@@ -4878,24 +5430,67 @@ export default function ScheduleAndMapViews(props: any) {
                 </div>
 
                 <div>
-                  <label className="block font-bold mb-1">Regime do Turno</label>
+                  <label className="block font-extrabold text-blue-900 mb-1">
+                    Forma de Remuneração / Regime
+                  </label>
                   <select
                     value={
-                      editShiftForm.allocationMode === 'manual'
+                      editShiftForm.allocationMode !== 'registered'
                         ? 'Coringa/Extra'
                         : editShiftForm.shiftType
                     }
-                    disabled={editShiftForm.allocationMode === 'manual'}
+                    disabled={editShiftForm.allocationMode !== 'registered'}
                     onChange={e =>
-                      setEditShiftForm({ ...editShiftForm, shiftType: e.target.value })
+                      setEditShiftForm({
+                        ...editShiftForm,
+                        shiftType: e.target.value as any
+                      })
                     }
-                    className="w-full border border-slate-300 rounded-xl px-3 py-2 bg-white font-bold"
+                    className="w-full border-2 border-blue-300 rounded-xl px-3 py-2 bg-blue-50/40 font-extrabold text-blue-950"
                   >
-                    <option value="Fixo">Fixo (Cota Mensal)</option>
-                    <option value="Coringa/Extra">Coringa / Extra Avulso</option>
+                    <option value="Fixo">Fixo (Por Cota Fixa Mensal)</option>
+                    <option value="Coringa/Extra">Por CH / Extra (Por Carga Horária)</option>
+                    <option value="Escala Periódica">
+                      Por Escala Periódica (Incluso na Cota Fixa)
+                    </option>
                   </select>
                 </div>
               </div>
+
+              {/* Adicionais do Turno dentro do Modal de Edição */}
+              {shiftAdditionalsCatalog.length > 0 && (
+                <div className="pt-2 border-t border-slate-100 space-y-1.5">
+                  <span className="block font-bold text-slate-600 text-[11px]">
+                    Adicionais vinculados a este plantão específico (Opcional):
+                  </span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {shiftAdditionalsCatalog.map((add: any) => {
+                      const active = (editShiftForm.additionals || []).includes(add.id);
+                      return (
+                        <button
+                          key={add.id}
+                          type="button"
+                          onClick={() => {
+                            const curr = editShiftForm.additionals || [];
+                            const next = active
+                              ? curr.filter(x => x !== add.id)
+                              : [...curr, add.id];
+                            setEditShiftForm({ ...editShiftForm, additionals: next });
+                          }}
+                          className={`px-2.5 py-1 rounded-lg font-bold border transition-all text-[11px] ${
+                            active
+                              ? 'bg-amber-500 text-white border-amber-600'
+                              : 'bg-white text-slate-600 border-slate-300'
+                          }`}
+                        >
+                          {active ? '✓ ' : '+ '}
+                          {add.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               <div className="pt-3 border-t border-slate-200 flex justify-between items-center gap-2">
                 <button

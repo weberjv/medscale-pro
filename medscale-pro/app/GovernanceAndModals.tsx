@@ -5,7 +5,7 @@ import {
   Umbrella, GraduationCap, ShieldAlert, ClipboardList, History,
   Sliders, Plus, Trash2, CheckCircle, AlertTriangle, RotateCcw,
   Lock, Unlock, X, Calendar, Sparkles, CheckSquare, Tag,
-  BarChart3, Edit3, Megaphone, Save
+  BarChart3, Edit3, Megaphone, Save, Lightbulb, Users
 } from 'lucide-react';
 
 export default function GovernanceAndModals(props: any) {
@@ -66,8 +66,12 @@ export default function GovernanceAndModals(props: any) {
     if (typeof setIsDoctorModalOpen === 'function') setIsDoctorModalOpen(false);
   };
 
-  // Listas blindadas
-  const safeDoctors = Array.isArray(doctors) ? doctors : [];
+  // Listas blindadas e ordenadas alfabeticamente (A-Z)
+  const safeDoctors = (Array.isArray(doctors) ? [...doctors] : []).sort((a, b) =>
+    String(a?.name || '').localeCompare(String(b?.name || ''), 'pt-BR', {
+      sensitivity: 'base'
+    })
+  );
   const safeActiveDoctors = safeDoctors.filter((d: any) => d?.status === 'Ativo');
   const safeVacations = Array.isArray(vacations) ? vacations : [];
   const safeCourses = Array.isArray(courses) ? courses : [];
@@ -368,7 +372,7 @@ export default function GovernanceAndModals(props: any) {
   };
 
   // ============================================================================
-  // ESTADOS E LÓGICA DE CURSOS & CERTIFICAÇÕES (DESTAQUE POR CURSO E ABAS VENCIDOS)
+  // ESTADOS E LÓGICA DE CURSOS & CERTIFICAÇÕES
   // ============================================================================
   const defaultCourseTypes = [
     { id: 'ct_acls', name: 'ACLS', colorTheme: 'blue', defaultMonths: 24 },
@@ -547,7 +551,7 @@ export default function GovernanceAndModals(props: any) {
   };
 
   // ============================================================================
-  // ESTADOS DE GESTÃO À VISTA, GOVERNANÇA & COMUNICADOS UNIFICADOS
+  // ESTADOS DE GESTÃO À VISTA, GOVERNANÇA, COMUNICADOS & OCORRÊNCIAS POR CATEGORIA
   // ============================================================================
   const defaultVisualIndicators = [
     {
@@ -606,10 +610,13 @@ export default function GovernanceAndModals(props: any) {
     content: ''
   });
 
+  // Novo Estado de Ocorrências com Categoria (Corpo Clínico -> Selecionar Médico / Fluxo / Assistência -> Campo Aberto / Outros -> Campo Aberto)
   const [occForm, setOccForm] = useState({
     date: new Date().toISOString().split('T')[0],
-    severity: 'Moderada',
-    category: 'Assistencial / Fluxo',
+    severity: 'Apontamento Operacional',
+    categoryGroup: 'Corpo Clínico' as 'Corpo Clínico' | 'Fluxo / Assistência' | 'Outros',
+    targetDoctorId: safeActiveDoctors[0]?.id || 1,
+    openCategoryDetail: '',
     description: ''
   });
 
@@ -625,7 +632,6 @@ export default function GovernanceAndModals(props: any) {
 
   // ============================================================================
   // ESTADO DO MODAL DE FICHA CADASTRAL COMPLETA DO MÉDICO
-  // (COM HISTÓRICO DE TRABALHO E OCORRÊNCIAS INDIVIDUAIS INTEGRADOS)
   // ============================================================================
   const [docModalForm, setDocModalForm] = useState<any>({
     name: '',
@@ -814,7 +820,7 @@ export default function GovernanceAndModals(props: any) {
   // ============================================================================
   const renderActiveGovernanceView = () => {
     // --------------------------------------------------------------------------
-    // 1. ABA: FÉRIAS & LICENÇAS (MATRIZ ANUAL MÊS x MÉDICO + BLOQUEIO + 2 ETAPAS)
+    // 1. ABA: FÉRIAS & LICENÇAS
     // --------------------------------------------------------------------------
     if (currentView === 'vacations') {
       const yearStr = String(matrixYear);
@@ -879,7 +885,7 @@ export default function GovernanceAndModals(props: any) {
                     1. Mapa Matriz Anual de Férias & Licenças ({matrixYear}) — Controle de Bloqueio de Meses
                   </h3>
                   <p className="text-[11px] text-slate-500">
-                    Clique no cadeado de qualquer mês para <strong>Bloquear / Desbloquear</strong> novas solicitações de férias naquele mês. As células explicitam se o afastamento é <strong>FÉRIAS</strong> ou <strong>LICENÇA</strong>.
+                    Clique no cadeado de qualquer mês para <strong>Bloquear / Desbloquear</strong> novas solicitações de férias naquele mês.
                   </p>
                 </div>
 
@@ -1061,7 +1067,9 @@ export default function GovernanceAndModals(props: any) {
             <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
               {isAdmin && (
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">Médico *</label>
+                  <label className="block font-bold text-slate-700 mb-1">
+                    Médico (A-Z) *
+                  </label>
                   <select
                     value={vacForm.doctorId}
                     onChange={e =>
@@ -1218,7 +1226,7 @@ export default function GovernanceAndModals(props: any) {
                             onClick={() => handleInitialApproveVacation(v.id)}
                             className="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-xl font-bold flex items-center gap-1 shadow-sm"
                           >
-                            <CheckCircle size={14} /> 1. Aprovar Inicialmente (Abrir Substituições)
+                            <CheckCircle size={14} /> 1. Aprovar Inicialmente
                           </button>
                         )}
 
@@ -1265,11 +1273,9 @@ export default function GovernanceAndModals(props: any) {
                   </div>
 
                   <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
-                    <div className="flex items-center justify-between">
-                      <span className="font-extrabold text-slate-800 uppercase text-[10px]">
-                        🤝 Plano de Substituições / Cobertura dos Plantões no Período ({subsList.length})
-                      </span>
-                    </div>
+                    <span className="font-extrabold text-slate-800 uppercase text-[10px] block">
+                      🤝 Plano de Substituições / Cobertura dos Plantões no Período ({subsList.length})
+                    </span>
 
                     {subsList.length === 0 ? (
                       <p className="text-slate-400 italic text-[11px]">
@@ -1385,7 +1391,7 @@ export default function GovernanceAndModals(props: any) {
     }
 
     // --------------------------------------------------------------------------
-    // 2. ABA: CURSOS & CERTIFICAÇÕES (DESTAQUE POR CURSO E ABAS VENCIDOS / EM DIA)
+    // 2. ABA: CURSOS & CERTIFICAÇÕES
     // --------------------------------------------------------------------------
     if (currentView === 'courses') {
       const baseVisibleCourses = isAdmin
@@ -1476,7 +1482,7 @@ export default function GovernanceAndModals(props: any) {
               >
                 <div className="sm:col-span-2">
                   <label className="block font-bold mb-1">
-                    Novo Tipo de Curso (Ex: ACLS, ATLS, PALS, POCUS, Via Aérea) *
+                    Novo Tipo de Curso *
                   </label>
                   <input
                     type="text"
@@ -1531,7 +1537,7 @@ export default function GovernanceAndModals(props: any) {
             <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 items-end">
               {isAdmin && (
                 <div>
-                  <label className="block font-bold mb-1">Médico *</label>
+                  <label className="block font-bold mb-1">Médico (A-Z) *</label>
                   <select
                     value={newCertForm.doctorId}
                     onChange={e =>
@@ -1865,10 +1871,13 @@ export default function GovernanceAndModals(props: any) {
     }
 
     // --------------------------------------------------------------------------
-    // 3. ABA UNIFICADA: GESTÃO À VISTA, GOVERNANÇA & COMUNICADOS
-    //    (FRASE MOTIVACIONAL, NPS, INDICADORES ASSISTENCIAIS E MURAL COM CIÊNCIA)
+    // 3. ABA UNIFICADA: GESTÃO À VISTA, GOVERNANÇA & COMUNICADOS (+ SUGESTÕES DOS MÉDICOS)
     // --------------------------------------------------------------------------
     if (currentView === 'announcements') {
+      const doctorSuggestionsList: any[] = Array.isArray(config?.doctorSuggestions)
+        ? config.doctorSuggestions
+        : [];
+
       const handleUpdateQuoteOrNps = (field: 'motivationalQuote' | 'unitNpsScore', val: any) => {
         if (!isAdmin) return;
         safeSetConfig((prev: any) => ({
@@ -1966,9 +1975,16 @@ export default function GovernanceAndModals(props: any) {
         safeRecordAction(`${myName} registou ciência no comunicado #${annId}`);
       };
 
+      const handleDeleteSuggestion = (sugId: string) => {
+        if (!isAdmin) return;
+        safeSetConfig((prev: any) => ({
+          ...prev,
+          doctorSuggestions: doctorSuggestionsList.filter(s => s.id !== sugId)
+        }));
+      };
+
       return (
         <div className="space-y-6 text-slate-800 text-xs">
-          {/* Cabeçalho da Aba Unificada */}
           <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
             <h2 className="text-xl sm:text-2xl font-bold text-slate-900 flex items-center gap-2">
               <ClipboardList className="text-blue-600" size={24} />
@@ -1979,7 +1995,6 @@ export default function GovernanceAndModals(props: any) {
             </p>
           </div>
 
-          {/* 1. BANNER VISUAL DA UNIDADE (FRASE MOTIVACIONAL & NPS — VISÍVEL PARA GESTOR E MÉDICOS) */}
           <div className="bg-slate-900 text-white rounded-2xl p-6 shadow-md flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div className="space-y-2 max-w-3xl flex-1">
               <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-950 border border-blue-700 text-blue-300 text-[11px] font-extrabold uppercase">
@@ -2003,7 +2018,6 @@ export default function GovernanceAndModals(props: any) {
             </div>
           </div>
 
-          {/* PAINEL DE EDIÇÃO RÁPIDA DE FRASE MOTIVACIONAL E NPS (EXCLUSIVO GESTOR) */}
           {isAdmin && (
             <div className="bg-white p-5 rounded-2xl border-2 border-blue-200 shadow-sm space-y-3">
               <h3 className="text-sm font-black text-blue-950 uppercase flex items-center gap-2">
@@ -2044,7 +2058,7 @@ export default function GovernanceAndModals(props: any) {
             </div>
           )}
 
-          {/* 2. INDICADORES ASSISTENCIAIS DE GESTÃO À VISTA (VISÍVEIS PARA TODOS E EDITÁVEIS PELO GESTOR) */}
+          {/* Indicadores Assistenciais */}
           <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
             <div className="flex items-center justify-between border-b border-slate-100 pb-3">
               <div>
@@ -2052,9 +2066,6 @@ export default function GovernanceAndModals(props: any) {
                   <BarChart3 size={18} className="text-blue-600" />
                   Indicadores Assistenciais & Metas de Governança da Unidade
                 </h3>
-                <p className="text-[11px] text-slate-500">
-                  Acompanhamento transparente de metas assistenciais e operacionais para todo o corpo clínico.
-                </p>
               </div>
             </div>
 
@@ -2082,13 +2093,11 @@ export default function GovernanceAndModals(props: any) {
                               handleUpdateIndicatorItem(ind.id, 'label', e.target.value)
                             }
                             className="w-full border border-slate-300 rounded-lg px-2 py-1 bg-white font-bold text-slate-800 text-[11px]"
-                            title="Título do Indicador"
                           />
                           <button
                             type="button"
                             onClick={() => handleDeleteIndicatorItem(ind.id)}
                             className="text-slate-400 hover:text-red-600 p-1 shrink-0"
-                            title="Remover indicador"
                           >
                             <Trash2 size={13} />
                           </button>
@@ -2168,7 +2177,6 @@ export default function GovernanceAndModals(props: any) {
               })}
             </div>
 
-            {/* Adicionar novo indicador (Gestor) */}
             {isAdmin && (
               <form
                 onSubmit={handleAddIndicatorItem}
@@ -2222,7 +2230,48 @@ export default function GovernanceAndModals(props: any) {
             )}
           </div>
 
-          {/* 3. MURAL DE COMUNICADOS IMPORTANTES & DIRETRIZES DE GOVERNANÇA */}
+          {/* CAIXA DE SUGESTÕES ENVIADAS PELOS MÉDICOS (VISÍVEL PARA O GESTOR) */}
+          {isAdmin && doctorSuggestionsList.length > 0 && (
+            <div className="bg-amber-50/70 p-5 rounded-2xl border-2 border-amber-200 space-y-3">
+              <h3 className="text-sm font-black text-amber-950 uppercase flex items-center gap-2">
+                <Lightbulb size={18} className="text-amber-600" />
+                Sugestões Recebidas do Corpo Clínico ({doctorSuggestionsList.length})
+              </h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {doctorSuggestionsList.map((sug: any) => (
+                  <div
+                    key={sug.id}
+                    className="bg-white p-4 rounded-xl border border-amber-200 shadow-2xs flex items-start justify-between gap-2"
+                  >
+                    <div className="space-y-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <strong className="text-slate-900 font-black">
+                          {sug.title || 'Sugestão'}
+                        </strong>
+                        <span className="px-2 py-0.5 rounded bg-blue-50 text-blue-800 font-bold text-[10px]">
+                          {sug.doctorName}
+                        </span>
+                        <span className="text-[10px] text-slate-400">
+                          {sug.timestamp || formatBrDate(sug.date)}
+                        </span>
+                      </div>
+                      <p className="text-slate-700">{sug.content}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteSuggestion(sug.id)}
+                      className="text-slate-400 hover:text-red-600 p-1"
+                      title="Arquivar / Excluir sugestão"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Mural de Comunicados */}
           <div className="space-y-4">
             {isAdmin && (
               <form
@@ -2264,7 +2313,7 @@ export default function GovernanceAndModals(props: any) {
                 <textarea
                   rows={3}
                   required
-                  placeholder="Escreva aqui o conteúdo completo do comunicado ou diretriz para conhecimento e confirmação de leitura dos plantonistas..."
+                  placeholder="Escreva aqui o conteúdo completo do comunicado..."
                   value={annForm.content}
                   onChange={e => setAnnForm({ ...annForm, content: e.target.value })}
                   className="w-full border border-slate-300 rounded-xl px-3.5 py-2"
@@ -2353,7 +2402,6 @@ export default function GovernanceAndModals(props: any) {
                             type="button"
                             onClick={() => handleDeleteAnnouncement(ann.id)}
                             className="p-2 rounded-xl bg-red-50 hover:bg-red-100 text-red-600"
-                            title="Excluir comunicado"
                           >
                             <Trash2 size={14} />
                           </button>
@@ -2384,90 +2432,337 @@ export default function GovernanceAndModals(props: any) {
 
     // --------------------------------------------------------------------------
     // 4. ABA: OCORRÊNCIAS GERAIS DA UNIDADE
+    // (CATEGORIAS: CORPO CLÍNICO -> SELECIONA MÉDICO E GRAVA NA FICHA DELE |
+    //              FLUXO / ASSISTÊNCIA -> CAMPO ABERTO | OUTROS -> CAMPO ABERTO)
     // --------------------------------------------------------------------------
     if (currentView === 'occurrences') {
       const handleAddOccurrence = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!occForm.description.trim()) return;
-        const created = {
+        if (!occForm.description.trim()) {
+          alert('Descreva a ocorrência.');
+          return;
+        }
+
+        const isClinicalStaff = occForm.categoryGroup === 'Corpo Clínico';
+        const chosenDoc = isClinicalStaff
+          ? resolveDoctor(occForm.targetDoctorId)
+          : null;
+
+        const formattedCategoryLabel = isClinicalStaff
+          ? `Corpo Clínico — ${chosenDoc?.name || 'Médico'}`
+          : `${occForm.categoryGroup}${
+              occForm.openCategoryDetail.trim()
+                ? ` — ${occForm.openCategoryDetail.trim()}`
+                : ''
+            }`;
+
+        const createdOcc = {
           id: Date.now(),
           date: occForm.date,
           severity: occForm.severity,
-          category: occForm.category,
+          categoryGroup: occForm.categoryGroup,
+          category: formattedCategoryLabel,
+          targetDoctorId: isClinicalStaff ? Number(occForm.targetDoctorId) : null,
+          targetDoctorName: isClinicalStaff ? chosenDoc?.name || '' : '',
+          openDetail: occForm.openCategoryDetail.trim(),
           description: occForm.description.trim(),
           author: currentUser?.name || 'Gestão'
         };
-        safeSetOccurrences((prev: any[]) => [created, ...(Array.isArray(prev) ? prev : [])]);
-        setOccForm({ ...occForm, description: '' });
-        safeRecordAction(`Nova ocorrência geral registada (${created.category})`);
+
+        // 1. Grava na lista geral de ocorrências
+        safeSetOccurrences((prev: any[]) => [
+          createdOcc,
+          ...(Array.isArray(prev) ? prev : [])
+        ]);
+
+        // 2. Se for relacionada a um médico específico ("Corpo Clínico"), grava automaticamente na ficha individual dele!
+        if (isClinicalStaff && chosenDoc) {
+          const individualEntry = {
+            id: `ind_occ_${createdOcc.id}`,
+            linkedGeneralOccurrenceId: createdOcc.id,
+            date: occForm.date,
+            severity: occForm.severity,
+            title: occForm.openCategoryDetail.trim() || occForm.severity,
+            description: occForm.description.trim(),
+            registeredBy: currentUser?.name || 'Gestor'
+          };
+
+          safeSetDoctors((prev: any[]) =>
+            (Array.isArray(prev) ? prev : []).map((d: any) => {
+              if (Number(d?.id) !== Number(chosenDoc.id)) return d;
+              const currInd = Array.isArray(d.individualOccurrences)
+                ? d.individualOccurrences
+                : [];
+              return {
+                ...d,
+                individualOccurrences: [individualEntry, ...currInd]
+              };
+            })
+          );
+        }
+
+        setOccForm({
+          ...occForm,
+          openCategoryDetail: '',
+          description: ''
+        });
+
+        safeRecordAction(
+          isClinicalStaff
+            ? `Ocorrência registada para ${chosenDoc?.name} (vinculada automaticamente à ficha individual no Corpo Clínico)`
+            : `Nova ocorrência registada em ${formattedCategoryLabel}`
+        );
+      };
+
+      const handleDeleteOccurrence = (occItem: any) => {
+        if (!isAdmin) return;
+        safeSetOccurrences((prev: any[]) =>
+          (Array.isArray(prev) ? prev : []).filter((o: any) => o.id !== occItem.id)
+        );
+        if (occItem.targetDoctorId) {
+          safeSetDoctors((prev: any[]) =>
+            (Array.isArray(prev) ? prev : []).map((d: any) => {
+              if (Number(d?.id) !== Number(occItem.targetDoctorId)) return d;
+              return {
+                ...d,
+                individualOccurrences: (Array.isArray(d.individualOccurrences)
+                  ? d.individualOccurrences
+                  : []
+                ).filter(
+                  (ind: any) =>
+                    ind.linkedGeneralOccurrenceId !== occItem.id &&
+                    ind.id !== `ind_occ_${occItem.id}`
+                )
+              };
+            })
+          );
+        }
       };
 
       return (
         <div className="space-y-6 text-slate-800 text-xs">
           <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-            <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+            <h2 className="text-xl sm:text-2xl font-bold text-slate-900 flex items-center gap-2">
               <ShieldAlert className="text-red-600" size={24} />
-              Registo Geral de Ocorrências da Unidade
+              Registo de Ocorrências da Unidade (Corpo Clínico, Fluxo/Assistência & Outros)
             </h2>
+            <p className="text-xs text-slate-500 mt-1">
+              Ocorrências registadas na categoria <strong>Corpo Clínico</strong> são vinculadas automaticamente à ficha individual do médico selecionado (constando no Dossiê Individual em PDF e na Planilha da Equipa).
+            </p>
           </div>
 
           <form
             onSubmit={handleAddOccurrence}
-            className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3"
+            className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4"
           >
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <input
-                type="date"
-                value={occForm.date}
-                onChange={e => setOccForm({ ...occForm, date: e.target.value })}
-                className="border rounded-xl px-3 py-2 font-bold"
-              />
-              <select
-                value={occForm.severity}
-                onChange={e => setOccForm({ ...occForm, severity: e.target.value })}
-                className="border rounded-xl px-3 py-2 bg-white font-bold"
-              >
-                <option value="Leve">Severidade Leve</option>
-                <option value="Moderada">Severidade Moderada</option>
-                <option value="Crítica">Severidade Crítica</option>
-              </select>
-              <input
-                type="text"
-                placeholder="Categoria (ex: Assistencial / Passagem)"
-                value={occForm.category}
-                onChange={e => setOccForm({ ...occForm, category: e.target.value })}
-                className="border rounded-xl px-3 py-2 font-bold"
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">
+                  Data da Ocorrência *
+                </label>
+                <input
+                  type="date"
+                  value={occForm.date}
+                  onChange={e => setOccForm({ ...occForm, date: e.target.value })}
+                  className="w-full border border-slate-300 rounded-xl px-3 py-2 font-bold"
+                />
+              </div>
+
+              <div>
+                <label className="block font-bold text-slate-700 mb-1">
+                  Classificação / Severidade *
+                </label>
+                <select
+                  value={occForm.severity}
+                  onChange={e => setOccForm({ ...occForm, severity: e.target.value })}
+                  className="w-full border border-slate-300 rounded-xl px-3 py-2 bg-white font-bold"
+                >
+                  <option value="Apontamento Operacional">
+                    Apontamento Operacional
+                  </option>
+                  <option value="Elogio / Destaque Assistencial">
+                    Elogio / Destaque Assistencial
+                  </option>
+                  <option value="Atraso / Falta / Alinhamento">
+                    Atraso / Falta / Alinhamento
+                  </option>
+                  <option value="Advertência / Notificação Crítica">
+                    Advertência / Notificação Crítica
+                  </option>
+                </select>
+              </div>
+
+              <div>
+                <label className="block font-extrabold text-blue-900 mb-1">
+                  Categoria da Ocorrência *
+                </label>
+                <select
+                  value={occForm.categoryGroup}
+                  onChange={e =>
+                    setOccForm({
+                      ...occForm,
+                      categoryGroup: e.target.value as
+                        | 'Corpo Clínico'
+                        | 'Fluxo / Assistência'
+                        | 'Outros'
+                    })
+                  }
+                  className="w-full border-2 border-blue-400 rounded-xl px-3 py-2 bg-blue-50/50 font-black text-blue-950"
+                >
+                  <option value="Corpo Clínico">
+                    👨‍⚕️ Corpo Clínico (Selecionar Médico)
+                  </option>
+                  <option value="Fluxo / Assistência">
+                    🏥 Fluxo / Assistência (Campo Aberto)
+                  </option>
+                  <option value="Outros">📋 Outros (Campo Aberto)</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Campo Dinâmico conforme a Categoria Escolhida */}
+            {occForm.categoryGroup === 'Corpo Clínico' ? (
+              <div className="p-4 rounded-2xl bg-indigo-50/60 border border-indigo-200 grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block font-extrabold text-indigo-950 mb-1">
+                    Selecione o Plantonista do Corpo Clínico (A-Z) *
+                  </label>
+                  <select
+                    value={occForm.targetDoctorId}
+                    onChange={e =>
+                      setOccForm({
+                        ...occForm,
+                        targetDoctorId: Number(e.target.value)
+                      })
+                    }
+                    className="w-full border border-indigo-300 rounded-xl px-3 py-2 bg-white font-black text-slate-900"
+                  >
+                    {safeActiveDoctors.map((d: any) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name} ({d.crm})
+                      </option>
+                    ))}
+                  </select>
+                  <span className="block text-[10px] text-indigo-700 font-bold mt-1">
+                    ✓ Esta ocorrência ficará registada automaticamente na ficha individual deste médico no Corpo Clínico.
+                  </span>
+                </div>
+
+                <div>
+                  <label className="block font-bold text-indigo-950 mb-1">
+                    Título Resumido (Opcional)
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="Ex: Alinhamento de passagem de plantão"
+                    value={occForm.openCategoryDetail}
+                    onChange={e =>
+                      setOccForm({ ...occForm, openCategoryDetail: e.target.value })
+                    }
+                    className="w-full border border-indigo-300 rounded-xl px-3 py-2 bg-white font-semibold"
+                  />
+                </div>
+              </div>
+            ) : (
+              <div>
+                <label className="block font-extrabold text-slate-700 mb-1">
+                  {occForm.categoryGroup === 'Fluxo / Assistência'
+                    ? 'Especifique o Fluxo ou Setor Assistencial (Campo Aberto) *'
+                    : 'Especifique o Assunto / Setor em Outros (Campo Aberto) *'}
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder={
+                    occForm.categoryGroup === 'Fluxo / Assistência'
+                      ? 'Ex: Fluxo de regulação / Sala Vermelha / ECG / Laboratório...'
+                      : 'Descreva o assunto ou área relacionada...'
+                  }
+                  value={occForm.openCategoryDetail}
+                  onChange={e =>
+                    setOccForm({ ...occForm, openCategoryDetail: e.target.value })
+                  }
+                  className="w-full border border-slate-300 rounded-xl px-3.5 py-2 font-bold"
+                />
+              </div>
+            )}
+
+            <div>
+              <label className="block font-bold text-slate-700 mb-1">
+                Descrição Detalhada da Ocorrência *
+              </label>
+              <textarea
+                rows={3}
+                required
+                placeholder="Descreva os detalhes da ocorrência..."
+                value={occForm.description}
+                onChange={e =>
+                  setOccForm({ ...occForm, description: e.target.value })
+                }
+                className="w-full border border-slate-300 rounded-xl px-3.5 py-2"
               />
             </div>
-            <textarea
-              rows={2}
-              placeholder="Descreva a ocorrência..."
-              value={occForm.description}
-              onChange={e => setOccForm({ ...occForm, description: e.target.value })}
-              className="w-full border rounded-xl px-3 py-2"
-            />
-            <button
-              type="submit"
-              className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2 rounded-xl font-bold"
-            >
-              Registar Ocorrência
-            </button>
+
+            <div className="flex justify-end">
+              <button
+                type="submit"
+                className="bg-slate-900 hover:bg-slate-800 text-white px-5 py-2.5 rounded-xl font-bold shadow-sm"
+              >
+                + Registar Ocorrência
+              </button>
+            </div>
           </form>
 
           <div className="space-y-2.5">
-            {safeOccurrences.map((oc: any) => (
-              <div
-                key={oc.id}
-                className="bg-white p-4 rounded-2xl border border-slate-200 flex items-start justify-between gap-3"
-              >
-                <div>
-                  <span className="font-black text-slate-900">
-                    {formatBrDate(oc.date)} — {oc.category} ({oc.severity})
-                  </span>
-                  <p className="text-slate-600 mt-1">{oc.description}</p>
-                </div>
+            {safeOccurrences.length === 0 ? (
+              <div className="bg-white p-8 rounded-2xl border border-slate-200 text-center text-slate-400 italic">
+                Nenhuma ocorrência registada no momento.
               </div>
-            ))}
+            ) : (
+              safeOccurrences.map((oc: any) => (
+                <div
+                  key={oc.id}
+                  className="bg-white p-4 rounded-2xl border border-slate-200 flex items-start justify-between gap-3 shadow-2xs"
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="px-2.5 py-0.5 rounded bg-slate-900 text-white font-black text-[10px]">
+                        {formatBrDate(oc.date)}
+                      </span>
+                      <span
+                        className={`px-2.5 py-0.5 rounded font-black text-[10px] ${
+                          oc.categoryGroup === 'Corpo Clínico'
+                            ? 'bg-indigo-100 text-indigo-900'
+                            : 'bg-blue-100 text-blue-900'
+                        }`}
+                      >
+                        {oc.category}
+                      </span>
+                      <span className="px-2 py-0.5 rounded bg-rose-50 text-rose-800 border border-rose-200 font-bold text-[10px]">
+                        {oc.severity}
+                      </span>
+                      {oc.targetDoctorId && (
+                        <span className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 font-bold text-[10px]">
+                          ✓ Vinculado à Ficha do Médico
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-slate-700 leading-relaxed">{oc.description}</p>
+                  </div>
+
+                  {isAdmin && (
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteOccurrence(oc)}
+                      className="text-slate-400 hover:text-red-600 p-1 shrink-0"
+                      title="Excluir ocorrência"
+                    >
+                      <Trash2 size={15} />
+                    </button>
+                  )}
+                </div>
+              ))
+            )}
           </div>
         </div>
       );
@@ -2610,10 +2905,7 @@ export default function GovernanceAndModals(props: any) {
     <>
       {renderActiveGovernanceView()}
 
-      {/* ==========================================================================
-          MODAL DE EDIÇÃO / CADASTRO COMPLETO DA FICHA INDIVIDUAL DO MÉDICO
-          (DADOS CADASTRAIS + HISTÓRICO DE TRABALHO + OCORRÊNCIAS INDIVIDUAIS)
-         ========================================================================== */}
+      {/* MODAL DE EDIÇÃO / CADASTRO COMPLETO DA FICHA INDIVIDUAL DO MÉDICO */}
       {isDoctorModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
           <div className="bg-white w-full max-w-4xl rounded-3xl shadow-2xl border border-slate-200 overflow-hidden my-8 text-xs text-slate-800">
@@ -2625,7 +2917,7 @@ export default function GovernanceAndModals(props: any) {
                     : 'Cadastrar Novo Médico no Corpo Clínico'}
                 </h3>
                 <p className="text-[11px] text-slate-400">
-                  Dados pessoais, PJ, especialidade, Nível (1 a 4), histórico profissional e ocorrências individuais.
+                  Dados pessoais, PJ, especialidade, Nível, histórico profissional e ocorrências individuais.
                 </p>
               </div>
               <button
@@ -2641,7 +2933,6 @@ export default function GovernanceAndModals(props: any) {
               onSubmit={handleSaveDoctorModal}
               className="p-6 space-y-5 max-h-[82vh] overflow-y-auto"
             >
-              {/* Dados Pessoais e Registo Profissional */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div className="sm:col-span-2">
                   <label className="block font-bold mb-1">Nome Completo *</label>
@@ -2717,7 +3008,6 @@ export default function GovernanceAndModals(props: any) {
                 </div>
               </div>
 
-              {/* Especialidade e Nível de Senioridade */}
               <div className="p-4 rounded-2xl bg-blue-50/60 border border-blue-200 grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block font-extrabold text-indigo-950 mb-1">
@@ -2752,10 +3042,11 @@ export default function GovernanceAndModals(props: any) {
                     }
                     className="w-full border-2 border-blue-400 rounded-xl px-3 py-2 bg-white font-black text-blue-950"
                   >
-                    <option value={1}>Nível 1</option>
-                    <option value={2}>Nível 2</option>
-                    <option value={3}>Nível 3</option>
-                    <option value={4}>Nível 4</option>
+                    {[1, 2, 3, 4, 5, 6].map(n => (
+                      <option key={n} value={n}>
+                        Nível {n}
+                      </option>
+                    ))}
                   </select>
                 </div>
 
@@ -2776,7 +3067,6 @@ export default function GovernanceAndModals(props: any) {
                 </div>
               </div>
 
-              {/* E-mail e Dados PJ */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                 <div>
                   <label className="block font-bold mb-1">E-mail</label>
@@ -2813,7 +3103,7 @@ export default function GovernanceAndModals(props: any) {
                 </div>
               </div>
 
-              {/* BLOCO NO MODAL: HISTÓRICO DE TRABALHO DO PLANTONISTA */}
+              {/* Histórico de Trabalho */}
               <div className="p-4 rounded-2xl bg-indigo-50/50 border border-indigo-200 space-y-3">
                 <strong className="text-indigo-950 uppercase flex items-center gap-1.5">
                   <History size={15} className="text-indigo-600" />
@@ -2911,7 +3201,7 @@ export default function GovernanceAndModals(props: any) {
                 </div>
               </div>
 
-              {/* BLOCO NO MODAL: OCORRÊNCIAS INDIVIDUAIS DO PLANTONISTA */}
+              {/* Ocorrências Individuais */}
               <div className="p-4 rounded-2xl bg-rose-50/50 border border-rose-200 space-y-3">
                 <strong className="text-rose-950 uppercase flex items-center gap-1.5">
                   <ShieldAlert size={15} className="text-rose-600" />
@@ -3008,12 +3298,12 @@ export default function GovernanceAndModals(props: any) {
                 </div>
               </div>
 
-              {/* Credenciais de Login e Permissão de Gestão */}
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2 border-t border-slate-100">
                 <div>
                   <label className="block font-bold mb-1">Utilizador de Login</label>
                   <input
                     type="text"
+                    autoCapitalize="none"
                     value={docModalForm.username}
                     onChange={e =>
                       setDocModalForm({ ...docModalForm, username: e.target.value })
