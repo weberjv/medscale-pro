@@ -3,7 +3,7 @@
 import React, { useState } from 'react';
 import {
   Shield, Lock, User, UserPlus, CheckCircle, AlertTriangle,
-  KeyRound, ArrowLeft, Stethoscope, Building2, HelpCircle
+  KeyRound, ArrowLeft, HelpCircle
 } from 'lucide-react';
 
 export default function AuthScreen(props: any) {
@@ -58,14 +58,16 @@ export default function AuthScreen(props: any) {
   });
 
   // ============================================================================
-  // 1. LOGIN SEM DISCRIMINAR MAIÚSCULAS OU MINÚSCULAS (CASE-INSENSITIVE)
+  // 1. LOGIN: USERNAME CASE-INSENSITIVE | SENHA ESTRITAMENTE CASE-SENSITIVE
   // ============================================================================
   const handleLoginSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
 
+    // Username ignora maiúsculas/minúsculas
     const normalizedUser = String(usernameInput || '').trim().toLowerCase();
+    // Senha mantém exatamente maiúsculas e minúsculas digitadas
     const rawPass = String(passwordInput || '').trim();
 
     if (!normalizedUser || !rawPass) {
@@ -73,14 +75,15 @@ export default function AuthScreen(props: any) {
       return;
     }
 
-    // 1. Verifica Login Mestre do Gestor (Case-Insensitive para o nome de utilizador)
+    // 1. Verifica Login Mestre do Gestor (Username case-insensitive | Senha case-sensitive)
     const masterPassword = String(config?.masterAdminPassword || 'admin123').trim();
     const validAdminUsernames = ['gestor', 'admin', 'coordenador', 'coordenacao', 'master'];
 
-    if (
-      validAdminUsernames.includes(normalizedUser) &&
-      (rawPass === masterPassword || rawPass.toLowerCase() === masterPassword.toLowerCase())
-    ) {
+    if (validAdminUsernames.includes(normalizedUser)) {
+      if (rawPass !== masterPassword) {
+        setErrorMsg('Senha incorreta (atenção às letras maiúsculas e minúsculas).');
+        return;
+      }
       if (typeof onLoginSuccess === 'function') {
         onLoginSuccess({
           id: 999999,
@@ -95,7 +98,7 @@ export default function AuthScreen(props: any) {
       return;
     }
 
-    // 2. Verifica Login de Médico (Compara username, CRM, e-mail ou nome sem diferenciar maiúsculas/minúsculas)
+    // 2. Verifica Login de Médico (Username/CRM/E-mail case-insensitive)
     const matchedDoctor = safeDoctors.find((d: any) => {
       const dUser = String(d?.username || '').trim().toLowerCase();
       const dCrm = String(d?.crm || '').trim().toLowerCase();
@@ -114,14 +117,17 @@ export default function AuthScreen(props: any) {
 
     if (!matchedDoctor) {
       setErrorMsg(
-        'Utilizador não encontrado. Verifique o seu login/CRM (não diferencia maiúsculas de minúsculas) ou solicite o seu cadastro.'
+        'Utilizador não encontrado. Verifique o seu login ou solicite o seu cadastro na aba ao lado.'
       );
       return;
     }
 
+    // Senha do médico estritamente case-sensitive
     const docPassword = String(matchedDoctor.password || '123').trim();
-    if (rawPass !== docPassword && rawPass.toLowerCase() !== docPassword.toLowerCase()) {
-      setErrorMsg('Senha incorreta. Caso não se recorde, clique em "Esqueci minha senha".');
+    if (rawPass !== docPassword) {
+      setErrorMsg(
+        'Senha incorreta (a senha diferencia letras maiúsculas e minúsculas). Caso não se recorde, clique em "Esqueci minha senha".'
+      );
       return;
     }
 
@@ -190,7 +196,6 @@ export default function AuthScreen(props: any) {
       return;
     }
 
-    // Validação extra opcional se o médico tiver CPF ou CRM preenchido
     if (normCheck) {
       const docCrmClean = String(targetDoc.crm || '')
         .replace(/[^a-zA-Z0-9]/g, '')
@@ -234,7 +239,7 @@ export default function AuthScreen(props: any) {
     setRecoveryConfirmPassword('');
     setMode('login');
     setSuccessMsg(
-      `Senha de ${targetDoc.name} atualizada com sucesso! Já pode iniciar sessão com a sua nova senha.`
+      `Senha de ${targetDoc.name} atualizada com sucesso! Já pode entrar com a sua nova senha.`
     );
   };
 
@@ -295,42 +300,45 @@ export default function AuthScreen(props: any) {
 
     setMode('login');
     setSuccessMsg(
-      `Cadastro enviado com sucesso! O seu utilizador de acesso é "${cleanUsername}". Assim que o gestor homologar o seu cadastro, poderá aceder ao painel.`
+      `Solicitação enviada com sucesso! O seu utilizador é "${cleanUsername}". Aguarde a homologação do gestor para aceder.`
     );
   };
 
   return (
-    <div className="min-h-screen bg-slate-950 flex flex-col justify-center items-center p-4 text-slate-800">
-      <div className="w-full max-w-md bg-white rounded-3xl shadow-2xl border border-slate-800/20 overflow-hidden">
-        {/* Cabeçalho Institucional */}
-        <div className="bg-slate-900 text-white p-6 text-center space-y-1.5">
-          <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-600/20 border border-blue-500/40 text-blue-300 text-[10px] font-extrabold uppercase tracking-wider">
-            <Building2 size={12} /> {config?.sectorUnitName || 'Emergência Adulta - HGD'}
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-900 to-blue-950 flex flex-col justify-center items-center p-4 text-slate-800">
+      <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
+        {/* Cabeçalho Visual Original */}
+        <div className="bg-slate-900 text-white p-6 text-center">
+          <div className="w-12 h-12 rounded-2xl bg-blue-600 flex items-center justify-center mx-auto mb-3 shadow-lg">
+            <Shield size={24} className="text-white" />
           </div>
-          <h1 className="text-2xl font-black tracking-tight">
+          <span className="inline-block px-2.5 py-0.5 rounded bg-blue-600/30 text-blue-300 text-[10px] font-extrabold uppercase tracking-wider mb-1">
+            {config?.sectorUnitName || 'Emergência Adulta - HGD'}
+          </span>
+          <h1 className="text-2xl font-extrabold tracking-tight">
             {config?.appName || 'MedScale Pro'}
           </h1>
-          <p className="text-xs text-slate-400">
-            Governança Clínica, Escalas Assistenciais & Gestão Financeira PJ
+          <p className="text-xs text-slate-400 mt-1">
+            Gestão de Escalas Médicas, Governança & Folha PJ
           </p>
         </div>
 
-        {/* Alternador de Abas (Entrar vs. Solicitar Cadastro) */}
+        {/* Abas Superiores */}
         {mode !== 'forgot_password' && (
-          <div className="flex border-b border-slate-200 bg-slate-50 text-xs font-extrabold">
+          <div className="flex border-b border-slate-200 bg-slate-50 text-xs font-bold">
             <button
               type="button"
               onClick={() => {
                 setMode('login');
                 setErrorMsg('');
               }}
-              className={`flex-1 py-3.5 text-center transition-all ${
+              className={`flex-1 py-3 text-center transition-colors ${
                 mode === 'login'
-                  ? 'bg-white text-blue-600 border-b-2 border-blue-600'
+                  ? 'bg-white text-blue-600 border-b-2 border-blue-600 font-extrabold'
                   : 'text-slate-500 hover:text-slate-800'
               }`}
             >
-              Entrar na Conta
+              Acesso ao Sistema
             </button>
             <button
               type="button"
@@ -338,65 +346,57 @@ export default function AuthScreen(props: any) {
                 setMode('register');
                 setErrorMsg('');
               }}
-              className={`flex-1 py-3.5 text-center transition-all ${
+              className={`flex-1 py-3 text-center transition-colors ${
                 mode === 'register'
-                  ? 'bg-white text-blue-600 border-b-2 border-blue-600'
+                  ? 'bg-white text-blue-600 border-b-2 border-blue-600 font-extrabold'
                   : 'text-slate-500 hover:text-slate-800'
               }`}
             >
-              Solicitar Cadastro Médico
+              Solicitar Cadastro
             </button>
           </div>
         )}
 
         <div className="p-6 space-y-4 text-xs">
           {errorMsg && (
-            <div className="p-3.5 rounded-2xl bg-red-50 border border-red-200 text-red-800 font-bold flex items-start gap-2">
+            <div className="p-3 rounded-xl bg-red-50 border border-red-200 text-red-700 font-bold flex items-start gap-2">
               <AlertTriangle size={16} className="text-red-600 shrink-0 mt-0.5" />
               <span>{errorMsg}</span>
             </div>
           )}
 
           {successMsg && (
-            <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-900 font-bold flex items-start gap-2">
+            <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200 text-emerald-800 font-bold flex items-start gap-2">
               <CheckCircle size={16} className="text-emerald-600 shrink-0 mt-0.5" />
               <span>{successMsg}</span>
             </div>
           )}
 
-          {/* MODO 1: FORMULÁRIO DE LOGIN */}
+          {/* MODO LOGIN */}
           {mode === 'login' && (
             <form onSubmit={handleLoginSubmit} className="space-y-4">
               <div>
-                <label className="block font-extrabold text-slate-700 mb-1">
-                  Utilizador, CRM ou E-mail
+                <label className="block font-bold text-slate-700 mb-1">
+                  Utilizador ou CRM
                 </label>
                 <div className="relative">
-                  <User
-                    size={15}
-                    className="absolute left-3.5 top-3 text-slate-400"
-                  />
+                  <User size={15} className="absolute left-3 top-2.5 text-slate-400" />
                   <input
                     type="text"
                     required
                     autoCapitalize="none"
                     autoCorrect="off"
-                    placeholder="Ex: nome.sobrenome, CRM ou gestor"
+                    placeholder="Digite seu utilizador ou CRM"
                     value={usernameInput}
                     onChange={e => setUsernameInput(e.target.value)}
-                    className="w-full border border-slate-300 rounded-xl pl-10 pr-3.5 py-2.5 font-bold text-slate-900 focus:outline-none focus:border-blue-600"
+                    className="w-full border border-slate-300 rounded-xl pl-9 pr-3 py-2 font-semibold text-slate-900 focus:outline-none focus:border-blue-600"
                   />
                 </div>
-                <span className="block text-[10px] text-slate-400 mt-1">
-                  * Não diferencia letras maiúsculas de minúsculas.
-                </span>
               </div>
 
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="font-extrabold text-slate-700">
-                    Senha de Acesso
-                  </label>
+                  <label className="font-bold text-slate-700">Senha</label>
                   <button
                     type="button"
                     onClick={() => {
@@ -405,43 +405,40 @@ export default function AuthScreen(props: any) {
                       setErrorMsg('');
                       setSuccessMsg('');
                     }}
-                    className="text-[11px] font-extrabold text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1"
+                    className="text-[11px] font-bold text-blue-600 hover:underline flex items-center gap-1"
                   >
                     <HelpCircle size={12} /> Esqueci minha senha
                   </button>
                 </div>
                 <div className="relative">
-                  <Lock
-                    size={15}
-                    className="absolute left-3.5 top-3 text-slate-400"
-                  />
+                  <Lock size={15} className="absolute left-3 top-2.5 text-slate-400" />
                   <input
                     type="password"
                     required
-                    placeholder="Digite a sua senha..."
+                    placeholder="Digite sua senha"
                     value={passwordInput}
                     onChange={e => setPasswordInput(e.target.value)}
-                    className="w-full border border-slate-300 rounded-xl pl-10 pr-3.5 py-2.5 font-bold text-slate-900 focus:outline-none focus:border-blue-600"
+                    className="w-full border border-slate-300 rounded-xl pl-9 pr-3 py-2 font-semibold text-slate-900 focus:outline-none focus:border-blue-600"
                   />
                 </div>
               </div>
 
               <button
                 type="submit"
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-black text-sm shadow-md transition-all"
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-xl font-extrabold text-sm shadow-md transition-colors"
               >
-                Acessar Plataforma
+                Entrar
               </button>
             </form>
           )}
 
-          {/* MODO 2: ESQUECI MINHA SENHA (RECUPERAÇÃO E REDEFINIÇÃO IMEDIATA) */}
+          {/* MODO ESQUECI MINHA SENHA */}
           {mode === 'forgot_password' && (
-            <form onSubmit={handlePasswordResetSubmit} className="space-y-4">
-              <div className="flex items-center justify-between border-b border-slate-100 pb-2.5">
-                <h3 className="text-sm font-black text-slate-900 flex items-center gap-1.5">
+            <form onSubmit={handlePasswordResetSubmit} className="space-y-3.5">
+              <div className="flex items-center justify-between border-b border-slate-100 pb-2">
+                <h3 className="text-sm font-extrabold text-slate-900 flex items-center gap-1.5">
                   <KeyRound size={16} className="text-blue-600" />
-                  Recuperar / Redefinir Minha Senha
+                  Redefinir Senha
                 </h3>
                 <button
                   type="button"
@@ -455,22 +452,18 @@ export default function AuthScreen(props: any) {
                 </button>
               </div>
 
-              <p className="text-[11px] text-slate-500 leading-relaxed">
-                Informe o seu utilizador, nome completo, e-mail ou CRM cadastrado para redefinir a sua senha imediatamente.
-              </p>
-
               <div>
                 <label className="block font-bold text-slate-700 mb-1">
-                  Utilizador, Nome Completo, E-mail ou CRM *
+                  Utilizador, Nome ou CRM *
                 </label>
                 <input
                   type="text"
                   required
                   autoCapitalize="none"
-                  placeholder="Digite o seu login, nome ou CRM..."
+                  placeholder="Informe o seu login ou CRM"
                   value={recoveryIdentifier}
                   onChange={e => setRecoveryIdentifier(e.target.value)}
-                  className="w-full border border-slate-300 rounded-xl px-3.5 py-2 font-bold"
+                  className="w-full border border-slate-300 rounded-xl px-3 py-2 font-semibold"
                 />
               </div>
 
@@ -480,56 +473,52 @@ export default function AuthScreen(props: any) {
                 </label>
                 <input
                   type="text"
-                  placeholder="Informe o seu CRM ou CPF para validação..."
+                  placeholder="Digite CRM ou CPF para validação"
                   value={recoveryCpfOrCrm}
                   onChange={e => setRecoveryCpfOrCrm(e.target.value)}
-                  className="w-full border border-slate-300 rounded-xl px-3.5 py-2"
+                  className="w-full border border-slate-300 rounded-xl px-3 py-2"
                 />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div className="grid grid-cols-2 gap-2.5">
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">
-                    Nova Senha *
-                  </label>
+                  <label className="block font-bold text-slate-700 mb-1">Nova Senha *</label>
                   <input
                     type="password"
                     required
                     placeholder="Nova senha"
                     value={recoveryNewPassword}
                     onChange={e => setRecoveryNewPassword(e.target.value)}
-                    className="w-full border border-slate-300 rounded-xl px-3 py-2 font-bold"
+                    className="w-full border border-slate-300 rounded-xl px-3 py-2 font-semibold"
                   />
                 </div>
                 <div>
-                  <label className="block font-bold text-slate-700 mb-1">
-                    Confirmar Nova Senha *
-                  </label>
+                  <label className="block font-bold text-slate-700 mb-1">Confirmar *</label>
                   <input
                     type="password"
                     required
                     placeholder="Repita a senha"
                     value={recoveryConfirmPassword}
                     onChange={e => setRecoveryConfirmPassword(e.target.value)}
-                    className="w-full border border-slate-300 rounded-xl px-3 py-2 font-bold"
+                    className="w-full border border-slate-300 rounded-xl px-3 py-2 font-semibold"
                   />
                 </div>
               </div>
 
               <button
                 type="submit"
-                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-3 rounded-xl font-black shadow-md"
+                className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-xl font-extrabold shadow-md"
               >
-                Salvar Nova Senha e Voltar ao Login
+                Salvar Nova Senha
               </button>
             </form>
           )}
 
-          {/* MODO 3: SOLICITAR CADASTRO (NOVO MÉDICO) */}
+          {/* MODO SOLICITAR CADASTRO */}
           {mode === 'register' && (
             <form
               onSubmit={handleRegisterSubmit}
-              className="space-y-3 max-h-[68vh] overflow-y-auto pr-1"
+              className="space-y-3 max-h-[65vh] overflow-y-auto pr-1"
             >
               <div>
                 <label className="block font-bold mb-1">Nome Completo *</label>
@@ -539,7 +528,7 @@ export default function AuthScreen(props: any) {
                   placeholder="Dr(a). Nome Completo"
                   value={regForm.name}
                   onChange={e => setRegForm({ ...regForm, name: e.target.value })}
-                  className="w-full border border-slate-300 rounded-xl px-3 py-2 font-bold"
+                  className="w-full border border-slate-300 rounded-xl px-3 py-2 font-semibold"
                 />
               </div>
 
@@ -552,11 +541,11 @@ export default function AuthScreen(props: any) {
                     placeholder="Ex: CRM-SP 123456"
                     value={regForm.crm}
                     onChange={e => setRegForm({ ...regForm, crm: e.target.value })}
-                    className="w-full border border-slate-300 rounded-xl px-3 py-2 font-bold"
+                    className="w-full border border-slate-300 rounded-xl px-3 py-2 font-semibold"
                   />
                 </div>
                 <div>
-                  <label className="block font-bold mb-1">RQE (se houver)</label>
+                  <label className="block font-bold mb-1">RQE</label>
                   <input
                     type="text"
                     placeholder="Opcional"
@@ -579,28 +568,22 @@ export default function AuthScreen(props: any) {
                   />
                 </div>
                 <div>
-                  <label className="block font-bold mb-1">Data de Nascimento</label>
+                  <label className="block font-bold mb-1">Nascimento</label>
                   <input
                     type="date"
                     value={regForm.birthDate}
-                    onChange={e =>
-                      setRegForm({ ...regForm, birthDate: e.target.value })
-                    }
+                    onChange={e => setRegForm({ ...regForm, birthDate: e.target.value })}
                     className="w-full border border-slate-300 rounded-xl px-3 py-2"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="block font-bold mb-1">
-                  Especialidade de Atuação na Emergência *
-                </label>
+                <label className="block font-bold mb-1">Especialidade *</label>
                 <select
                   value={regForm.specialty}
-                  onChange={e =>
-                    setRegForm({ ...regForm, specialty: e.target.value })
-                  }
-                  className="w-full border border-slate-300 rounded-xl px-3 py-2 bg-white font-bold"
+                  onChange={e => setRegForm({ ...regForm, specialty: e.target.value })}
+                  className="w-full border border-slate-300 rounded-xl px-3 py-2 bg-white font-semibold"
                 >
                   {registeredSpecialties.map(sp => (
                     <option key={sp.id} value={sp.name}>
@@ -638,11 +621,9 @@ export default function AuthScreen(props: any) {
                   <label className="block font-bold mb-1">Razão Social PJ</label>
                   <input
                     type="text"
-                    placeholder="Nome da Empresa PJ"
+                    placeholder="Empresa Médica"
                     value={regForm.razaoSocial}
-                    onChange={e =>
-                      setRegForm({ ...regForm, razaoSocial: e.target.value })
-                    }
+                    onChange={e => setRegForm({ ...regForm, razaoSocial: e.target.value })}
                     className="w-full border border-slate-300 rounded-xl px-3 py-2"
                   />
                 </div>
@@ -660,40 +641,34 @@ export default function AuthScreen(props: any) {
 
               <div className="grid grid-cols-2 gap-2.5 pt-2 border-t border-slate-100">
                 <div>
-                  <label className="block font-bold mb-1">
-                    Utilizador para Login
-                  </label>
+                  <label className="block font-bold mb-1">Utilizador (Login)</label>
                   <input
                     type="text"
                     autoCapitalize="none"
-                    placeholder="ex: joao.silva"
+                    placeholder="ex: nome.sobrenome"
                     value={regForm.username}
-                    onChange={e =>
-                      setRegForm({ ...regForm, username: e.target.value })
-                    }
-                    className="w-full border border-slate-300 rounded-xl px-3 py-2 font-bold"
+                    onChange={e => setRegForm({ ...regForm, username: e.target.value })}
+                    className="w-full border border-slate-300 rounded-xl px-3 py-2 font-semibold"
                   />
                 </div>
                 <div>
-                  <label className="block font-bold mb-1">Criar Senha *</label>
+                  <label className="block font-bold mb-1">Senha *</label>
                   <input
                     type="password"
                     required
                     placeholder="Sua senha"
                     value={regForm.password}
-                    onChange={e =>
-                      setRegForm({ ...regForm, password: e.target.value })
-                    }
-                    className="w-full border border-slate-300 rounded-xl px-3 py-2 font-bold"
+                    onChange={e => setRegForm({ ...regForm, password: e.target.value })}
+                    className="w-full border border-slate-300 rounded-xl px-3 py-2 font-semibold"
                   />
                 </div>
               </div>
 
               <button
                 type="submit"
-                className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-xl font-black shadow-md flex items-center justify-center gap-1.5"
+                className="w-full bg-blue-600 hover:bg-blue-700 text-white py-2.5 rounded-xl font-extrabold shadow-md flex items-center justify-center gap-1.5"
               >
-                <UserPlus size={16} /> Enviar Cadastro para Aprovação
+                <UserPlus size={15} /> Enviar Cadastro
               </button>
             </form>
           )}

@@ -2,9 +2,10 @@
 
 import React, { useState, useMemo } from 'react';
 import {
-  DollarSign, Download, ShieldCheck, RotateCcw, Clock,
+  DollarSign, ShieldCheck, RotateCcw, Clock,
   Layers, Table, Printer, CheckCircle, CheckSquare, Plus,
-  Trash2, Filter, CalendarRange, Search, FileSpreadsheet
+  Trash2, CalendarRange, Search, FileSpreadsheet,
+  ChevronLeft, ChevronRight, ArrowLeftRight, MessageSquare, Receipt
 } from 'lucide-react';
 import { FUNCTION_COLOR_PALETTE } from './StaffAndFinanceViews';
 
@@ -18,9 +19,10 @@ export default function PayrollAndAuditView(props: any) {
     activeDoctors = [],
     shifts = [],
     swaps = [],
-    competenceMonth = '2026-10',
+    setSwaps,
+    competenceMonth = '2026-11',
     setCompetenceMonth,
-    competenceWindow = { startStr: '2026-09-26', endStr: '2026-10-25' },
+    competenceWindow = { startStr: '2026-10-26', endStr: '2026-11-25' },
     doctorConferenceData = {},
     setDoctorConferenceData,
     dynamicCategories = [],
@@ -31,6 +33,9 @@ export default function PayrollAndAuditView(props: any) {
   const safeSetConfig = (updater: any) => {
     if (typeof setConfig === 'function') setConfig(updater);
   };
+  const safeSetSwaps = (updater: any) => {
+    if (typeof setSwaps === 'function') setSwaps(updater);
+  };
   const safeSetCompetenceMonth = (val: string) => {
     if (typeof setCompetenceMonth === 'function') setCompetenceMonth(val);
   };
@@ -39,6 +44,15 @@ export default function PayrollAndAuditView(props: any) {
   };
   const safeRecordAction = (msg: string) => {
     if (typeof recordAction === 'function') recordAction(msg);
+  };
+
+  // Navegação de meses (Anterior / Próximo) mantendo competência 26 a 25
+  const shiftCompetenceMonth = (deltaMonths: number) => {
+    const [yr, mo] = String(competenceMonth || '2026-11').split('-').map(Number);
+    if (isNaN(yr) || isNaN(mo)) return;
+    const d = new Date(yr, mo - 1 + deltaMonths, 1, 12, 0, 0);
+    const nextYm = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    safeSetCompetenceMonth(nextYm);
   };
 
   // Listas blindadas e ordenadas alfabeticamente (A-Z)
@@ -119,19 +133,17 @@ export default function PayrollAndAuditView(props: any) {
   // ============================================================================
   const [periodMode, setPeriodMode] = useState<'standard' | 'custom'>('standard');
   const [customStartDate, setCustomStartDate] = useState<string>(
-    competenceWindow?.startStr || '2026-09-26'
+    competenceWindow?.startStr || '2026-10-26'
   );
   const [customEndDate, setCustomEndDate] = useState<string>(
-    competenceWindow?.endStr || '2026-10-25'
+    competenceWindow?.endStr || '2026-11-25'
   );
 
-  // Filtros de visualização e auditoria
   const [filterFunction, setFilterFunction] = useState<string>('Todas');
   const [filterLevel, setFilterLevel] = useState<string>('Todos');
   const [filterSpecialty, setFilterSpecialty] = useState<string>('Todas');
   const [searchDoctorTerm, setSearchDoctorTerm] = useState<string>('');
 
-  // Estados de Ajustes Manuais e Expansão de Dias
   const [adjDraftByEntity, setAdjDraftByEntity] = useState<
     Record<string, { type: 'add' | 'subtract'; amount: string; description: string }>
   >({});
@@ -140,7 +152,6 @@ export default function PayrollAndAuditView(props: any) {
   >({});
   const [doctorDivergenceNoteInput, setDoctorDivergenceNoteInput] = useState<string>('');
 
-  // Janela efetiva de análise (26 a 25 ou Seleção Livre)
   const effectiveWindow = useMemo(() => {
     if (periodMode === 'custom' && customStartDate && customEndDate) {
       return {
@@ -150,9 +161,9 @@ export default function PayrollAndAuditView(props: any) {
       };
     }
     return {
-      startStr: competenceWindow?.startStr || '2026-09-26',
-      endStr: competenceWindow?.endStr || '2026-10-25',
-      label: `Competência Padrão 26 a 25 (${competenceMonth})`
+      startStr: competenceWindow?.startStr || '2026-10-26',
+      endStr: competenceWindow?.endStr || '2026-11-25',
+      label: `Competência 26 a 25 (${competenceMonth})`
     };
   }, [periodMode, customStartDate, customEndDate, competenceWindow, competenceMonth]);
 
@@ -164,6 +175,13 @@ export default function PayrollAndAuditView(props: any) {
     const parts = String(dateStr).split('-');
     if (parts.length !== 3) return dateStr;
     return `${parts[2]}/${parts[1]}/${parts[0]}`;
+  };
+
+  const formatCurrencyBR = (val: number) => {
+    return Number(val || 0).toLocaleString('pt-BR', {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    });
   };
 
   const getWeekdayShortLabel = (dateStr?: string) => {
@@ -272,7 +290,7 @@ export default function PayrollAndAuditView(props: any) {
   };
 
   // ============================================================================
-  // MOTOR DE PROCESSAMENTO DA FOLHA PJ & AUDITORIA DE CARGA HORÁRIA (3 REGIMES)
+  // MOTOR DE PROCESSAMENTO DA FOLHA PJ & AUDITORIA DE CARGA HORÁRIA + TROCAS
   // ============================================================================
   const windowShifts = useMemo(() => {
     return safeShifts.filter((s: any) => {
@@ -310,10 +328,7 @@ export default function PayrollAndAuditView(props: any) {
       (s: any) => s?.substituteBillingMode !== 'direct_settlement'
     );
 
-    // 1. Auditoria Analítica de Carga Horária separando claramente:
-    //    - Fixo (Cota Mensal)
-    //    - Extra / Por Carga Horária (CH)
-    //    - Escala Periódica (Inclusa no Pacote / Cota Fixa — R$ 0 adicional)
+    // 1. Auditoria Analítica de Carga Horária (Fixa, Extra CH e Inclusa no Pacote)
     const auditByFunction: Record<
       string,
       {
@@ -416,7 +431,7 @@ export default function PayrollAndAuditView(props: any) {
         };
       });
 
-    // 2. Construção automática das Funções Exercidas na Competência
+    // 2. Construção das Funções Exercidas na Competência
     const autoRoleEntries: {
       id: string;
       functionName: string;
@@ -585,6 +600,7 @@ export default function PayrollAndAuditView(props: any) {
     const evaluatedRoleEntries = activeRoleEntries.map((entry: any) => {
       const rates = getFunctionEffectiveRates(entry.functionName, docLevel);
       let lineTotal = 0;
+      let subcomponentLabel = '';
 
       if (entry.billingMode === 'monthly_no_schedule') {
         const unitVal =
@@ -594,9 +610,8 @@ export default function PayrollAndAuditView(props: any) {
             ? Number(entry.customOverrideUnitValue)
             : rates.monthlyAdminRef;
         lineTotal = Number(entry.units || 1) * unitVal;
+        subcomponentLabel = `${entry.functionName} (Cargo Mensal s/ Escala)`;
       } else if (entry.billingMode === 'fixed_quota_monthly') {
-        // Cota Fixa Mensal: o valor final na folha é o valor da cota (independe de 4 ou 5 semanas),
-        // ajustado apenas se a CH semanal da cota do médico for uma fração da CH de referência da função
         const refQuotaHours = rates.fixedQuotaRefHours || 12;
         const baseQuotaVal =
           entry.customOverrideUnitValue !== undefined &&
@@ -605,15 +620,20 @@ export default function PayrollAndAuditView(props: any) {
             ? Number(entry.customOverrideUnitValue)
             : rates.fixed12hRef * (Number(entry.hoursPerUnit || refQuotaHours) / refQuotaHours);
         lineTotal = Number(entry.units || 0) * baseQuotaVal;
+        subcomponentLabel = `${entry.functionName} (${entry.units}x Cota Fixa ${entry.hoursPerUnit}h/sem)`;
       } else if (entry.billingMode === 'periodic_included') {
-        // Escala periódica inclusa no pacote da cota fixa: contabiliza horas, mas R$ 0 adicional
         lineTotal = 0;
+        subcomponentLabel = `${entry.functionName} (Escala Periódica Inclusa no Pacote: ${
+          entry.periodicHours || 0
+        }h)`;
       } else {
-        // Por Carga Horária Total (CH / Extra): paga proporcionalmente sobre a CH de referência
         const refHr = rates.hourlyRefHours || 12;
         const wkVal = rates.extraWeekday12hRef * (Number(entry.weekdayHours || 0) / refHr);
         const fdVal = rates.extraWeekend12hRef * (Number(entry.weekendHours || 0) / refHr);
         lineTotal = wkVal + fdVal;
+        subcomponentLabel = `${entry.functionName} (Por CH: ${entry.weekdayHours || 0}h Sem + ${
+          entry.weekendHours || 0
+        }h FDS)`;
       }
 
       functionsSubtotal += lineTotal;
@@ -634,6 +654,7 @@ export default function PayrollAndAuditView(props: any) {
         ...entry,
         rates,
         lineTotal,
+        subcomponentLabel,
         fulfilledFixedShifts: fnAudit.fixedShifts,
         fulfilledFixedHours: fnAudit.fixedHours,
         fulfilledExtraHours: fnAudit.extraHours,
@@ -709,20 +730,48 @@ export default function PayrollAndAuditView(props: any) {
       };
     });
 
-    // 4. Descontos sobre Passagens de Plantão
+    // 4. Descontos e Auditoria sobre Passagens / Trocas (Titular) + Registo como Substituto
     const doctorPassagensInWindow = safeSwaps.filter((sw: any) => {
       if (sw?.status !== 'Aprovado') return false;
       if (Number(sw?.requesterId) !== Number(docObj?.id)) return false;
       const d = String(sw?.date || sw?.shiftDate || '');
       if (d < effectiveWindow.startStr || d > effectiveWindow.endStr) return false;
-      if (
-        sw?.type === 'Liberação / Dispensa Gerencial' &&
-        sw?.financialDispenseType === 'abonada'
-      ) {
-        return false;
-      }
       return true;
     });
+
+    const doctorSubstitutionsReceivedInWindow = safeSwaps
+      .filter((sw: any) => {
+        if (sw?.status !== 'Aprovado') return false;
+        const d = String(sw?.date || sw?.shiftDate || '');
+        if (d < effectiveWindow.startStr || d > effectiveWindow.endStr) return false;
+        if (Number(sw?.targetDoctorId) === Number(docObj?.id)) return true;
+        if (
+          Array.isArray(sw?.segments) &&
+          sw.segments.some((seg: any) => Number(seg?.targetDoctorId) === Number(docObj?.id))
+        ) {
+          return true;
+        }
+        return false;
+      })
+      .map((sw: any) => {
+        const reqDoc = resolveDoctorByIdLocal(sw.requesterId);
+        const hrs = getShiftHours({
+          startTime: sw.startTime || '07:00',
+          endTime: sw.endTime || '19:00'
+        });
+        return {
+          swapId: sw.id,
+          date: sw.date || sw.shiftDate || '',
+          startTime: sw.startTime || '07:00',
+          endTime: sw.endTime || '19:00',
+          hours: hrs,
+          functionName: sw.category || defaultFn,
+          type: sw.type || 'Passagem de Plantão',
+          titularName: reqDoc?.name || 'Médico Titular',
+          substituteBillingMode: sw.substituteBillingMode || 'payroll_extra',
+          managerComment: sw.managerFinancialComment || ''
+        };
+      });
 
     const swapDiscountConfigs = customDoc.swapDiscounts || {};
     let totalPassagensDiscounts = 0;
@@ -744,18 +793,24 @@ export default function PayrollAndAuditView(props: any) {
       const subShiftValue = subRates.fixed12hRef * (hrs / 12);
       const levelDiffValue = Math.max(0, fullShiftValue - subShiftValue);
 
-      const defaultMode =
+      const isAbonadaDispense =
         sw.type === 'Liberação / Dispensa Gerencial' &&
-        sw.financialDispenseType === 'desconto'
-          ? 'full'
-          : sw.titularDiscountMode || 'none';
+        sw.financialDispenseType === 'abonada';
+
+      const defaultMode = isAbonadaDispense
+        ? 'none'
+        : sw.type === 'Liberação / Dispensa Gerencial' &&
+          sw.financialDispenseType === 'desconto'
+        ? 'full'
+        : sw.titularDiscountMode || 'none';
 
       const cfg = swapDiscountConfigs[sw.id] || {
         mode: defaultMode as 'none' | 'full' | 'level_diff' | 'fraction' | 'custom',
         fractionPercent: sw.titularFractionPercent ?? 50,
         customAmount:
           sw.titularCustomDiscountAmount ??
-          (levelDiffValue > 0 ? levelDiffValue : fullShiftValue)
+          (levelDiffValue > 0 ? levelDiffValue : fullShiftValue),
+        managerComment: sw.managerFinancialComment || ''
       };
 
       let discountApplied = 0;
@@ -771,9 +826,22 @@ export default function PayrollAndAuditView(props: any) {
 
       totalPassagensDiscounts += discountApplied;
 
+      const modeDescriptionLabel =
+        cfg.mode === 'full'
+          ? 'Desconto Integral (100%)'
+          : cfg.mode === 'level_diff'
+          ? `Diferença de Nível (Nível ${docLevel} → Nível ${subLevel})`
+          : cfg.mode === 'fraction'
+          ? `Fração (${cfg.fractionPercent ?? 50}%)`
+          : cfg.mode === 'custom'
+          ? 'Valor Parcial Personalizado'
+          : isAbonadaDispense
+          ? 'Dispensa Abonada (Isento)'
+          : 'Sem Desconto (Isento)';
+
       return {
         swapId: sw.id,
-        date: sw.date,
+        date: sw.date || sw.shiftDate || '',
         startTime: sw.startTime || '07:00',
         endTime: sw.endTime || '19:00',
         hours: hrs,
@@ -783,14 +851,21 @@ export default function PayrollAndAuditView(props: any) {
           sw.type === 'Liberação / Dispensa Gerencial' && sw.dispenseMode === 'vacant'
             ? 'Dispensado s/ Substituto'
             : subDoc?.name || 'Substituto',
+        permutedShiftInfo: sw.permutedShiftInfo || '',
         titularLevel: docLevel,
         substituteLevel: subLevel,
         isLowerLevel,
         fullShiftValue,
         levelDiffValue,
         mode: cfg.mode,
+        modeDescriptionLabel,
         fractionPercent: cfg.fractionPercent ?? 50,
         customAmount: cfg.customAmount ?? 0,
+        managerComment:
+          cfg.managerComment !== undefined
+            ? cfg.managerComment
+            : sw.managerFinancialComment || '',
+        reason: sw.reason || '',
         discountApplied
       };
     });
@@ -844,6 +919,7 @@ export default function PayrollAndAuditView(props: any) {
       evaluatedAdditionals,
       additionalsSubtotal,
       evaluatedPassagensDiscounts,
+      doctorSubstitutionsReceivedInWindow,
       totalPassagensDiscounts,
       manualAdjustmentsList,
       manualAdjustmentsNet,
@@ -916,7 +992,6 @@ export default function PayrollAndAuditView(props: any) {
     effectiveWindow
   ]);
 
-  // Aplica filtros de Categoria/Função, Nível, Especialidade e Busca por Nome
   const detailedPayrollRows = useMemo(() => {
     const baseList = isAdmin
       ? allActivePayrollRows
@@ -965,8 +1040,8 @@ export default function PayrollAndAuditView(props: any) {
   );
 
   // ============================================================================
-  // GERADOR PDF: DOCUMENTO ANALÍTICO DE AUDITORIA DE CARGA HORÁRIA
-  // (COM DESTAQUE PARA: 1. FUNÇÃO FIXA, 2. FUNÇÃO EXTRA POR CH, 3. ESCALA INCLUSA NO PACOTE)
+  // GERADOR PDF: DOCUMENTO ANALÍTICO DE AUDITORIA DE CARGA HORÁRIA + EXTRATO BANCÁRIO DETALHADO
+  // (COM SUBCOMPONENTES DE FUNÇÕES, ADICIONAIS, DESCONTOS, AJUSTES + TROCAS E COMENTÁRIOS)
   // ============================================================================
   const handleDownloadAnalyticalWorkloadAuditPDF = (singleDoctorRow?: any) => {
     if (typeof window === 'undefined') return;
@@ -976,6 +1051,7 @@ export default function PayrollAndAuditView(props: any) {
       .map(row => {
         const d = row.doctor || {};
 
+        // 1. Tabela de Carga Horária Acumulada por Função
         const fnSummaryRowsHtml = allFunctionNames
           .map(fn => {
             const aud = row.auditByFunction[fn];
@@ -1001,6 +1077,7 @@ export default function PayrollAndAuditView(props: any) {
           .filter(Boolean)
           .join('');
 
+        // 2. Discriminação Cronológica de Plantões Cumpridos
         const dailyRowsHtml =
           row.dailyWorkedScheduleList.length === 0
             ? `<tr><td colspan="5" style="padding:6px;text-align:center;color:#64748b;">Nenhum plantão registado na escala neste período.</td></tr>`
@@ -1027,20 +1104,158 @@ export default function PayrollAndAuditView(props: any) {
                         ? '#1e40af'
                         : '#065f46'
                     };">
-                      ${sh.regime} ${sh.isFromSwap ? '🔄' : ''}
+                      ${sh.regime} ${sh.isFromSwap ? '🔄 (Troca/Substituição)' : ''}
                     </td>
                   </tr>
                 `
                 )
                 .join('');
 
+        // 3. Trocas, Permutas e Passagens Realizadas no Período (Titular + Substituto) com Comentários do Gestor
+        const titularSwapsRowsHtml = row.evaluatedPassagensDiscounts.map(
+          (pd: any) => `
+            <tr>
+              <td style="padding:4px 8px;border:1px solid #cbd5e1;font-weight:bold;">
+                ${formatBrDate(pd.date)} (${pd.startTime}-${pd.endTime} • ${pd.hours}h)
+              </td>
+              <td style="padding:4px 8px;border:1px solid #cbd5e1;font-weight:bold;color:#9f1239;">
+                Solicitante (Titular) • ${pd.type} (${pd.functionName})
+              </td>
+              <td style="padding:4px 8px;border:1px solid #cbd5e1;">
+                Substituto: <strong>${pd.substituteName}</strong>
+                ${pd.permutedShiftInfo ? `<br/><em>Permuta: ${pd.permutedShiftInfo}</em>` : ''}
+              </td>
+              <td style="padding:4px 8px;border:1px solid #cbd5e1;">
+                <strong>Regra:</strong> ${pd.modeDescriptionLabel}
+                ${
+                  pd.discountApplied > 0
+                    ? ` (<strong style="color:#be123c;">- R$ ${formatCurrencyBR(pd.discountApplied)}</strong>)`
+                    : ' (R$ 0,00)'
+                }
+                ${
+                  pd.managerComment
+                    ? `<br/><span style="color:#1e3a8a;font-weight:bold;">💬 Comentário Gestor: “${pd.managerComment}”</span>`
+                    : ''
+                }
+                ${
+                  pd.reason
+                    ? `<br/><span style="color:#64748b;">Motivo: ${pd.reason}</span>`
+                    : ''
+                }
+              </td>
+            </tr>
+          `
+        );
+
+        const subSwapsRowsHtml = (row.doctorSubstitutionsReceivedInWindow || []).map(
+          (sub: any) => `
+            <tr>
+              <td style="padding:4px 8px;border:1px solid #cbd5e1;font-weight:bold;">
+                ${formatBrDate(sub.date)} (${sub.startTime}-${sub.endTime} • ${sub.hours}h)
+              </td>
+              <td style="padding:4px 8px;border:1px solid #cbd5e1;font-weight:bold;color:#065f46;">
+                Substituto / Permutante • ${sub.type} (${sub.functionName})
+              </td>
+              <td style="padding:4px 8px;border:1px solid #cbd5e1;">
+                Titular Substituído: <strong>${sub.titularName}</strong>
+              </td>
+              <td style="padding:4px 8px;border:1px solid #cbd5e1;">
+                <strong>Enquadramento:</strong> ${
+                  sub.substituteBillingMode === 'direct_settlement'
+                    ? 'Acerto Direto / Permuta'
+                    : 'Incorporado na Carga Horária (Folha PJ)'
+                }
+                ${
+                  sub.managerComment
+                    ? `<br/><span style="color:#1e3a8a;font-weight:bold;">💬 Comentário Gestor: “${sub.managerComment}”</span>`
+                    : ''
+                }
+              </td>
+            </tr>
+          `
+        );
+
+        const allSwapsAuditHtml = [...titularSwapsRowsHtml, ...subSwapsRowsHtml].join('');
+
+        // 4. Extrato Bancário Detalhado (Composição PJ com Subcomponentes)
+        const functionsSubItemsHtml =
+          row.evaluatedRoleEntries.length === 0
+            ? `<div style="padding:2px 0 2px 14px;color:#64748b;">• Nenhuma função remunerada lançada no período (R$ 0,00)</div>`
+            : row.evaluatedRoleEntries
+                .map(
+                  (re: any) => `
+                  <div style="display:flex;justify-content:space-between;padding:2px 0 2px 14px;border-bottom:1px dashed #e2e8f0;">
+                    <span>↳ <strong>${re.subcomponentLabel}</strong></span>
+                    <span style="font-weight:bold;color:#0f172a;">+ R$ ${formatCurrencyBR(re.lineTotal)}</span>
+                  </div>
+                `
+                )
+                .join('');
+
+        const activeAdditionals = row.evaluatedAdditionals.filter((a: any) => a.count > 0);
+        const additionalsSubItemsHtml =
+          activeAdditionals.length === 0
+            ? `<div style="padding:2px 0 2px 14px;color:#64748b;">• Nenhum adicional ou bonificação aplicada (R$ 0,00)</div>`
+            : activeAdditionals
+                .map(
+                  (add: any) => `
+                  <div style="display:flex;justify-content:space-between;padding:2px 0 2px 14px;border-bottom:1px dashed #e2e8f0;">
+                    <span>↳ <strong>${add.count}x ${add.name}</strong> (${
+                      add.calcMode === 'percent'
+                        ? `${add.percentValue}%`
+                        : `R$ ${formatCurrencyBR(add.singleCompetenceValue)} / cota`
+                    })</span>
+                    <span style="font-weight:bold;color:#b45309;">+ R$ ${formatCurrencyBR(add.totalAmount)}</span>
+                  </div>
+                `
+                )
+                .join('');
+
+        const discountsSubItemsHtml =
+          row.evaluatedPassagensDiscounts.length === 0
+            ? `<div style="padding:2px 0 2px 14px;color:#64748b;">• Nenhuma passagem de plantão com desconto no período (R$ 0,00)</div>`
+            : row.evaluatedPassagensDiscounts
+                .map(
+                  (pd: any) => `
+                  <div style="display:flex;justify-content:space-between;padding:2px 0 2px 14px;border-bottom:1px dashed #e2e8f0;">
+                    <span>
+                      ↳ <strong>Passagem ${formatBrDate(pd.date)} (${pd.hours}h • ${pd.functionName}) → ${pd.substituteName}</strong>:
+                      ${pd.modeDescriptionLabel}
+                      ${pd.managerComment ? ` <em>[Obs. Gestor: "${pd.managerComment}"]</em>` : ''}
+                    </span>
+                    <span style="font-weight:bold;color:#be123c;">- R$ ${formatCurrencyBR(pd.discountApplied)}</span>
+                  </div>
+                `
+                )
+                .join('');
+
+        const adjustmentsSubItemsHtml =
+          row.manualAdjustmentsList.length === 0
+            ? `<div style="padding:2px 0 2px 14px;color:#64748b;">• Nenhum ajuste manual lançado no período (R$ 0,00)</div>`
+            : row.manualAdjustmentsList
+                .map(
+                  (adj: any) => `
+                  <div style="display:flex;justify-content:space-between;padding:2px 0 2px 14px;border-bottom:1px dashed #e2e8f0;">
+                    <span>↳ <strong>${adj.description}</strong> (${
+                      adj.type === 'subtract' ? 'Ajuste Negativo / Débito' : 'Ajuste Positivo / Crédito'
+                    })</span>
+                    <span style="font-weight:bold;color:${
+                      adj.type === 'subtract' ? '#be123c' : '#047857'
+                    };">
+                      ${adj.type === 'subtract' ? '-' : '+'} R$ ${formatCurrencyBR(adj.amount)}
+                    </span>
+                  </div>
+                `
+                )
+                .join('');
+
         return `
-          <div style="margin-bottom:14px;padding:10px;border:1px solid #94a3b8;border-radius:6px;page-break-inside:avoid;">
-            <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #0f172a;padding-bottom:5px;margin-bottom:8px;">
+          <div style="margin-bottom:16px;padding:12px;border:1px solid #94a3b8;border-radius:8px;page-break-inside:avoid;">
+            <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #0f172a;padding-bottom:6px;margin-bottom:8px;">
               <div>
-                <strong style="font-size:12px;text-transform:uppercase;">${d.name}</strong>
+                <strong style="font-size:12.5px;text-transform:uppercase;">${d.name}</strong>
                 <span style="color:#475569;font-size:10px;margin-left:8px;">
-                  ${d.crm || ''} • ${d.specialty || 'Clínica Médica'} • Nível ${row.docLevel}
+                  ${d.crm || ''} • ${d.specialty || 'Clínica Médica'} • Nível ${row.docLevel} • PJ: ${d.razaoSocial || '—'} (${d.cnpj || '—'})
                 </span>
               </div>
               <div style="display:flex;gap:6px;font-size:9.5px;font-weight:bold;">
@@ -1054,7 +1269,7 @@ export default function PayrollAndAuditView(props: any) {
                   Inclusa Pacote: ${row.totalPeriodicHoursAllFns}h
                 </span>
                 <span style="background:#0f172a;color:#ffffff;padding:3px 8px;border-radius:4px;">
-                  Total: ${row.totalFulfilledHours}h
+                  Total Cumprido: ${row.totalFulfilledHours}h
                 </span>
               </div>
             </div>
@@ -1082,7 +1297,7 @@ export default function PayrollAndAuditView(props: any) {
               </table>
             </div>
 
-            <div>
+            <div style="margin-bottom:8px;">
               <strong style="font-size:9.5px;text-transform:uppercase;color:#0f172a;display:block;margin-bottom:3px;">
                 2. Discriminação Cronológica por Dia e Horário Exercidos:
               </strong>
@@ -1102,16 +1317,75 @@ export default function PayrollAndAuditView(props: any) {
               </table>
             </div>
 
-            <div style="margin-top:6px;padding:6px 10px;background:#f8fafc;border:1px solid #cbd5e1;border-radius:6px;font-size:9.5px;display:flex;justify-content:space-between;">
-              <span>
-                <strong>Composição PJ:</strong> Funções: R$ ${row.functionsSubtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} |
-                Adicionais: + R$ ${row.additionalsSubtotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} |
-                Descontos Passagens: - R$ ${row.totalPassagensDiscounts.toLocaleString('pt-BR', { minimumFractionDigits: 2 })} |
-                Ajustes: R$ ${row.manualAdjustmentsNet.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
-              </span>
-              <strong style="color:#065f46;font-size:10.5px;">
-                Líquido Final: R$ ${row.netTotal.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+            <div style="margin-bottom:8px;">
+              <strong style="font-size:9.5px;text-transform:uppercase;color:#0f172a;display:block;margin-bottom:3px;">
+                3. Histórico de Trocas, Permutas e Passagens no Período (Com Comentários de Auditoria do Gestor):
               </strong>
+              <table style="width:100%;border-collapse:collapse;font-size:9.5px;">
+                <thead>
+                  <tr style="background:#f1f5f9;text-align:left;">
+                    <th style="padding:4px 8px;border:1px solid #cbd5e1;width:19%;">Data / Turno</th>
+                    <th style="padding:4px 8px;border:1px solid #cbd5e1;width:23%;">Participação / Tipo</th>
+                    <th style="padding:4px 8px;border:1px solid #cbd5e1;width:23%;">Colega Envolvido</th>
+                    <th style="padding:4px 8px;border:1px solid #cbd5e1;">Regra Aplicada & Comentários do Gestor</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${
+                    allSwapsAuditHtml ||
+                    '<tr><td colspan="4" style="padding:5px;text-align:center;color:#94a3b8;">Nenhuma troca, permuta ou passagem realizada neste período.</td></tr>'
+                  }
+                </tbody>
+              </table>
+            </div>
+
+            <!-- 4. EXTRATO BANCÁRIO DETALHADO (COMPOSIÇÃO PJ COM SUBCOMPONENTES) -->
+            <div style="margin-top:8px;padding:10px;background:#f8fafc;border:1.5px solid #0f172a;border-radius:6px;font-size:9.5px;">
+              <div style="font-weight:900;font-size:10.5px;text-transform:uppercase;color:#0f172a;border-bottom:1.5px solid #cbd5e1;padding-bottom:4px;margin-bottom:6px;">
+                4. Extrato Detalhado de Composição Financeira PJ (Componentes e Subcomponentes)
+              </div>
+
+              <!-- A. Funções -->
+              <div style="margin-bottom:6px;">
+                <div style="display:flex;justify-content:space-between;background:#e2e8f0;padding:3px 6px;border-radius:4px;font-weight:bold;">
+                  <span>A) SUBTOTAL FUNÇÕES EXERCIDAS</span>
+                  <span>R$ ${formatCurrencyBR(row.functionsSubtotal)}</span>
+                </div>
+                ${functionsSubItemsHtml}
+              </div>
+
+              <!-- B. Adicionais -->
+              <div style="margin-bottom:6px;">
+                <div style="display:flex;justify-content:space-between;background:#fef3c7;padding:3px 6px;border-radius:4px;font-weight:bold;color:#92400e;">
+                  <span>B) SUBTOTAL ADICIONAIS E BONIFICAÇÕES</span>
+                  <span>+ R$ ${formatCurrencyBR(row.additionalsSubtotal)}</span>
+                </div>
+                ${additionalsSubItemsHtml}
+              </div>
+
+              <!-- C. Descontos de Passagens -->
+              <div style="margin-bottom:6px;">
+                <div style="display:flex;justify-content:space-between;background:#ffe4e6;padding:3px 6px;border-radius:4px;font-weight:bold;color:#9f1239;">
+                  <span>C) DESCONTOS DE PASSAGENS / TROCAS DE PLANTÃO</span>
+                  <span>- R$ ${formatCurrencyBR(row.totalPassagensDiscounts)}</span>
+                </div>
+                ${discountsSubItemsHtml}
+              </div>
+
+              <!-- D. Ajustes Manuais -->
+              <div style="margin-bottom:8px;">
+                <div style="display:flex;justify-content:space-between;background:#f1f5f9;padding:3px 6px;border-radius:4px;font-weight:bold;">
+                  <span>D) AJUSTES MANUAIS (+/-)</span>
+                  <span>${row.manualAdjustmentsNet >= 0 ? '+' : ''} R$ ${formatCurrencyBR(row.manualAdjustmentsNet)}</span>
+                </div>
+                ${adjustmentsSubItemsHtml}
+              </div>
+
+              <!-- VALOR LÍQUIDO FINAL -->
+              <div style="display:flex;justify-content:space-between;align-items:center;background:#064e3b;color:#ffffff;padding:6px 10px;border-radius:5px;font-size:11px;font-weight:900;">
+                <span>VALOR LÍQUIDO FINAL PJ A RECEBER (${effectiveWindow.label})</span>
+                <span style="font-size:12.5px;">R$ ${formatCurrencyBR(row.netTotal)}</span>
+              </div>
             </div>
           </div>
         `;
@@ -1123,7 +1397,7 @@ export default function PayrollAndAuditView(props: any) {
       <html lang="pt-BR">
       <head>
         <meta charset="UTF-8" />
-        <title>Folha de Auditoria de Carga Horaria - ${effectiveWindow.label}</title>
+        <title>Auditoria de Carga Horaria e Extrato PJ - ${effectiveWindow.label}</title>
         <style>
           @page { size: A4 portrait; margin: 10mm; }
           * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; box-sizing: border-box; }
@@ -1137,7 +1411,7 @@ export default function PayrollAndAuditView(props: any) {
               ${config?.appName || 'MedScale Pro'} — ${config?.sectorUnitName || 'Emergência Adulta - HGD'}
             </h1>
             <p style="margin:2px 0 0 0;font-size:10px;color:#475569;">
-              Folha Oficial de Auditoria de Carga Horária (Evidência de Função Fixa, Extra por CH e Escala Inclusa no Pacote)
+              Folha Oficial de Auditoria de Carga Horária, Histórico de Trocas/Passagens & Extrato Bancário PJ Detalhado
             </p>
           </div>
           <div style="text-align:right;">
@@ -1161,11 +1435,13 @@ export default function PayrollAndAuditView(props: any) {
       win.document.write(html);
       win.document.close();
     }
-    safeRecordAction(`Documento de Auditoria de Carga Horária emitido em PDF (${effectiveWindow.label})`);
+    safeRecordAction(
+      `Espelho/Auditoria de Carga Horária e Extrato PJ Detalhado emitido em PDF (${effectiveWindow.label})`
+    );
   };
 
   // ============================================================================
-  // MANIPULADORES DE EDIÇÃO E DUPLA CHECAGEM NA FOLHA PJ
+  // MANIPULADORES DE EDIÇÃO E DUPLA CHECAGEM NA FOLHA PJ (COM SINCRONIZAÇÃO DE TROCAS)
   // ============================================================================
   const updateDoctorPayrollCustom = (
     entityKey: string | number,
@@ -1248,18 +1524,25 @@ export default function PayrollAndAuditView(props: any) {
     }));
   };
 
+  // Atualiza tanto a configuração na Folha PJ quanto o registo original da troca em `swaps`
   const handleUpdateSwapDiscountOnRow = (
     docRow: any,
     swapId: any,
-    field: 'mode' | 'fractionPercent' | 'customAmount',
+    field: 'mode' | 'fractionPercent' | 'customAmount' | 'managerComment',
     val: any
   ) => {
+    if (!isAdmin) return;
+    const existingEval = docRow.evaluatedPassagensDiscounts.find(
+      (x: any) => String(x.swapId) === String(swapId)
+    );
+
     updateDoctorPayrollCustom(docRow.entityKey, curr => {
       const currDiscounts = curr.swapDiscounts || {};
       const currSwapCfg = currDiscounts[swapId] || {
-        mode: 'none',
-        fractionPercent: 50,
-        customAmount: 0
+        mode: existingEval?.mode || 'none',
+        fractionPercent: existingEval?.fractionPercent ?? 50,
+        customAmount: existingEval?.customAmount ?? 0,
+        managerComment: existingEval?.managerComment || ''
       };
       return {
         ...curr,
@@ -1272,6 +1555,21 @@ export default function PayrollAndAuditView(props: any) {
         }
       };
     });
+
+    // Sincroniza também com o array global `swaps` para manter Trocas & Passagens e Folha PJ 100% espelhados
+    safeSetSwaps((prev: any[]) =>
+      (Array.isArray(prev) ? prev : []).map((sw: any) => {
+        if (String(sw?.id) !== String(swapId)) return sw;
+        if (field === 'mode') return { ...sw, titularDiscountMode: val };
+        if (field === 'fractionPercent')
+          return { ...sw, titularFractionPercent: Number(val) };
+        if (field === 'customAmount')
+          return { ...sw, titularCustomDiscountAmount: Number(val) };
+        if (field === 'managerComment')
+          return { ...sw, managerFinancialComment: String(val) };
+        return sw;
+      })
+    );
   };
 
   const handleAddManualAdjustmentOnRow = (docRow: any) => {
@@ -1391,12 +1689,14 @@ export default function PayrollAndAuditView(props: any) {
       'Nivel Senioridade',
       'Razao Social PJ',
       'CNPJ',
-      'Funcoes Exercidas na Competencia',
+      'Subcomponentes de Funcoes Exercidas',
       'Subtotal Funcoes (R$)',
-      'Adicionais Acumulados',
+      'Subcomponentes de Adicionais Acumulados',
       'Subtotal Adicionais (R$)',
-      'Descontos de Passagens (R$)',
-      'Ajustes Manuais (+/- R$)',
+      'Detalhamento de Trocas, Passagens e Comentarios do Gestor',
+      'Subtotal Descontos de Passagens (R$)',
+      'Detalhamento de Ajustes Manuais',
+      'Subtotal Ajustes Manuais (+/- R$)',
       'Liquido Total PJ (R$)',
       'CH Total Fixa',
       'CH Total Extra',
@@ -1411,26 +1711,49 @@ export default function PayrollAndAuditView(props: any) {
       const rolesDesc =
         item.evaluatedRoleEntries.length > 0
           ? item.evaluatedRoleEntries
-              .map((re: any) => {
-                if (re.billingMode === 'monthly_no_schedule') {
-                  return `${re.functionName} (Cargo Mensal s/ Escala)`;
-                }
-                if (re.billingMode === 'fixed_quota_monthly') {
-                  return `${re.units}x Cota Fixa ${re.hoursPerUnit}h ${re.functionName}`;
-                }
-                if (re.billingMode === 'periodic_included') {
-                  return `${re.functionName} (Incluso Pacote: ${re.periodicHours || 0}h)`;
-                }
-                return `${re.functionName} (Extra: ${re.weekdayHours}h Sem + ${re.weekendHours}h FDS)`;
-              })
+              .map(
+                (re: any) =>
+                  `${re.subcomponentLabel}: R$ ${formatCurrencyBR(re.lineTotal)}`
+              )
               .join(' + ')
           : 'Sem função lançada';
 
       const addsDesc =
         item.evaluatedAdditionals
           .filter((a: any) => a.count > 0)
-          .map((a: any) => `${a.count}x ${a.name}`)
+          .map(
+            (a: any) =>
+              `${a.count}x ${a.name}: + R$ ${formatCurrencyBR(a.totalAmount)}`
+          )
           .join(' + ') || 'Nenhum adicional';
+
+      const swapsDesc =
+        [
+          ...item.evaluatedPassagensDiscounts.map(
+            (pd: any) =>
+              `[Titular ${formatBrDate(pd.date)} -> ${pd.substituteName}: ${
+                pd.modeDescriptionLabel
+              } (-R$ ${formatCurrencyBR(pd.discountApplied)})${
+                pd.managerComment ? ` Obs: ${pd.managerComment}` : ''
+              }]`
+          ),
+          ...(item.doctorSubstitutionsReceivedInWindow || []).map(
+            (sub: any) =>
+              `[Substituto em ${formatBrDate(sub.date)} de ${sub.titularName} (${
+                sub.functionName
+              })]`
+          )
+        ].join(' | ') || 'Sem trocas/passagens';
+
+      const adjsDesc =
+        item.manualAdjustmentsList
+          .map(
+            (adj: any) =>
+              `${adj.description}: ${adj.type === 'subtract' ? '-' : '+'} R$ ${formatCurrencyBR(
+                adj.amount
+              )}`
+          )
+          .join(' | ') || 'Sem ajustes';
 
       const daysDesc =
         item.dailyWorkedScheduleList
@@ -1461,18 +1784,20 @@ export default function PayrollAndAuditView(props: any) {
         `Nivel ${item.docLevel}`,
         `"${(d.razaoSocial || '').replace(/"/g, '""')}"`,
         `"${(d.cnpj || '').replace(/"/g, '""')}"`,
-        `"${rolesDesc}"`,
+        `"${rolesDesc.replace(/"/g, '""')}"`,
         String(item.functionsSubtotal.toFixed(2).replace('.', ',')),
-        `"${addsDesc}"`,
+        `"${addsDesc.replace(/"/g, '""')}"`,
         String(item.additionalsSubtotal.toFixed(2).replace('.', ',')),
+        `"${swapsDesc.replace(/"/g, '""')}"`,
         String(item.totalPassagensDiscounts.toFixed(2).replace('.', ',')),
+        `"${adjsDesc.replace(/"/g, '""')}"`,
         String(item.manualAdjustmentsNet.toFixed(2).replace('.', ',')),
         String(item.netTotal.toFixed(2).replace('.', ',')),
         String(item.totalFixedHoursAllFns).replace('.', ','),
         String(item.totalExtraHoursAllFns).replace('.', ','),
         String(item.totalPeriodicHoursAllFns).replace('.', ','),
         String(item.totalFulfilledHours).replace('.', ','),
-        `"${daysDesc}"`,
+        `"${daysDesc.replace(/"/g, '""')}"`,
         ...fnCols
       ].join(';');
     });
@@ -1497,7 +1822,7 @@ export default function PayrollAndAuditView(props: any) {
             <h2 className="text-xl sm:text-2xl font-bold text-slate-900 flex items-center gap-2">
               <DollarSign className="text-emerald-600" size={24} />
               {isAdmin
-                ? `Folha Financeira PJ & Auditoria de Carga Horária`
+                ? `Folha Financeira PJ & Auditoria de Carga Horária e Trocas`
                 : `Meu Extrato de Produção PJ & Carga Horária`}
             </h2>
             <p className="text-xs text-slate-500 mt-0.5">
@@ -1519,8 +1844,8 @@ export default function PayrollAndAuditView(props: any) {
             >
               <Printer size={15} />
               {isAdmin
-                ? 'Baixar Folha de Auditoria de Carga Horária (PDF)'
-                : 'Baixar Meu Espelho PJ & Horas (PDF)'}
+                ? 'Baixar Auditoria & Extrato Bancário PJ (PDF)'
+                : 'Baixar Meu Extrato Detalhado PJ & Horas (PDF)'}
             </button>
 
             {isAdmin && (
@@ -1535,11 +1860,11 @@ export default function PayrollAndAuditView(props: any) {
           </div>
         </div>
 
-        {/* BARRA DE ESCOLHA DO PERÍODO DA COMPETÊNCIA (26 A 25 OU SELEÇÃO LIVRE) */}
+        {/* BARRA DE ESCOLHA DO PERÍODO DA COMPETÊNCIA (26 A 25 COM NAVEGAÇÃO MENSAL OU SELEÇÃO LIVRE) */}
         <div className="p-3.5 rounded-2xl bg-slate-900 text-white flex flex-col lg:flex-row lg:items-center justify-between gap-3 text-xs">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-[10px] font-extrabold uppercase text-amber-400 flex items-center gap-1 mr-1">
-              <CalendarRange size={14} /> Modo de Período / Competência:
+              <CalendarRange size={14} /> Modo de Competência:
             </span>
 
             <button
@@ -1558,8 +1883,8 @@ export default function PayrollAndAuditView(props: any) {
               type="button"
               onClick={() => {
                 setPeriodMode('custom');
-                setCustomStartDate(competenceWindow?.startStr || '2026-09-26');
-                setCustomEndDate(competenceWindow?.endStr || '2026-10-25');
+                setCustomStartDate(competenceWindow?.startStr || '2026-10-26');
+                setCustomEndDate(competenceWindow?.endStr || '2026-11-25');
               }}
               className={`px-3 py-1.5 rounded-xl font-extrabold transition-all ${
                 periodMode === 'custom'
@@ -1572,14 +1897,29 @@ export default function PayrollAndAuditView(props: any) {
           </div>
 
           {periodMode === 'standard' ? (
-            <div className="flex items-center gap-2">
-              <span className="font-bold text-slate-300">Mês da Competência:</span>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => shiftCompetenceMonth(-1)}
+                className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold flex items-center gap-1 border border-slate-700"
+                title="Mês de competência anterior"
+              >
+                <ChevronLeft size={14} /> Mês Ant.
+              </button>
               <input
                 type="month"
                 value={competenceMonth}
                 onChange={e => safeSetCompetenceMonth(e.target.value)}
                 className="bg-slate-950 text-white border border-slate-600 rounded-xl px-3 py-1.5 font-black"
               />
+              <button
+                type="button"
+                onClick={() => shiftCompetenceMonth(1)}
+                className="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold flex items-center gap-1 border border-slate-700"
+                title="Próximo mês de competência"
+              >
+                Próx. Mês <ChevronRight size={14} />
+              </button>
             </div>
           ) : (
             <div className="flex flex-wrap items-center gap-2">
@@ -1601,7 +1941,7 @@ export default function PayrollAndAuditView(props: any) {
           )}
         </div>
 
-        {/* BARRA DE FILTROS DE AUDITORIA (POR CATEGORIA/FUNÇÃO, NÍVEL, ESPECIALIDADE E MÉDICO) */}
+        {/* BARRA DE FILTROS DE AUDITORIA */}
         {isAdmin && (
           <div className="pt-2 border-t border-slate-100 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
             <div>
@@ -1686,13 +2026,13 @@ export default function PayrollAndAuditView(props: any) {
               : `Minha Produção Líquida Total (${effectiveWindow.label})`}
           </span>
           <div className="text-2xl sm:text-3xl font-black mt-0.5">
-            R$ {totalNet.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+            R$ {formatCurrencyBR(totalNet)}
           </div>
         </div>
         <div className="text-xs text-emerald-200 flex items-center gap-2 max-w-md">
           <ShieldCheck size={20} className="shrink-0" />
           <span>
-            Fluxo integrado: Tabela de Remuneração ↔ Escala ↔ Folha PJ, permitindo ajustes manuais para dupla checagem em cada função, adicional ou desconto.
+            Auditoria integrada: subcomponentes detalhados no estilo extrato bancário, reavaliação de descontos de trocas e comentários da gestão sincronizados no PDF.
           </span>
         </div>
       </div>
@@ -1707,7 +2047,7 @@ export default function PayrollAndAuditView(props: any) {
                 Conferência do Meu Extrato de Produção PJ ({competenceMonth})
               </h3>
               <p className="text-slate-500 mt-0.5">
-                Confira abaixo as suas funções cadastradas, adicionais acumulados, descontos de passagens e horas trabalhadas.
+                Confira abaixo todos os componentes e subcomponentes do seu extrato PJ, bem como o histórico de trocas e horas cumpridas.
               </p>
             </div>
 
@@ -1749,17 +2089,17 @@ export default function PayrollAndAuditView(props: any) {
       )}
 
       {/* ==========================================================================
-          TABELA 1: COMPOSIÇÃO FINANCEIRA PJ & DUPLA CHECAGEM
+          TABELA 1: COMPOSIÇÃO FINANCEIRA PJ, AUDITORIA DE TROCAS & EXTRATO BANCÁRIO
          ========================================================================== */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
         <div className="p-4 border-b border-slate-100 flex items-center justify-between">
           <div>
             <h3 className="text-sm font-black text-slate-900 uppercase flex items-center gap-2">
               <Layers size={17} className="text-blue-600" />
-              1. Composição Financeira PJ — Funções Exercidas (Cota Fixa, Por CH e Inclusa no Pacote), Adicionais & Ajustes
+              1. Composição Financeira PJ — Funções, Adicionais, Auditoria de Trocas/Passagens & Resumo Estilo Extrato Bancário
             </h3>
             <p className="text-[11px] text-slate-500">
-              A folha puxa automaticamente a carga horária praticada em cada função e estabelece a estimativa, permitindo ajuste manual em qualquer linha.
+              Reavalie descontos de trocas/passagens com comentários de auditoria e consulte o extrato bancário detalhado com cada subcomponente na última coluna.
             </p>
           </div>
         </div>
@@ -1769,15 +2109,17 @@ export default function PayrollAndAuditView(props: any) {
             <tr className="bg-slate-900 text-white uppercase text-[10px]">
               <th className="py-3 px-4">Médico / Resumo de CH</th>
               <th className="py-3 px-3">
-                Funções Exercidas (Cota Fixa Mensal, Por CH/Extra ou Inclusa no Pacote)
+                Funções Exercidas (Cota Fixa, Por CH ou Inclusa no Pacote)
               </th>
               <th className="py-3 px-3">
                 Adicionais & Bonificações (Acumuláveis 1x, 2x...)
               </th>
               <th className="py-3 px-3">
-                Descontos Passagens & Ajustes (+/-)
+                Auditoria de Trocas / Passagens & Ajustes Manuais (+/-)
               </th>
-              <th className="py-3 px-4 text-right">Líquido Final PJ</th>
+              <th className="py-3 px-4">
+                Extrato Bancário Detalhado (Subcomponentes & Líquido)
+              </th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-200">
@@ -1788,6 +2130,9 @@ export default function PayrollAndAuditView(props: any) {
                 amount: '',
                 description: ''
               };
+              const activeAdds = row.evaluatedAdditionals.filter(
+                (a: any) => a.count > 0
+              );
 
               return (
                 <tr
@@ -1797,7 +2142,7 @@ export default function PayrollAndAuditView(props: any) {
                   }`}
                 >
                   {/* COLUNA 1: MÉDICO + RESUMO DAS 3 CARGAS HORÁRIAS */}
-                  <td className="py-4 px-4 space-y-1.5 min-w-[225px]">
+                  <td className="py-4 px-4 space-y-1.5 min-w-[220px]">
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <strong className="text-slate-900 text-sm font-black">
                         {d.name}
@@ -1829,9 +2174,9 @@ export default function PayrollAndAuditView(props: any) {
                       <button
                         type="button"
                         onClick={() => handleDownloadAnalyticalWorkloadAuditPDF(row)}
-                        className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-800 font-bold text-[10px] flex items-center gap-1 border border-slate-300"
+                        className="px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 text-white font-bold text-[10px] flex items-center gap-1 shadow-2xs"
                       >
-                        <Printer size={11} /> Espelho PDF
+                        <Printer size={11} /> Espelho PDF Detalhado
                       </button>
                       {isAdmin && row.isCustomized && (
                         <button
@@ -1858,8 +2203,8 @@ export default function PayrollAndAuditView(props: any) {
                     )}
                   </td>
 
-                  {/* COLUNA 2: FUNÇÕES EXERCIDAS (COM EDIÇÃO DE COTAS, CH E INCLUSO NO PACOTE) */}
-                  <td className="py-4 px-3 min-w-[380px] space-y-2">
+                  {/* COLUNA 2: FUNÇÕES EXERCIDAS */}
+                  <td className="py-4 px-3 min-w-[360px] space-y-2">
                     {row.evaluatedRoleEntries.length === 0 ? (
                       <div className="text-slate-400 italic text-[11px]">
                         Nenhuma função remunerada lançada neste período.
@@ -1948,7 +2293,6 @@ export default function PayrollAndAuditView(props: any) {
                                 </div>
                               )}
 
-                              {/* 1. Cota Fixa Mensal */}
                               {re.billingMode === 'fixed_quota_monthly' && (
                                 <div className="space-y-1.5 text-[11px]">
                                   <div className="flex flex-wrap items-center justify-between gap-2">
@@ -1967,7 +2311,6 @@ export default function PayrollAndAuditView(props: any) {
                                             )
                                           }
                                           className="w-11 border rounded px-1 py-0.5 text-center font-black bg-white"
-                                          title="Número de cotas fixas"
                                         />
                                         <span className="text-[10px] font-bold">cota(s)</span>
                                         <input
@@ -1983,7 +2326,6 @@ export default function PayrollAndAuditView(props: any) {
                                             )
                                           }
                                           className="w-12 border rounded px-1 py-0.5 text-center font-black bg-white"
-                                          title="CH semanal de referência da cota"
                                         />
                                         <span className="text-[10px] font-bold">h/sem</span>
                                       </div>
@@ -1994,10 +2336,7 @@ export default function PayrollAndAuditView(props: any) {
                                     )}
 
                                     <span className="font-black text-blue-900 ml-auto">
-                                      R${' '}
-                                      {re.lineTotal.toLocaleString('pt-BR', {
-                                        minimumFractionDigits: 2
-                                      })}
+                                      R$ {formatCurrencyBR(re.lineTotal)}
                                     </span>
                                   </div>
 
@@ -2015,7 +2354,6 @@ export default function PayrollAndAuditView(props: any) {
                                 </div>
                               )}
 
-                              {/* 2. Por Carga Horária (CH / Extra) */}
                               {re.billingMode === 'hourly_extra' && (
                                 <div className="flex flex-wrap items-center justify-between gap-2 text-[11px]">
                                   {isAdmin ? (
@@ -2067,15 +2405,11 @@ export default function PayrollAndAuditView(props: any) {
                                   )}
 
                                   <span className="font-black text-emerald-800 ml-auto">
-                                    R${' '}
-                                    {re.lineTotal.toLocaleString('pt-BR', {
-                                      minimumFractionDigits: 2
-                                    })}
+                                    R$ {formatCurrencyBR(re.lineTotal)}
                                   </span>
                                 </div>
                               )}
 
-                              {/* 3. Incluso na Cota Mensal (Escala Periódica) */}
                               {re.billingMode === 'periodic_included' && (
                                 <div className="flex items-center justify-between text-[11px] bg-purple-50/70 p-1.5 rounded-lg border border-purple-200">
                                   <span className="text-purple-950 font-bold">
@@ -2090,17 +2424,13 @@ export default function PayrollAndAuditView(props: any) {
                                 </div>
                               )}
 
-                              {/* 4. Cargo Fixo Sem Escala */}
                               {re.billingMode === 'monthly_no_schedule' && (
                                 <div className="flex items-center justify-between text-[11px]">
                                   <span className="text-purple-900 font-bold">
                                     Cargo Fixo Mensal (Sem Escala)
                                   </span>
                                   <span className="font-black text-purple-900">
-                                    R${' '}
-                                    {re.lineTotal.toLocaleString('pt-BR', {
-                                      minimumFractionDigits: 2
-                                    })}
+                                    R$ {formatCurrencyBR(re.lineTotal)}
                                   </span>
                                 </div>
                               )}
@@ -2121,16 +2451,13 @@ export default function PayrollAndAuditView(props: any) {
                         </button>
                       )}
                       <span className="text-[11px] font-extrabold text-slate-700 ml-auto">
-                        Subtotal Funções: R${' '}
-                        {row.functionsSubtotal.toLocaleString('pt-BR', {
-                          minimumFractionDigits: 2
-                        })}
+                        Subtotal Funções: R$ {formatCurrencyBR(row.functionsSubtotal)}
                       </span>
                     </div>
                   </td>
 
                   {/* COLUNA 3: ADICIONAIS ACUMULÁVEIS */}
-                  <td className="py-4 px-3 min-w-[270px] space-y-2">
+                  <td className="py-4 px-3 min-w-[260px] space-y-2">
                     <div className="space-y-1.5">
                       {row.evaluatedAdditionals.map((add: any) => {
                         const isActive = add.count > 0;
@@ -2186,10 +2513,7 @@ export default function PayrollAndAuditView(props: any) {
                               )}
 
                               <span className="font-extrabold text-[11px] min-w-[68px] text-right">
-                                R${' '}
-                                {add.totalAmount.toLocaleString('pt-BR', {
-                                  minimumFractionDigits: 2
-                                })}
+                                R$ {formatCurrencyBR(add.totalAmount)}
                               </span>
                             </div>
                           </div>
@@ -2198,33 +2522,32 @@ export default function PayrollAndAuditView(props: any) {
                     </div>
 
                     <div className="text-right text-[11px] font-extrabold text-amber-900 pt-1">
-                      Subtotal Adicionais: + R${' '}
-                      {row.additionalsSubtotal.toLocaleString('pt-BR', {
-                        minimumFractionDigits: 2
-                      })}
+                      Subtotal Adicionais: + R$ {formatCurrencyBR(row.additionalsSubtotal)}
                     </div>
                   </td>
 
-                  {/* COLUNA 4: DESCONTOS DE PASSAGENS & AJUSTES MANUAIS */}
-                  <td className="py-4 px-3 min-w-[305px] space-y-3">
+                  {/* COLUNA 4: AUDITORIA DE TROCAS / PASSAGENS & AJUSTES MANUAIS */}
+                  <td className="py-4 px-3 min-w-[330px] space-y-3">
                     <div className="space-y-1.5">
-                      <span className="block text-[10px] font-extrabold uppercase text-slate-500">
-                        Passagens de Plantão ({row.evaluatedPassagensDiscounts.length}):
+                      <span className="block text-[10px] font-extrabold uppercase text-slate-600 flex items-center gap-1">
+                        <ArrowLeftRight size={12} className="text-rose-600" />
+                        Trocas / Passagens Solicitadas pelo Titular ({row.evaluatedPassagensDiscounts.length}):
                       </span>
 
                       {row.evaluatedPassagensDiscounts.length === 0 ? (
                         <span className="text-[10px] text-slate-400 italic block">
-                          Nenhuma passagem registada pelo titular.
+                          Nenhuma passagem registada como titular neste período.
                         </span>
                       ) : (
                         row.evaluatedPassagensDiscounts.map((pd: any) => (
                           <div
                             key={pd.swapId}
-                            className="p-2 rounded-xl bg-rose-50/50 border border-rose-200 space-y-1.5 text-[10px]"
+                            className="p-2.5 rounded-xl bg-rose-50/50 border border-rose-200 space-y-1.5 text-[10px]"
                           >
-                            <div className="flex items-center justify-between gap-1">
+                            <div className="flex items-center justify-between gap-1 flex-wrap">
                               <strong className="text-slate-900">
-                                {formatBrDate(pd.date)} ({pd.hours}h) → {pd.substituteName}
+                                {formatBrDate(pd.date)} ({pd.hours}h • {pd.functionName}) →{' '}
+                                {pd.substituteName}
                               </strong>
                               {pd.isLowerLevel && (
                                 <span className="px-1.5 py-0.5 rounded bg-rose-600 text-white font-black text-[9px]">
@@ -2234,87 +2557,121 @@ export default function PayrollAndAuditView(props: any) {
                             </div>
 
                             {isAdmin ? (
-                              <div className="flex flex-wrap items-center gap-1.5">
-                                <select
-                                  value={pd.mode}
-                                  onChange={e =>
-                                    handleUpdateSwapDiscountOnRow(
-                                      row,
-                                      pd.swapId,
-                                      'mode',
-                                      e.target.value
-                                    )
-                                  }
-                                  className="border border-rose-300 rounded px-1.5 py-0.5 bg-white font-bold text-rose-950"
-                                >
-                                  <option value="none">Sem Desconto (R$ 0)</option>
-                                  <option value="full">
-                                    Integral (R$ {pd.fullShiftValue.toFixed(0)})
-                                  </option>
-                                  <option value="level_diff">
-                                    Dif. Nível (R$ {pd.levelDiffValue.toFixed(0)})
-                                  </option>
-                                  <option value="fraction">Fração (%)</option>
-                                  <option value="custom">Parcial (R$)</option>
-                                </select>
-
-                                {pd.mode === 'fraction' && (
-                                  <input
-                                    type="number"
-                                    min={0}
-                                    max={100}
-                                    value={pd.fractionPercent}
+                              <div className="space-y-1.5">
+                                <div className="flex flex-wrap items-center gap-1.5">
+                                  <select
+                                    value={pd.mode}
                                     onChange={e =>
                                       handleUpdateSwapDiscountOnRow(
                                         row,
                                         pd.swapId,
-                                        'fractionPercent',
-                                        Number(e.target.value)
+                                        'mode',
+                                        e.target.value
                                       )
                                     }
-                                    className="w-11 border rounded px-1 py-0.5 bg-white font-black text-center"
-                                  />
-                                )}
+                                    className="border border-rose-300 rounded px-1.5 py-0.5 bg-white font-bold text-rose-950"
+                                  >
+                                    <option value="none">Sem Desconto (R$ 0)</option>
+                                    <option value="full">
+                                      Integral (R$ {pd.fullShiftValue.toFixed(0)})
+                                    </option>
+                                    <option value="level_diff">
+                                      Dif. Nível (R$ {pd.levelDiffValue.toFixed(0)})
+                                    </option>
+                                    <option value="fraction">Fração (%)</option>
+                                    <option value="custom">Parcial (R$)</option>
+                                  </select>
 
-                                {pd.mode === 'custom' && (
+                                  {pd.mode === 'fraction' && (
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      max={100}
+                                      value={pd.fractionPercent}
+                                      onChange={e =>
+                                        handleUpdateSwapDiscountOnRow(
+                                          row,
+                                          pd.swapId,
+                                          'fractionPercent',
+                                          Number(e.target.value)
+                                        )
+                                      }
+                                      className="w-11 border rounded px-1 py-0.5 bg-white font-black text-center"
+                                    />
+                                  )}
+
+                                  {pd.mode === 'custom' && (
+                                    <input
+                                      type="number"
+                                      min={0}
+                                      value={pd.customAmount}
+                                      onChange={e =>
+                                        handleUpdateSwapDiscountOnRow(
+                                          row,
+                                          pd.swapId,
+                                          'customAmount',
+                                          Number(e.target.value)
+                                        )
+                                      }
+                                      className="w-16 border rounded px-1.5 py-0.5 bg-white font-black"
+                                    />
+                                  )}
+
+                                  <span className="font-black text-rose-700 ml-auto">
+                                    - R$ {formatCurrencyBR(pd.discountApplied)}
+                                  </span>
+                                </div>
+
+                                <div className="flex items-center gap-1">
+                                  <MessageSquare size={11} className="text-blue-600 shrink-0" />
                                   <input
-                                    type="number"
-                                    min={0}
-                                    value={pd.customAmount}
+                                    type="text"
+                                    placeholder="Comentário/justificativa do gestor (sai no PDF)..."
+                                    value={pd.managerComment || ''}
                                     onChange={e =>
                                       handleUpdateSwapDiscountOnRow(
                                         row,
                                         pd.swapId,
-                                        'customAmount',
-                                        Number(e.target.value)
+                                        'managerComment',
+                                        e.target.value
                                       )
                                     }
-                                    className="w-16 border rounded px-1.5 py-0.5 bg-white font-black"
+                                    className="w-full border border-rose-200 rounded px-2 py-0.5 bg-white text-[10px] font-semibold text-slate-800"
                                   />
-                                )}
-
-                                <span className="font-black text-rose-700 ml-auto">
-                                  - R${' '}
-                                  {pd.discountApplied.toLocaleString('pt-BR', {
-                                    minimumFractionDigits: 2
-                                  })}
-                                </span>
+                                </div>
                               </div>
                             ) : (
-                              <div className="flex justify-between text-rose-800 font-bold">
-                                <span>
-                                  {pd.mode === 'none' ? 'Isento' : 'Desconto aplicado'}
-                                </span>
-                                <span>
-                                  - R${' '}
-                                  {pd.discountApplied.toLocaleString('pt-BR', {
-                                    minimumFractionDigits: 2
-                                  })}
-                                </span>
+                              <div className="space-y-1">
+                                <div className="flex justify-between text-rose-800 font-bold">
+                                  <span>{pd.modeDescriptionLabel}</span>
+                                  <span>- R$ {formatCurrencyBR(pd.discountApplied)}</span>
+                                </div>
+                                {pd.managerComment && (
+                                  <div className="text-blue-900 font-bold">
+                                    💬 Obs. Gestor: “{pd.managerComment}”
+                                  </div>
+                                )}
                               </div>
                             )}
                           </div>
                         ))
+                      )}
+
+                      {row.doctorSubstitutionsReceivedInWindow.length > 0 && (
+                        <div className="pt-1 space-y-1">
+                          <span className="block text-[9px] font-extrabold uppercase text-emerald-800">
+                            Coberturas / Permutas Assumidas como Substituto ({row.doctorSubstitutionsReceivedInWindow.length}):
+                          </span>
+                          {row.doctorSubstitutionsReceivedInWindow.map((sub: any) => (
+                            <div
+                              key={sub.swapId}
+                              className="p-1.5 rounded-lg bg-emerald-50/70 border border-emerald-200 text-[10px] text-emerald-950 font-semibold"
+                            >
+                              🔄 {formatBrDate(sub.date)} ({sub.hours}h • {sub.functionName}) de{' '}
+                              <strong>{sub.titularName}</strong>
+                            </div>
+                          ))}
+                        </div>
                       )}
                     </div>
 
@@ -2334,10 +2691,7 @@ export default function PayrollAndAuditView(props: any) {
                         >
                           <span>
                             {adj.type === 'subtract' ? '−' : '+'} R${' '}
-                            {Number(adj.amount).toLocaleString('pt-BR', {
-                              minimumFractionDigits: 2
-                            })}{' '}
-                            ({adj.description})
+                            {formatCurrencyBR(adj.amount)} ({adj.description})
                           </span>
                           {isAdmin && (
                             <button
@@ -2411,17 +2765,121 @@ export default function PayrollAndAuditView(props: any) {
                     </div>
                   </td>
 
-                  {/* COLUNA 5: LÍQUIDO FINAL PJ */}
-                  <td className="py-4 px-4 text-right whitespace-nowrap">
-                    <span className="text-base font-black text-emerald-700 block">
-                      R${' '}
-                      {row.netTotal.toLocaleString('pt-BR', {
-                        minimumFractionDigits: 2
-                      })}
-                    </span>
-                    <span className="text-[10px] text-slate-400 font-bold uppercase block">
-                      Líquido Final PJ
-                    </span>
+                  {/* COLUNA 5: EXTRATO BANCÁRIO DETALHADO (COMPONENTES, SUBCOMPONENTES E LÍQUIDO FINAL) */}
+                  <td className="py-4 px-4 min-w-[300px]">
+                    <div className="p-3 rounded-2xl bg-slate-50 border border-slate-300 space-y-2 text-[10px]">
+                      <div className="flex items-center justify-between border-b border-slate-200 pb-1.5">
+                        <span className="font-black uppercase text-slate-800 flex items-center gap-1">
+                          <Receipt size={12} className="text-emerald-700" />
+                          Extrato PJ Detalhado
+                        </span>
+                        <span className="text-[9px] font-bold text-slate-400">
+                          {competenceMonth}
+                        </span>
+                      </div>
+
+                      {/* 1. Funções e Subcomponentes */}
+                      <div className="space-y-0.5">
+                        <div className="flex justify-between font-black text-slate-900">
+                          <span>1. Funções:</span>
+                          <span>R$ {formatCurrencyBR(row.functionsSubtotal)}</span>
+                        </div>
+                        {row.evaluatedRoleEntries.map((re: any, idx: number) => (
+                          <div
+                            key={re.id || idx}
+                            className="flex justify-between text-slate-600 pl-2"
+                          >
+                            <span className="truncate pr-1">↳ {re.functionName}:</span>
+                            <span className="font-bold shrink-0">
+                              R$ {formatCurrencyBR(re.lineTotal)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+
+                      {/* 2. Adicionais e Subcomponentes */}
+                      <div className="space-y-0.5 pt-1 border-t border-slate-200/70">
+                        <div className="flex justify-between font-black text-amber-900">
+                          <span>2. Adicionais:</span>
+                          <span>+ R$ {formatCurrencyBR(row.additionalsSubtotal)}</span>
+                        </div>
+                        {activeAdds.length === 0 ? (
+                          <div className="text-slate-400 pl-2 italic">↳ Sem adicionais</div>
+                        ) : (
+                          activeAdds.map((add: any) => (
+                            <div
+                              key={add.id}
+                              className="flex justify-between text-amber-950 pl-2"
+                            >
+                              <span className="truncate pr-1">
+                                ↳ {add.count}x {add.name}:
+                              </span>
+                              <span className="font-bold shrink-0">
+                                + R$ {formatCurrencyBR(add.totalAmount)}
+                              </span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+
+                      {/* 3. Descontos de Passagens e Subcomponentes */}
+                      <div className="space-y-0.5 pt-1 border-t border-slate-200/70">
+                        <div className="flex justify-between font-black text-rose-800">
+                          <span>3. Descontos Trocas:</span>
+                          <span>- R$ {formatCurrencyBR(row.totalPassagensDiscounts)}</span>
+                        </div>
+                        {row.evaluatedPassagensDiscounts
+                          .filter((pd: any) => pd.discountApplied > 0)
+                          .map((pd: any) => (
+                            <div
+                              key={pd.swapId}
+                              className="flex justify-between text-rose-700 pl-2"
+                            >
+                              <span className="truncate pr-1">
+                                ↳ {formatBrDate(pd.date)} ({pd.substituteName}):
+                              </span>
+                              <span className="font-bold shrink-0">
+                                - R$ {formatCurrencyBR(pd.discountApplied)}
+                              </span>
+                            </div>
+                          ))}
+                      </div>
+
+                      {/* 4. Ajustes Manuais e Subcomponentes */}
+                      {row.manualAdjustmentsList.length > 0 && (
+                        <div className="space-y-0.5 pt-1 border-t border-slate-200/70">
+                          <div className="flex justify-between font-black text-slate-800">
+                            <span>4. Ajustes Manuais:</span>
+                            <span>
+                              {row.manualAdjustmentsNet >= 0 ? '+' : ''} R${' '}
+                              {formatCurrencyBR(row.manualAdjustmentsNet)}
+                            </span>
+                          </div>
+                          {row.manualAdjustmentsList.map((adj: any) => (
+                            <div
+                              key={adj.id}
+                              className="flex justify-between text-slate-600 pl-2"
+                            >
+                              <span className="truncate pr-1">↳ {adj.description}:</span>
+                              <span className="font-bold shrink-0">
+                                {adj.type === 'subtract' ? '-' : '+'} R${' '}
+                                {formatCurrencyBR(adj.amount)}
+                              </span>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Líquido Final */}
+                      <div className="pt-2 border-t-2 border-slate-900 flex items-center justify-between">
+                        <span className="font-black uppercase text-slate-900 text-[10px]">
+                          Líquido Final PJ:
+                        </span>
+                        <span className="text-sm font-black text-emerald-700">
+                          R$ {formatCurrencyBR(row.netTotal)}
+                        </span>
+                      </div>
+                    </div>
                   </td>
                 </tr>
               );
@@ -2431,18 +2889,17 @@ export default function PayrollAndAuditView(props: any) {
       </div>
 
       {/* ==========================================================================
-          TABELA 2: NOVA FOLHA DE AUDITORIA ANALÍTICA DE CARGA HORÁRIA
-          (EVIDENCIANDO: 1. FUNÇÃO FIXA, 2. FUNÇÃO EXTRA POR CH, 3. ESCALA INCLUSA NO PACOTE)
+          TABELA 2: FOLHA DE AUDITORIA ANALÍTICA DE CARGA HORÁRIA + TROCAS E PASSAGENS
          ========================================================================== */}
       <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
         <div className="p-4 border-b border-slate-100 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div>
             <h3 className="text-sm font-black text-slate-900 uppercase flex items-center gap-2">
               <Table size={17} className="text-indigo-600" />
-              2. Folha de Auditoria de Carga Horária (Evidência de Função Fixa, Extra por CH e Escala Inclusa no Pacote)
+              2. Folha de Auditoria de Carga Horária & Movimentações de Trocas/Passagens
             </h3>
             <p className="text-[11px] text-slate-500">
-              Mesmo para funções de remuneração fixa ou inclusas no pacote, todas as horas trabalhadas individualmente são contabilizadas e discriminadas por dia e horário abaixo.
+              Contabiliza as horas em Cota Fixa, Extra por CH e Escala Inclusa no Pacote, além de auditar todas as trocas e passagens realizadas pelo médico no período.
             </p>
           </div>
         </div>
@@ -2461,7 +2918,7 @@ export default function PayrollAndAuditView(props: any) {
                 🟪 CH Inclusa no Pacote
               </th>
               <th className="py-3 px-3 text-center bg-slate-900 border-l border-slate-700">
-                Total Geral Cumprido
+                Total Cumprido & Trocas
               </th>
               {allFunctionNames.map((fn, idx) => {
                 const cInfo = getFunctionColorInfo(fn, idx);
@@ -2486,6 +2943,9 @@ export default function PayrollAndAuditView(props: any) {
               const isExpanded = Boolean(
                 expandedAuditDaysByEntity[String(row.entityKey)] || !isAdmin
               );
+              const totalSwapsInPeriod =
+                row.evaluatedPassagensDiscounts.length +
+                (row.doctorSubstitutionsReceivedInWindow?.length || 0);
 
               return (
                 <React.Fragment key={row.entityKey}>
@@ -2509,7 +2969,7 @@ export default function PayrollAndAuditView(props: any) {
                           className="px-2.5 py-1 rounded-lg bg-indigo-50 hover:bg-indigo-100 text-indigo-900 font-extrabold text-[10px] flex items-center gap-1 shrink-0"
                         >
                           <Clock size={11} />
-                          {isExpanded ? 'Ocultar Dias' : 'Ver Dias e Horários'}
+                          {isExpanded ? 'Ocultar Detalhes' : 'Ver Dias e Trocas'}
                         </button>
                       </div>
                     </td>
@@ -2524,7 +2984,14 @@ export default function PayrollAndAuditView(props: any) {
                       {row.totalPeriodicHoursAllFns}h
                     </td>
                     <td className="py-3 px-3 text-center font-black text-slate-900 bg-slate-100 border-l border-slate-200">
-                      {row.totalFulfilledHours}h ({row.shiftsCount} pl.)
+                      <div>
+                        {row.totalFulfilledHours}h ({row.shiftsCount} pl.)
+                      </div>
+                      {totalSwapsInPeriod > 0 && (
+                        <span className="inline-block mt-0.5 px-2 py-0.5 rounded bg-amber-100 text-amber-900 font-extrabold text-[9px]">
+                          🔄 {totalSwapsInPeriod} troca(s)/passagem(ns)
+                        </span>
+                      )}
                     </td>
 
                     {allFunctionNames.map(fn => {
@@ -2569,24 +3036,24 @@ export default function PayrollAndAuditView(props: any) {
                     })}
                   </tr>
 
-                  {/* LINHA EXPANSÍVEL: DISCRIMINAÇÃO POR DIA E HORÁRIO EXERCIDOS */}
+                  {/* LINHA EXPANSÍVEL: DISCRIMINAÇÃO POR DIA/HORÁRIO + AUDITORIA DE TROCAS E PASSAGENS */}
                   {isExpanded && (
                     <tr className="bg-slate-50/90">
                       <td
                         colSpan={5 + allFunctionNames.length}
                         className="p-4 border-b border-slate-200"
                       >
-                        <div className="space-y-2.5">
+                        <div className="space-y-4">
                           <div className="flex items-center justify-between flex-wrap gap-2">
                             <strong className="text-[11px] font-black text-indigo-950 uppercase">
-                              📅 Discriminação Cronológica de Dias e Horários Exercidos — {d.name} ({row.dailyWorkedScheduleList.length} plantões / {row.totalFulfilledHours}h totais)
+                              📅 1. Discriminação Cronológica de Dias e Horários Exercidos — {d.name} ({row.dailyWorkedScheduleList.length} plantões / {row.totalFulfilledHours}h totais)
                             </strong>
                             <button
                               type="button"
                               onClick={() => handleDownloadAnalyticalWorkloadAuditPDF(row)}
                               className="text-[10px] font-extrabold text-indigo-700 hover:underline flex items-center gap-1"
                             >
-                              <Printer size={12} /> Imprimir Auditoria Individual deste Médico
+                              <Printer size={12} /> Imprimir Auditoria & Extrato Bancário deste Médico (PDF)
                             </button>
                           </div>
 
@@ -2625,7 +3092,7 @@ export default function PayrollAndAuditView(props: any) {
                                       <span
                                         className={`inline-block px-1.5 py-0.5 rounded border text-[9px] font-black ${regimeBadgeClass}`}
                                       >
-                                        {sh.regime}
+                                        {sh.regime} {sh.isFromSwap ? '🔄' : ''}
                                       </span>
                                     </div>
                                     <span className="px-2.5 py-1 rounded-lg bg-slate-900 text-white font-black text-[11px] shrink-0">
@@ -2636,6 +3103,82 @@ export default function PayrollAndAuditView(props: any) {
                               })}
                             </div>
                           )}
+
+                          {/* SECÇÃO DE TROCAS E PASSAGENS NA AUDITORIA DE CARGA HORÁRIA */}
+                          <div className="pt-3 border-t border-slate-200 space-y-2">
+                            <strong className="text-[11px] font-black text-emerald-950 uppercase flex items-center gap-1.5">
+                              <ArrowLeftRight size={13} className="text-emerald-600" />
+                              🔄 2. Trocas, Permutas e Passagens Realizadas pelo Médico na Competência ({totalSwapsInPeriod})
+                            </strong>
+
+                            {totalSwapsInPeriod === 0 ? (
+                              <p className="text-slate-400 italic text-[11px]">
+                                Nenhuma troca, permuta ou passagem registada para este médico no período.
+                              </p>
+                            ) : (
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+                                {row.evaluatedPassagensDiscounts.map((pd: any) => (
+                                  <div
+                                    key={`aud_tit_${pd.swapId}`}
+                                    className="p-3 rounded-xl bg-white border border-rose-200 space-y-1 text-[11px]"
+                                  >
+                                    <div className="flex items-center justify-between gap-2">
+                                      <span className="px-2 py-0.5 rounded bg-rose-100 text-rose-900 font-black text-[9px] uppercase">
+                                        Solicitante (Passou o Plantão)
+                                      </span>
+                                      <strong className="text-slate-900">
+                                        {formatBrDate(pd.date)} • {pd.startTime}-{pd.endTime} ({pd.hours}h)
+                                      </strong>
+                                    </div>
+                                    <div className="text-slate-700">
+                                      <strong>Função:</strong> {pd.functionName} •{' '}
+                                      <strong>Substituto:</strong> {pd.substituteName}
+                                    </div>
+                                    <div className="text-rose-800 font-bold text-[10px]">
+                                      Regra Financeira: {pd.modeDescriptionLabel} (
+                                      {pd.discountApplied > 0
+                                        ? `- R$ ${formatCurrencyBR(pd.discountApplied)}`
+                                        : 'Sem desconto'}
+                                      )
+                                    </div>
+                                    {pd.managerComment && (
+                                      <div className="p-1.5 rounded bg-blue-50 text-blue-950 font-bold text-[10px]">
+                                        💬 Comentário do Gestor: “{pd.managerComment}”
+                                      </div>
+                                    )}
+                                  </div>
+                                ))}
+
+                                {(row.doctorSubstitutionsReceivedInWindow || []).map(
+                                  (sub: any) => (
+                                    <div
+                                      key={`aud_sub_${sub.swapId}`}
+                                      className="p-3 rounded-xl bg-white border border-emerald-200 space-y-1 text-[11px]"
+                                    >
+                                      <div className="flex items-center justify-between gap-2">
+                                        <span className="px-2 py-0.5 rounded bg-emerald-100 text-emerald-900 font-black text-[9px] uppercase">
+                                          Substituto / Permutante (Assumiu o Plantão)
+                                        </span>
+                                        <strong className="text-slate-900">
+                                          {formatBrDate(sub.date)} • {sub.startTime}-{sub.endTime} (
+                                          {sub.hours}h)
+                                        </strong>
+                                      </div>
+                                      <div className="text-slate-700">
+                                        <strong>Função:</strong> {sub.functionName} •{' '}
+                                        <strong>Titular Substituído:</strong> {sub.titularName}
+                                      </div>
+                                      {sub.managerComment && (
+                                        <div className="p-1.5 rounded bg-blue-50 text-blue-950 font-bold text-[10px]">
+                                          💬 Comentário do Gestor: “{sub.managerComment}”
+                                        </div>
+                                      )}
+                                    </div>
+                                  )
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       </td>
                     </tr>

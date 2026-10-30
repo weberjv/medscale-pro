@@ -5,7 +5,7 @@ import {
   Users, Sliders, Plus, Trash2, Edit3, CheckCircle,
   UserCheck, Award, Briefcase, Stethoscope, FileSpreadsheet,
   ChevronDown, ChevronUp, FileText, Printer, History,
-  ShieldAlert, Percent, Save, Palette, ArrowLeftRight, Clock
+  ShieldAlert, Percent, Save, Palette, ArrowLeftRight, Clock, X
 } from 'lucide-react';
 import PayrollAndAuditView from './PayrollAndAuditView';
 
@@ -128,6 +128,7 @@ export default function StaffAndFinanceViews(props: any) {
     shifts = [],
     setShifts,
     swaps = [],
+    setSwaps,
     vacations = [],
     setVacations,
     courses = [],
@@ -153,6 +154,9 @@ export default function StaffAndFinanceViews(props: any) {
   };
   const safeSetShifts = (updater: any) => {
     if (typeof setShifts === 'function') setShifts(updater);
+  };
+  const safeSetSwaps = (updater: any) => {
+    if (typeof setSwaps === 'function') setSwaps(updater);
   };
   const safeSetVacations = (updater: any) => {
     if (typeof setVacations === 'function') setVacations(updater);
@@ -275,7 +279,7 @@ export default function StaffAndFinanceViews(props: any) {
     Record<number, { date: string; severity: string; title: string; description: string }>
   >({});
 
-  // Estados locais para a aba de Tabela de Remuneração (Com as 3 Formas de Remuneração por Função)
+  // Estados locais para a aba de Tabela de Remuneração
   const [newSpecialtyName, setNewSpecialtyName] = useState<string>('');
   const [newFunctionForm, setNewFunctionForm] = useState({
     name: '',
@@ -294,6 +298,17 @@ export default function StaffAndFinanceViews(props: any) {
     enablePeriodicIncluded: false,
     periodicRefHours: 12,
     monthlyFixedValue: 5000
+  });
+
+  // Estado para Edição Completa de uma Função já Cadastrada (Nome, Tipo de Alocação, etc.)
+  const [editingFunctionOriginalName, setEditingFunctionOriginalName] = useState<string | null>(
+    null
+  );
+  const [editFunctionDraft, setEditFunctionDraft] = useState({
+    newName: '',
+    description: '',
+    colorTheme: 'blue',
+    requiresSchedule: true
   });
 
   // Estado para o Catálogo Avançado de Adicionais & Bonificações
@@ -417,7 +432,8 @@ export default function StaffAndFinanceViews(props: any) {
           roleInSwap,
           requesterName: reqDoc?.name || 'Médico Titular',
           substituteDetail: coverageDetail,
-          permutedInfo: sw.permutedShiftInfo || ''
+          permutedInfo: sw.permutedShiftInfo || '',
+          managerComment: sw.managerFinancialComment || ''
         };
       });
   };
@@ -619,6 +635,7 @@ export default function StaffAndFinanceViews(props: any) {
                 <td style="padding:6px 8px;border:1px solid #cbd5e1;">
                   <strong>Substituto/Permutante:</strong> ${sw.substituteDetail}
                   ${sw.permutedInfo ? `<br/><em>Permuta: ${sw.permutedInfo}</em>` : ''}
+                  ${sw.managerComment ? `<br/><strong>Obs. Gestor:</strong> ${sw.managerComment}` : ''}
                 </td>
               </tr>
             `
@@ -1683,6 +1700,11 @@ export default function StaffAndFinanceViews(props: any) {
                                     <strong>Solicitante:</strong> {sw.requesterName} →{' '}
                                     <strong>Substituto/Permutante:</strong> {sw.substituteDetail}
                                   </div>
+                                  {sw.managerComment && (
+                                    <div className="text-blue-900 font-bold text-[10px]">
+                                      💬 Obs. Gestor: “{sw.managerComment}”
+                                    </div>
+                                  )}
                                 </div>
                               ))}
                             </div>
@@ -2194,7 +2216,7 @@ export default function StaffAndFinanceViews(props: any) {
 
   // ============================================================================
   // 3. ABA: TABELA DE REMUNERAÇÃO
-  // (HABILITAÇÃO DAS 3 FORMAS DE REMUNERAÇÃO POR FUNÇÃO + NIVELAMENTO + ADICIONAIS)
+  // (COM BOTÃO "✏️ EDITAR FUNÇÃO", AS 3 MODALIDADES, NIVELAMENTO & ADICIONAIS)
   // ============================================================================
   const functionNames = Object.keys(functionRatesObj);
   const shiftAdditionalsList = Array.isArray(config?.shiftAdditionals)
@@ -2234,6 +2256,122 @@ export default function StaffAndFinanceViews(props: any) {
       registeredSpecialties: nextList
     }));
     safeRecordAction(`Especialidade removida: ${specName}`);
+  };
+
+  // Abrir edição de uma função já criada
+  const handleStartEditFunction = (fnName: string, fnObj: any, idx: number) => {
+    if (!isAdmin) return;
+    const cInfo = getFunctionColorInfo(fnName, idx);
+    setEditingFunctionOriginalName(fnName);
+    setEditFunctionDraft({
+      newName: fnName,
+      description: fnObj.description || '',
+      colorTheme: cInfo.id || 'blue',
+      requiresSchedule: fnObj.requiresSchedule !== false
+    });
+  };
+
+  // Guardar alterações da função (incluindo mudança de nome com migração automática em todo o app)
+  const handleSaveEditedFunction = (oldName: string) => {
+    if (!isAdmin) return;
+    const cleanNewName = editFunctionDraft.newName.trim();
+    if (!cleanNewName) {
+      alert('O nome da função não pode ficar em branco.');
+      return;
+    }
+
+    const isRenamed = cleanNewName !== oldName;
+    if (
+      isRenamed &&
+      Object.keys(functionRatesObj).some(
+        k => k.toLowerCase() === cleanNewName.toLowerCase() && k !== oldName
+      )
+    ) {
+      alert(`Já existe uma função chamada "${cleanNewName}" na Tabela de Remuneração.`);
+      return;
+    }
+
+    safeSetConfig((prev: any) => {
+      const oldRates = prev?.functionRates || {};
+      const nextRates: Record<string, any> = {};
+
+      Object.keys(oldRates).forEach(k => {
+        if (k === oldName) {
+          nextRates[cleanNewName] = {
+            ...oldRates[k],
+            description: editFunctionDraft.description.trim(),
+            colorTheme: editFunctionDraft.colorTheme,
+            requiresSchedule: Boolean(editFunctionDraft.requiresSchedule)
+          };
+        } else {
+          nextRates[k] = oldRates[k];
+        }
+      });
+
+      // Atualiza também os adicionais que apontavam para o nome antigo
+      const nextAdditionals = (Array.isArray(prev?.shiftAdditionals)
+        ? prev.shiftAdditionals
+        : []
+      ).map((add: any) => {
+        if (!isRenamed) return add;
+        const currTargets: string[] = Array.isArray(add.targetFunctionNames)
+          ? add.targetFunctionNames.map((fn: string) =>
+              fn === oldName ? cleanNewName : fn
+            )
+          : [];
+        return {
+          ...add,
+          targetFunctionNames: currTargets,
+          targetFunctionName:
+            add.targetFunctionName === oldName
+              ? cleanNewName
+              : add.targetFunctionName
+        };
+      });
+
+      return {
+        ...prev,
+        functionRates: nextRates,
+        shiftAdditionals: nextAdditionals
+      };
+    });
+
+    // Se houve mudança no nome da função, migra médicos, plantões e trocas
+    if (isRenamed) {
+      safeSetDoctors((prev: any[]) =>
+        (Array.isArray(prev) ? prev : []).map((d: any) => ({
+          ...d,
+          role: d.role === oldName ? cleanNewName : d.role,
+          allowedFunctions: Array.isArray(d.allowedFunctions)
+            ? d.allowedFunctions.map((fn: string) =>
+                fn === oldName ? cleanNewName : fn
+              )
+            : d.allowedFunctions
+        }))
+      );
+
+      safeSetShifts((prev: any[]) =>
+        (Array.isArray(prev) ? prev : []).map((s: any) => ({
+          ...s,
+          category: s.category === oldName ? cleanNewName : s.category,
+          role: s.role === oldName ? cleanNewName : s.role
+        }))
+      );
+
+      safeSetSwaps((prev: any[]) =>
+        (Array.isArray(prev) ? prev : []).map((sw: any) => ({
+          ...sw,
+          category: sw.category === oldName ? cleanNewName : sw.category
+        }))
+      );
+    }
+
+    setEditingFunctionOriginalName(null);
+    safeRecordAction(
+      isRenamed
+        ? `Função "${oldName}" renomeada e atualizada para "${cleanNewName}" na Tabela de Remuneração`
+        : `Parâmetros da função "${cleanNewName}" atualizados na Tabela de Remuneração`
+    );
   };
 
   const handleUpdateFunctionField = (fnName: string, field: string, value: any) => {
@@ -2532,10 +2670,10 @@ export default function StaffAndFinanceViews(props: any) {
       <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
         <h2 className="text-xl sm:text-2xl font-bold text-slate-900 flex items-center gap-2">
           <Sliders className="text-blue-600" size={24} />
-          Tabela de Remuneração, Formas de Remuneração por Função, Nivelamento & Adicionais
+          Tabela de Remuneração, Edição de Funções, Nivelamento & Adicionais
         </h2>
         <p className="text-xs text-slate-500 mt-1">
-          Para cada função, habilite as modalidades desejadas: <strong>1. Por Cota Fixa Mensal</strong> (valor incide fechado na folha, independente de 4 ou 5 semanas), <strong>2. Por Carga Horária Total (CH/Extra)</strong> (ajuste proporcional por fração de horas) e/ou <strong>3. Incluso na Cota Mensal (Escala Periódica)</strong> (contabiliza horas na auditoria sem pagamento extra).
+          Clique em <strong>"✏️ Editar Função"</strong> em qualquer cartão para alterar o nome da função, o tipo de alocação (Com Escala vs. Sem Escala), a descrição ou a cor.
         </p>
       </div>
 
@@ -2588,11 +2726,11 @@ export default function StaffAndFinanceViews(props: any) {
         )}
       </div>
 
-      {/* BLOCO 2: CARTÕES DE FUNÇÕES COM AS 3 FORMAS DE REMUNERAÇÃO + NIVELAMENTO SOB DEMANDA */}
+      {/* BLOCO 2: CARTÕES DE FUNÇÕES COM BOTÃO "✏️ EDITAR FUNÇÃO" + 3 MODALIDADES + NIVELAMENTO */}
       <div className="space-y-4">
         <h3 className="text-base font-extrabold text-slate-900 uppercase px-1 flex items-center gap-2">
           <Briefcase size={18} className="text-blue-600" />
-          Funções Cadastradas — Formas de Remuneração Habilitadas, CH de Referência & Nivelamento
+          Funções Cadastradas — Edição Flexível, Formas de Remuneração & Nivelamento
         </h3>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
@@ -2610,6 +2748,8 @@ export default function StaffAndFinanceViews(props: any) {
             const hourlyRefHours = Number(fnObj.hourlyRefHours || 12);
             const enablePeriodicIncluded = Boolean(fnObj.enablePeriodicIncluded);
             const periodicRefHours = Number(fnObj.periodicRefHours || 12);
+
+            const isEditingThisFn = editingFunctionOriginalName === fnName;
 
             return (
               <div
@@ -2642,18 +2782,151 @@ export default function StaffAndFinanceViews(props: any) {
                         </div>
 
                         {isAdmin && (
-                          <button
-                            type="button"
-                            onClick={() => handleDeleteFunction(fnName)}
-                            className="text-slate-400 hover:text-red-600 p-1"
-                            title="Excluir função"
-                          >
-                            <Trash2 size={15} />
-                          </button>
+                          <div className="flex items-center gap-1.5">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                isEditingThisFn
+                                  ? setEditingFunctionOriginalName(null)
+                                  : handleStartEditFunction(fnName, fnObj, fnIdx)
+                              }
+                              className={`px-2.5 py-1 rounded-xl font-extrabold flex items-center gap-1 text-[11px] transition-all ${
+                                isEditingThisFn
+                                  ? 'bg-slate-200 text-slate-800'
+                                  : 'bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200'
+                              }`}
+                            >
+                              <Edit3 size={12} />
+                              {isEditingThisFn ? 'Cancelar' : '✏️ Editar Função'}
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteFunction(fnName)}
+                              className="text-slate-400 hover:text-red-600 p-1"
+                              title="Excluir função"
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          </div>
                         )}
                       </div>
 
-                      {/* Seletor de Cor */}
+                      {/* PAINEL DE EDIÇÃO COMPLETA DA FUNÇÃO (NOME, ALOCAÇÃO, DESCRIÇÃO E COR) */}
+                      {isAdmin && isEditingThisFn && (
+                        <div className="p-3.5 rounded-2xl bg-blue-50/80 border-2 border-blue-400 space-y-3">
+                          <div className="flex items-center justify-between">
+                            <strong className="text-blue-950 font-black uppercase text-[11px]">
+                              ✏️ Editar Nome, Alocação e Dados da Função
+                            </strong>
+                            <button
+                              type="button"
+                              onClick={() => setEditingFunctionOriginalName(null)}
+                              className="text-slate-500 hover:text-slate-800"
+                            >
+                              <X size={14} />
+                            </button>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                            <div>
+                              <label className="block font-bold text-slate-700 mb-1">
+                                Nome da Função *
+                              </label>
+                              <input
+                                type="text"
+                                value={editFunctionDraft.newName}
+                                onChange={e =>
+                                  setEditFunctionDraft({
+                                    ...editFunctionDraft,
+                                    newName: e.target.value
+                                  })
+                                }
+                                className="w-full border border-blue-300 rounded-xl px-3 py-1.5 bg-white font-black text-slate-900"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block font-bold text-slate-700 mb-1">
+                                Tipo de Alocação
+                              </label>
+                              <select
+                                value={editFunctionDraft.requiresSchedule ? 'sim' : 'nao'}
+                                onChange={e =>
+                                  setEditFunctionDraft({
+                                    ...editFunctionDraft,
+                                    requiresSchedule: e.target.value === 'sim'
+                                  })
+                                }
+                                className="w-full border border-blue-300 rounded-xl px-2.5 py-1.5 bg-white font-bold"
+                              >
+                                <option value="sim">Com Escala (Plantão / Rotina)</option>
+                                <option value="nao">Sem Escala (Cargo Fixo Mensal)</option>
+                              </select>
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                            <div className="sm:col-span-2">
+                              <label className="block font-bold text-slate-700 mb-1">
+                                Descrição / Atribuições
+                              </label>
+                              <input
+                                type="text"
+                                value={editFunctionDraft.description}
+                                onChange={e =>
+                                  setEditFunctionDraft({
+                                    ...editFunctionDraft,
+                                    description: e.target.value
+                                  })
+                                }
+                                className="w-full border border-blue-300 rounded-xl px-3 py-1.5 bg-white"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="block font-bold text-slate-700 mb-1">
+                                Cor do Tema
+                              </label>
+                              <select
+                                value={editFunctionDraft.colorTheme}
+                                onChange={e =>
+                                  setEditFunctionDraft({
+                                    ...editFunctionDraft,
+                                    colorTheme: e.target.value
+                                  })
+                                }
+                                className="w-full border border-blue-300 rounded-xl px-2.5 py-1.5 bg-white font-bold"
+                              >
+                                {Object.values(FUNCTION_COLOR_PALETTE).map(pal => (
+                                  <option key={pal.id} value={pal.id}>
+                                    🎨 {pal.label}
+                                  </option>
+                                ))}
+                              </select>
+                            </div>
+                          </div>
+
+                          <div className="flex justify-end gap-2 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => setEditingFunctionOriginalName(null)}
+                              className="px-3 py-1.5 rounded-xl bg-white border border-slate-300 text-slate-700 font-bold"
+                            >
+                              Cancelar
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleSaveEditedFunction(fnName)}
+                              className="px-4 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white font-black flex items-center gap-1 shadow-xs"
+                            >
+                              <Save size={13} /> Guardar Alterações da Função
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Seletor Rápido de Cor */}
                       <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex flex-wrap items-center justify-between gap-2">
                         <span className="font-extrabold text-slate-700 text-[11px] flex items-center gap-1.5">
                           <Palette size={14} style={{ color: colorInfo.hex }} />
@@ -3418,7 +3691,7 @@ export default function StaffAndFinanceViews(props: any) {
         )}
       </div>
 
-      {/* BLOCO 3: CATÁLOGO DETALHADO DE ADICIONAIS & BONIFICAÇÕES (MANTIDO INTACTO) */}
+      {/* BLOCO 3: CATÁLOGO DETALHADO DE ADICIONAIS & BONIFICAÇÕES */}
       <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5 text-xs">
         <div>
           <h3 className="text-base font-extrabold text-slate-900 flex items-center gap-2">

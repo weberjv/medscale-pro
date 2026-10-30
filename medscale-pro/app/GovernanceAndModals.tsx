@@ -5,7 +5,7 @@ import {
   Umbrella, GraduationCap, ShieldAlert, ClipboardList, History,
   Sliders, Plus, Trash2, CheckCircle, AlertTriangle, RotateCcw,
   Lock, Unlock, X, Calendar, Sparkles, CheckSquare, Tag,
-  BarChart3, Edit3, Megaphone, Save, Lightbulb, Users
+  BarChart3, Megaphone, Save, Lightbulb, CalendarCheck, MapPin
 } from 'lucide-react';
 
 export default function GovernanceAndModals(props: any) {
@@ -101,7 +101,6 @@ export default function GovernanceAndModals(props: any) {
     return `${parts[2]}/${parts[1]}`;
   };
 
-  // Especialidades e Funções disponíveis
   const registeredSpecialtiesList: { id: string; name: string }[] =
     Array.isArray(config?.registeredSpecialties) && config.registeredSpecialties.length > 0
       ? config.registeredSpecialties
@@ -123,15 +122,25 @@ export default function GovernanceAndModals(props: any) {
       ? dynamicCategories
       : ['Plantonista', 'Médico Rotina/Sênior', 'Chefe de Plantão'];
 
+  // Pop-up Global de Confirmação ("Solicitação enviada")
+  const [requestSentPopup, setRequestSentPopup] = useState<{
+    open: boolean;
+    title: string;
+    subtitle: string;
+  }>({ open: false, title: '', subtitle: '' });
+
   // ============================================================================
-  // ESTADOS E LÓGICA DE FÉRIAS & LICENÇAS (MATRIZ ANUAL, BLOQUEIO DE MÊS, 2 ETAPAS)
+  // ESTADOS E LÓGICA DE FÉRIAS & LICENÇAS
   // ============================================================================
-  const [matrixYear, setMatrixYear] = useState<number>(2026);
+  const todayIsoStr = new Date().toISOString().split('T')[0];
+  const [matrixYear, setMatrixYear] = useState<number>(
+    Number(todayIsoStr.slice(0, 4)) || 2026
+  );
   const [vacForm, setVacForm] = useState({
     doctorId: safeActiveDoctors[0]?.id || currentUser?.id || 1,
     requestType: 'Férias' as 'Férias' | 'Licença',
-    startDate: '2026-10-05',
-    endDate: '2026-10-20',
+    startDate: todayIsoStr,
+    endDate: todayIsoStr,
     reason: ''
   });
   const [vacErrorMsg, setVacErrorMsg] = useState<string>('');
@@ -234,6 +243,17 @@ export default function GovernanceAndModals(props: any) {
         newVac.startDate
       )} a ${formatBrDate(newVac.endDate)})`
     );
+
+    // Exibe o Pop-up de confirmação "Solicitação enviada"
+    setRequestSentPopup({
+      open: true,
+      title: 'Solicitação enviada!',
+      subtitle: `O seu pedido de ${newVac.requestType} (${formatBrDate(
+        newVac.startDate
+      )} a ${formatBrDate(
+        newVac.endDate
+      )}) foi registado e enviado para análise da coordenação.`
+    });
   };
 
   const handleInitialApproveVacation = (vacId: number) => {
@@ -372,7 +392,7 @@ export default function GovernanceAndModals(props: any) {
   };
 
   // ============================================================================
-  // ESTADOS E LÓGICA DE CURSOS & CERTIFICAÇÕES
+  // ESTADOS E LÓGICA DE MEUS CURSOS & AGENDAMENTO DE CURSOS DA EQUIPE
   // ============================================================================
   const defaultCourseTypes = [
     { id: 'ct_acls', name: 'ACLS', colorTheme: 'blue', defaultMonths: 24 },
@@ -392,8 +412,19 @@ export default function GovernanceAndModals(props: any) {
       ? config.courseTypes
       : defaultCourseTypes;
 
+  const scheduledCoursesList: {
+    id: string;
+    doctorId: number;
+    courseName: string;
+    scheduledDate: string;
+    scheduledTime?: string;
+    location: string;
+    notes?: string;
+    status: 'Agendado' | 'Realizado' | 'Cancelado';
+  }[] = Array.isArray(config?.scheduledCourses) ? config.scheduledCourses : [];
+
   const [courseActiveTab, setCourseActiveTab] = useState<
-    'expired' | 'expiring_soon' | 'valid' | 'by_course' | 'all'
+    'expired' | 'expiring_soon' | 'valid' | 'by_course' | 'scheduled'
   >('by_course');
   const [selectedCourseFilter, setSelectedCourseFilter] = useState<string>('Todos');
 
@@ -406,10 +437,20 @@ export default function GovernanceAndModals(props: any) {
   const [newCertForm, setNewCertForm] = useState({
     doctorId: safeActiveDoctors[0]?.id || currentUser?.id || 1,
     courseName: registeredCourseTypes[0]?.name || 'ACLS',
-    completionDate: '2025-05-10',
-    expirationDate: '2027-05-10',
+    completionDate: todayIsoStr,
+    expirationDate: '2028-10-30',
     institution: 'AHA / Sociedade Médica',
     certificateNumber: ''
+  });
+
+  // Novo Estado para Agendamento de Curso da Equipe (Gestor)
+  const [scheduleCourseForm, setScheduleCourseForm] = useState({
+    doctorId: safeActiveDoctors[0]?.id || 1,
+    courseName: registeredCourseTypes[0]?.name || 'ACLS',
+    scheduledDate: todayIsoStr,
+    scheduledTime: '08:00',
+    location: 'Centro de Simulação / Hospital',
+    notes: ''
   });
 
   const getCourseThemeClasses = (theme?: string) => {
@@ -550,8 +591,47 @@ export default function GovernanceAndModals(props: any) {
     );
   };
 
+  const handleAddScheduledCourse = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!isAdmin) return;
+    const docObj = resolveDoctor(scheduleCourseForm.doctorId);
+
+    const newSched = {
+      id: `sched_${Date.now()}`,
+      doctorId: Number(scheduleCourseForm.doctorId),
+      courseName: scheduleCourseForm.courseName,
+      scheduledDate: scheduleCourseForm.scheduledDate,
+      scheduledTime: scheduleCourseForm.scheduledTime || '08:00',
+      location: scheduleCourseForm.location.trim() || 'Centro de Treinamento',
+      notes: scheduleCourseForm.notes.trim(),
+      status: 'Agendado' as const
+    };
+
+    safeSetConfig((prev: any) => ({
+      ...prev,
+      scheduledCourses: [newSched, ...(Array.isArray(prev?.scheduledCourses) ? prev.scheduledCourses : [])]
+    }));
+
+    setScheduleCourseForm({ ...scheduleCourseForm, notes: '' });
+    safeRecordAction(
+      `Curso ${newSched.courseName} agendado pelo gestor para ${docObj?.name || 'Médico'} em ${formatBrDate(
+        newSched.scheduledDate
+      )}`
+    );
+  };
+
+  const handleRemoveScheduledCourse = (schedId: string) => {
+    if (!isAdmin) return;
+    safeSetConfig((prev: any) => ({
+      ...prev,
+      scheduledCourses: (Array.isArray(prev?.scheduledCourses) ? prev.scheduledCourses : []).filter(
+        (sc: any) => sc.id !== schedId
+      )
+    }));
+  };
+
   // ============================================================================
-  // ESTADOS DE GESTÃO À VISTA, GOVERNANÇA, COMUNICADOS & OCORRÊNCIAS POR CATEGORIA
+  // ESTADOS DE GESTÃO À VISTA, GOVERNANÇA, COMUNICADOS & OCORRÊNCIAS
   // ============================================================================
   const defaultVisualIndicators = [
     {
@@ -610,9 +690,8 @@ export default function GovernanceAndModals(props: any) {
     content: ''
   });
 
-  // Novo Estado de Ocorrências com Categoria (Corpo Clínico -> Selecionar Médico / Fluxo / Assistência -> Campo Aberto / Outros -> Campo Aberto)
   const [occForm, setOccForm] = useState({
-    date: new Date().toISOString().split('T')[0],
+    date: todayIsoStr,
     severity: 'Apontamento Operacional',
     categoryGroup: 'Corpo Clínico' as 'Corpo Clínico' | 'Fluxo / Assistência' | 'Outros',
     targetDoctorId: safeActiveDoctors[0]?.id || 1,
@@ -660,13 +739,13 @@ export default function GovernanceAndModals(props: any) {
 
   const [modalWhDraft, setModalWhDraft] = useState({
     type: 'Início de Função',
-    date: new Date().toISOString().split('T')[0],
+    date: todayIsoStr,
     endDate: '',
     details: ''
   });
 
   const [modalOccDraft, setModalOccDraft] = useState({
-    date: new Date().toISOString().split('T')[0],
+    date: todayIsoStr,
     severity: 'Apontamento Operacional',
     title: '',
     description: ''
@@ -815,9 +894,6 @@ export default function GovernanceAndModals(props: any) {
     safeCloseModal();
   };
 
-  // ============================================================================
-  // RENDERIZAÇÃO PRINCIPAL DAS ABAS DE GOVERNANÇA
-  // ============================================================================
   const renderActiveGovernanceView = () => {
     // --------------------------------------------------------------------------
     // 1. ABA: FÉRIAS & LICENÇAS
@@ -1391,13 +1467,19 @@ export default function GovernanceAndModals(props: any) {
     }
 
     // --------------------------------------------------------------------------
-    // 2. ABA: CURSOS & CERTIFICAÇÕES
+    // 2. ABA: MEUS CURSOS / CURSOS & AGENDAMENTOS DA EQUIPE
     // --------------------------------------------------------------------------
     if (currentView === 'courses') {
       const baseVisibleCourses = isAdmin
         ? safeCourses
         : safeCourses.filter(
             (c: any) => Number(c?.doctorId) === Number(currentUser?.id)
+          );
+
+      const visibleScheduledCourses = isAdmin
+        ? scheduledCoursesList
+        : scheduledCoursesList.filter(
+            sc => Number(sc.doctorId) === Number(currentUser?.id)
           );
 
       const enrichedCourses = baseVisibleCourses.map((c: any) => {
@@ -1437,12 +1519,220 @@ export default function GovernanceAndModals(props: any) {
           <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
             <h2 className="text-xl sm:text-2xl font-bold text-slate-900 flex items-center gap-2">
               <GraduationCap className="text-blue-600" size={24} />
-              Central de Cursos, Certificações & Controle de Vencimentos
+              {isAdmin
+                ? 'Central de Cursos, Agendamentos da Equipe & Vencimentos'
+                : 'Meus Cursos, Agendamentos & Certificados'}
             </h2>
             <p className="text-xs text-slate-500 mt-1">
-              Diferenciação visual por tipo de curso cadastrado e abas dedicadas para identificar imediatamente certificados vencidos ou a vencer.
+              {isAdmin
+                ? 'Gerencie os tipos de curso, agende turmas para os médicos da equipe e acompanhe certificados em dia ou vencidos.'
+                : 'Acompanhe abaixo os seus cursos agendados pela coordenação e mantenha os seus certificados atualizados.'}
             </p>
           </div>
+
+          {/* SECÇÃO DE DESTAQUE PARA O MÉDICO: "SEUS CURSOS AGENDADOS" */}
+          {!isAdmin && (
+            <div className="bg-indigo-950 text-white p-5 rounded-2xl border-2 border-indigo-500 shadow-md space-y-3 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <h3 className="text-sm sm:text-base font-black uppercase flex items-center gap-2">
+                  <CalendarCheck size={19} className="text-amber-400" />
+                  Seus Cursos Agendados ({visibleScheduledCourses.length})
+                </h3>
+                <span className="px-2.5 py-1 rounded-full bg-indigo-800 text-indigo-200 font-bold text-[10px]">
+                  Programação Oficial da Coordenação
+                </span>
+              </div>
+
+              {visibleScheduledCourses.length === 0 ? (
+                <p className="text-indigo-200 italic py-2">
+                  Você não possui nenhum curso agendado no momento.
+                </p>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {visibleScheduledCourses.map(sc => {
+                    const cTypeObj = registeredCourseTypes.find(
+                      ct => ct.name.toLowerCase() === String(sc.courseName).toLowerCase()
+                    );
+                    const theme = getCourseThemeClasses(cTypeObj?.colorTheme);
+                    return (
+                      <div
+                        key={sc.id}
+                        className="bg-white text-slate-900 p-4 rounded-xl border border-indigo-200 shadow-xs space-y-1.5"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span
+                            className={`px-2.5 py-0.5 rounded font-black text-[11px] uppercase ${theme.badge}`}
+                          >
+                            {sc.courseName}
+                          </span>
+                          <span className="px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-950 font-black text-[10px]">
+                            📅 Data: {formatBrDate(sc.scheduledDate)} às {sc.scheduledTime || '08:00'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1.5 text-slate-700 font-bold pt-1">
+                          <MapPin size={13} className="text-blue-600 shrink-0" />
+                          <span>Local: {sc.location}</span>
+                        </div>
+                        {sc.notes && (
+                          <p className="text-[11px] text-slate-500 italic">
+                            Obs: {sc.notes}
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* PAINEL DO GESTOR: AGENDAR CURSOS DA EQUIPE */}
+          {isAdmin && (
+            <div className="bg-white p-5 rounded-2xl border-2 border-indigo-200 shadow-sm space-y-4 text-xs">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                <div>
+                  <h3 className="text-sm font-black text-indigo-950 uppercase flex items-center gap-2">
+                    <CalendarCheck size={17} className="text-indigo-600" />
+                    Agendamento de Cursos da Equipe (Sincronizado com "Seus Cursos Agendados" no Login do Médico)
+                  </h3>
+                  <p className="text-[11px] text-slate-500">
+                    Ao agendar um curso abaixo, o plantonista visualizará automaticamente na aba <strong>"Meus cursos"</strong> e no seu painel inicial.
+                  </p>
+                </div>
+              </div>
+
+              <form
+                onSubmit={handleAddScheduledCourse}
+                className="grid grid-cols-1 sm:grid-cols-6 gap-2.5 items-end"
+              >
+                <div className="sm:col-span-2">
+                  <label className="block font-bold mb-1">Médico (A-Z) *</label>
+                  <select
+                    value={scheduleCourseForm.doctorId}
+                    onChange={e =>
+                      setScheduleCourseForm({
+                        ...scheduleCourseForm,
+                        doctorId: Number(e.target.value)
+                      })
+                    }
+                    className="w-full border border-slate-300 rounded-xl px-3 py-2 bg-white font-bold"
+                  >
+                    {safeActiveDoctors.map((d: any) => (
+                      <option key={d.id} value={d.id}>
+                        {d.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-bold mb-1">Curso *</label>
+                  <select
+                    value={scheduleCourseForm.courseName}
+                    onChange={e =>
+                      setScheduleCourseForm({
+                        ...scheduleCourseForm,
+                        courseName: e.target.value
+                      })
+                    }
+                    className="w-full border border-slate-300 rounded-xl px-3 py-2 bg-white font-extrabold text-indigo-950"
+                  >
+                    {registeredCourseTypes.map(ct => (
+                      <option key={ct.id || ct.name} value={ct.name}>
+                        {ct.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block font-bold mb-1">Data Agendada *</label>
+                  <input
+                    type="date"
+                    required
+                    value={scheduleCourseForm.scheduledDate}
+                    onChange={e =>
+                      setScheduleCourseForm({
+                        ...scheduleCourseForm,
+                        scheduledDate: e.target.value
+                      })
+                    }
+                    className="w-full border border-slate-300 rounded-xl px-3 py-2 font-bold"
+                  />
+                </div>
+
+                <div>
+                  <label className="block font-bold mb-1">Local / Instituição</label>
+                  <input
+                    type="text"
+                    placeholder="Ex: Centro de Simulação"
+                    value={scheduleCourseForm.location}
+                    onChange={e =>
+                      setScheduleCourseForm({
+                        ...scheduleCourseForm,
+                        location: e.target.value
+                      })
+                    }
+                    className="w-full border border-slate-300 rounded-xl px-3 py-2 font-semibold"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  className="bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2.5 rounded-xl font-black shadow-sm"
+                >
+                  + Agendar Curso
+                </button>
+              </form>
+
+              {scheduledCoursesList.length > 0 && (
+                <div className="pt-2 space-y-2">
+                  <span className="block text-[10px] font-extrabold uppercase text-slate-500">
+                    Médicos com Cursos Agendados ({scheduledCoursesList.length}):
+                  </span>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5">
+                    {scheduledCoursesList.map(sc => {
+                      const doc = resolveDoctor(sc.doctorId);
+                      const cTypeObj = registeredCourseTypes.find(
+                        ct => ct.name.toLowerCase() === String(sc.courseName).toLowerCase()
+                      );
+                      const theme = getCourseThemeClasses(cTypeObj?.colorTheme);
+                      return (
+                        <div
+                          key={sc.id}
+                          className="p-3 rounded-xl bg-indigo-50/60 border border-indigo-200 flex items-center justify-between gap-2"
+                        >
+                          <div className="space-y-0.5">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span
+                                className={`px-2 py-0.5 rounded font-black text-[10px] uppercase ${theme.badge}`}
+                              >
+                                {sc.courseName}
+                              </span>
+                              <strong className="text-slate-900 font-black">
+                                {doc?.name || 'Médico'}
+                              </strong>
+                            </div>
+                            <span className="block text-[11px] font-bold text-indigo-950">
+                              📅 Agendado para: {formatBrDate(sc.scheduledDate)} • {sc.location}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveScheduledCourse(sc.id)}
+                            className="text-slate-400 hover:text-red-600 p-1"
+                            title="Remover agendamento"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
 
           {isAdmin && (
             <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4 text-xs">
@@ -1531,7 +1821,7 @@ export default function GovernanceAndModals(props: any) {
           >
             <h3 className="text-sm font-black text-slate-900 uppercase flex items-center gap-2">
               <Plus size={16} className="text-blue-600" />
-              Registar Certificado / Curso de Médico
+              Registar Curso Realizado / Certificado
             </h3>
 
             <div className="grid grid-cols-1 sm:grid-cols-5 gap-3 items-end">
@@ -1685,6 +1975,9 @@ export default function GovernanceAndModals(props: any) {
                 const courseItems = enrichedCourses.filter(
                   c => c.courseName.toLowerCase() === ct.name.toLowerCase()
                 );
+                const courseScheduledItems = visibleScheduledCourses.filter(
+                  sc => sc.courseName.toLowerCase() === ct.name.toLowerCase()
+                );
                 const courseExpiredCount = courseItems.filter(
                   c => c.expStatus === 'expired'
                 ).length;
@@ -1715,9 +2008,32 @@ export default function GovernanceAndModals(props: any) {
                     </div>
 
                     <div className="p-4 space-y-2.5 text-xs flex-1">
-                      {courseItems.length === 0 ? (
+                      {/* Exibe também quem está com este curso agendado */}
+                      {courseScheduledItems.map(sc => {
+                        const doc = resolveDoctor(sc.doctorId);
+                        return (
+                          <div
+                            key={sc.id}
+                            className="p-2.5 rounded-xl bg-indigo-50 border border-indigo-200 flex items-center justify-between gap-2"
+                          >
+                            <div>
+                              <strong className="text-indigo-950 font-black block">
+                                {doc?.name || 'Médico'}
+                              </strong>
+                              <span className="text-[11px] text-indigo-800 font-bold">
+                                📅 Curso Agendado: {formatBrDate(sc.scheduledDate)} ({sc.location})
+                              </span>
+                            </div>
+                            <span className="px-2.5 py-1 rounded-lg bg-indigo-600 text-white font-black text-[10px] uppercase">
+                              AGENDADO
+                            </span>
+                          </div>
+                        );
+                      })}
+
+                      {courseItems.length === 0 && courseScheduledItems.length === 0 ? (
                         <p className="text-slate-400 italic py-4 text-center">
-                          Nenhum certificado de {ct.name} registado.
+                          Nenhum certificado ou agendamento de {ct.name} registado.
                         </p>
                       ) : (
                         courseItems.map((item: any) => {
@@ -1871,7 +2187,7 @@ export default function GovernanceAndModals(props: any) {
     }
 
     // --------------------------------------------------------------------------
-    // 3. ABA UNIFICADA: GESTÃO À VISTA, GOVERNANÇA & COMUNICADOS (+ SUGESTÕES DOS MÉDICOS)
+    // 3. ABA: GESTÃO À VISTA, GOVERNANÇA & COMUNICADOS
     // --------------------------------------------------------------------------
     if (currentView === 'announcements') {
       const doctorSuggestionsList: any[] = Array.isArray(config?.doctorSuggestions)
@@ -1934,7 +2250,7 @@ export default function GovernanceAndModals(props: any) {
         if (!annForm.title.trim() || !annForm.content.trim()) return;
         const created = {
           id: Date.now(),
-          date: new Date().toISOString().split('T')[0],
+          date: todayIsoStr,
           title: annForm.title.trim(),
           priority: annForm.priority,
           category: annForm.category,
@@ -1990,9 +2306,6 @@ export default function GovernanceAndModals(props: any) {
               <ClipboardList className="text-blue-600" size={24} />
               Gestão à Vista, Governança Clínica & Mural de Comunicados
             </h2>
-            <p className="text-xs text-slate-500 mt-1">
-              Painel central unificado com a frase motivacional da unidade, NPS, indicadores assistenciais de desempenho e comunicados importantes com confirmação de ciência da equipa.
-            </p>
           </div>
 
           <div className="bg-slate-900 text-white rounded-2xl p-6 shadow-md flex flex-col md:flex-row md:items-center justify-between gap-4">
@@ -2058,16 +2371,11 @@ export default function GovernanceAndModals(props: any) {
             </div>
           )}
 
-          {/* Indicadores Assistenciais */}
           <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-              <div>
-                <h3 className="text-sm sm:text-base font-black text-slate-900 uppercase flex items-center gap-2">
-                  <BarChart3 size={18} className="text-blue-600" />
-                  Indicadores Assistenciais & Metas de Governança da Unidade
-                </h3>
-              </div>
-            </div>
+            <h3 className="text-sm sm:text-base font-black text-slate-900 uppercase flex items-center gap-2 border-b border-slate-100 pb-3">
+              <BarChart3 size={18} className="text-blue-600" />
+              Indicadores Assistenciais & Metas de Governança da Unidade
+            </h3>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
               {visualIndicatorsList.map(ind => {
@@ -2230,7 +2538,6 @@ export default function GovernanceAndModals(props: any) {
             )}
           </div>
 
-          {/* CAIXA DE SUGESTÕES ENVIADAS PELOS MÉDICOS (VISÍVEL PARA O GESTOR) */}
           {isAdmin && doctorSuggestionsList.length > 0 && (
             <div className="bg-amber-50/70 p-5 rounded-2xl border-2 border-amber-200 space-y-3">
               <h3 className="text-sm font-black text-amber-950 uppercase flex items-center gap-2">
@@ -2261,7 +2568,6 @@ export default function GovernanceAndModals(props: any) {
                       type="button"
                       onClick={() => handleDeleteSuggestion(sug.id)}
                       className="text-slate-400 hover:text-red-600 p-1"
-                      title="Arquivar / Excluir sugestão"
                     >
                       <Trash2 size={14} />
                     </button>
@@ -2271,7 +2577,6 @@ export default function GovernanceAndModals(props: any) {
             </div>
           )}
 
-          {/* Mural de Comunicados */}
           <div className="space-y-4">
             {isAdmin && (
               <form
@@ -2432,8 +2737,6 @@ export default function GovernanceAndModals(props: any) {
 
     // --------------------------------------------------------------------------
     // 4. ABA: OCORRÊNCIAS GERAIS DA UNIDADE
-    // (CATEGORIAS: CORPO CLÍNICO -> SELECIONA MÉDICO E GRAVA NA FICHA DELE |
-    //              FLUXO / ASSISTÊNCIA -> CAMPO ABERTO | OUTROS -> CAMPO ABERTO)
     // --------------------------------------------------------------------------
     if (currentView === 'occurrences') {
       const handleAddOccurrence = (e: React.FormEvent) => {
@@ -2469,13 +2772,11 @@ export default function GovernanceAndModals(props: any) {
           author: currentUser?.name || 'Gestão'
         };
 
-        // 1. Grava na lista geral de ocorrências
         safeSetOccurrences((prev: any[]) => [
           createdOcc,
           ...(Array.isArray(prev) ? prev : [])
         ]);
 
-        // 2. Se for relacionada a um médico específico ("Corpo Clínico"), grava automaticamente na ficha individual dele!
         if (isClinicalStaff && chosenDoc) {
           const individualEntry = {
             id: `ind_occ_${createdOcc.id}`,
@@ -2546,9 +2847,6 @@ export default function GovernanceAndModals(props: any) {
               <ShieldAlert className="text-red-600" size={24} />
               Registo de Ocorrências da Unidade (Corpo Clínico, Fluxo/Assistência & Outros)
             </h2>
-            <p className="text-xs text-slate-500 mt-1">
-              Ocorrências registadas na categoria <strong>Corpo Clínico</strong> são vinculadas automaticamente à ficha individual do médico selecionado (constando no Dossiê Individual em PDF e na Planilha da Equipa).
-            </p>
           </div>
 
           <form
@@ -2620,7 +2918,6 @@ export default function GovernanceAndModals(props: any) {
               </div>
             </div>
 
-            {/* Campo Dinâmico conforme a Categoria Escolhida */}
             {occForm.categoryGroup === 'Corpo Clínico' ? (
               <div className="p-4 rounded-2xl bg-indigo-50/60 border border-indigo-200 grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
@@ -2643,9 +2940,6 @@ export default function GovernanceAndModals(props: any) {
                       </option>
                     ))}
                   </select>
-                  <span className="block text-[10px] text-indigo-700 font-bold mt-1">
-                    ✓ Esta ocorrência ficará registada automaticamente na ficha individual deste médico no Corpo Clínico.
-                  </span>
                 </div>
 
                 <div>
@@ -2675,7 +2969,7 @@ export default function GovernanceAndModals(props: any) {
                   required
                   placeholder={
                     occForm.categoryGroup === 'Fluxo / Assistência'
-                      ? 'Ex: Fluxo de regulação / Sala Vermelha / ECG / Laboratório...'
+                      ? 'Ex: Fluxo de regulação / Sala Vermelha / ECG...'
                       : 'Descreva o assunto ou área relacionada...'
                   }
                   value={occForm.openCategoryDetail}
@@ -2741,11 +3035,6 @@ export default function GovernanceAndModals(props: any) {
                       <span className="px-2 py-0.5 rounded bg-rose-50 text-rose-800 border border-rose-200 font-bold text-[10px]">
                         {oc.severity}
                       </span>
-                      {oc.targetDoctorId && (
-                        <span className="px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 font-bold text-[10px]">
-                          ✓ Vinculado à Ficha do Médico
-                        </span>
-                      )}
                     </div>
                     <p className="text-slate-700 leading-relaxed">{oc.description}</p>
                   </div>
@@ -2755,7 +3044,6 @@ export default function GovernanceAndModals(props: any) {
                       type="button"
                       onClick={() => handleDeleteOccurrence(oc)}
                       className="text-slate-400 hover:text-red-600 p-1 shrink-0"
-                      title="Excluir ocorrência"
                     >
                       <Trash2 size={15} />
                     </button>
@@ -2905,6 +3193,34 @@ export default function GovernanceAndModals(props: any) {
     <>
       {renderActiveGovernanceView()}
 
+      {/* POP-UP DE CONFIRMAÇÃO "SOLICITAÇÃO ENVIADA" */}
+      {requestSentPopup.open && (
+        <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl border-2 border-emerald-500 p-6 text-center space-y-4">
+            <div className="w-16 h-16 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto shadow-sm">
+              <CheckCircle size={36} />
+            </div>
+            <div className="space-y-1">
+              <h3 className="text-xl font-black text-slate-900">
+                {requestSentPopup.title || 'Solicitação enviada!'}
+              </h3>
+              <p className="text-xs text-slate-600 leading-relaxed">
+                {requestSentPopup.subtitle}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() =>
+                setRequestSentPopup({ open: false, title: '', subtitle: '' })
+              }
+              className="w-full bg-emerald-600 hover:bg-emerald-700 text-white py-2.5 rounded-xl font-black text-xs shadow-md"
+            >
+              OK, Entendido
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* MODAL DE EDIÇÃO / CADASTRO COMPLETO DA FICHA INDIVIDUAL DO MÉDICO */}
       {isDoctorModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4 overflow-y-auto">
@@ -2916,9 +3232,6 @@ export default function GovernanceAndModals(props: any) {
                     ? `Ficha Cadastral, Histórico & Ocorrências — ${editingDoctor.name}`
                     : 'Cadastrar Novo Médico no Corpo Clínico'}
                 </h3>
-                <p className="text-[11px] text-slate-400">
-                  Dados pessoais, PJ, especialidade, Nível, histórico profissional e ocorrências individuais.
-                </p>
               </div>
               <button
                 type="button"
@@ -2950,7 +3263,6 @@ export default function GovernanceAndModals(props: any) {
                   <label className="block font-bold mb-1">CPF</label>
                   <input
                     type="text"
-                    placeholder="000.000.000-00"
                     value={docModalForm.cpf}
                     onChange={e =>
                       setDocModalForm({ ...docModalForm, cpf: e.target.value })
@@ -3100,201 +3412,6 @@ export default function GovernanceAndModals(props: any) {
                     }
                     className="w-full border border-slate-300 rounded-xl px-3 py-2 font-semibold"
                   />
-                </div>
-              </div>
-
-              {/* Histórico de Trabalho */}
-              <div className="p-4 rounded-2xl bg-indigo-50/50 border border-indigo-200 space-y-3">
-                <strong className="text-indigo-950 uppercase flex items-center gap-1.5">
-                  <History size={15} className="text-indigo-600" />
-                  Histórico de Trabalho (Início de Função, Mudança de Carga Horária, Férias Passadas)
-                </strong>
-
-                <div className="space-y-1.5">
-                  {(docModalForm.workHistory || []).map((wh: any) => (
-                    <div
-                      key={wh.id}
-                      className="p-2 rounded-lg bg-white border border-indigo-200 flex items-center justify-between gap-2"
-                    >
-                      <div>
-                        <span className="px-2 py-0.5 rounded bg-indigo-700 text-white font-black text-[9px] uppercase mr-1.5">
-                          {wh.type}
-                        </span>
-                        <strong>
-                          {formatBrDate(wh.date)}
-                          {wh.endDate ? ` a ${formatBrDate(wh.endDate)}` : ''}:
-                        </strong>{' '}
-                        <span>{wh.details}</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setDocModalForm({
-                            ...docModalForm,
-                            workHistory: (docModalForm.workHistory || []).filter(
-                              (x: any) => x.id !== wh.id
-                            )
-                          })
-                        }
-                        className="text-slate-400 hover:text-red-600"
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 pt-1">
-                  <select
-                    value={modalWhDraft.type}
-                    onChange={e =>
-                      setModalWhDraft({ ...modalWhDraft, type: e.target.value })
-                    }
-                    className="border rounded-lg px-2 py-1.5 bg-white font-bold"
-                  >
-                    <option value="Início de Função">Início de Função</option>
-                    <option value="Mudança de Carga Horária (Aumento)">
-                      Mudança Carga (Aumento)
-                    </option>
-                    <option value="Mudança de Carga Horária (Redução)">
-                      Mudança Carga (Redução)
-                    </option>
-                    <option value="Férias Passadas">Férias Passadas</option>
-                  </select>
-                  <input
-                    type="date"
-                    value={modalWhDraft.date}
-                    onChange={e =>
-                      setModalWhDraft({ ...modalWhDraft, date: e.target.value })
-                    }
-                    className="border rounded-lg px-2 py-1.5 bg-white font-bold"
-                  />
-                  <input
-                    type="text"
-                    placeholder="Detalhe (ex: Redução de 24h para 12h)"
-                    value={modalWhDraft.details}
-                    onChange={e =>
-                      setModalWhDraft({ ...modalWhDraft, details: e.target.value })
-                    }
-                    className="border rounded-lg px-2.5 py-1.5 bg-white"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const item = {
-                        id: `wh_${Date.now()}`,
-                        type: modalWhDraft.type,
-                        date: modalWhDraft.date,
-                        endDate: modalWhDraft.endDate,
-                        details: modalWhDraft.details.trim() || modalWhDraft.type
-                      };
-                      setDocModalForm({
-                        ...docModalForm,
-                        workHistory: [item, ...(docModalForm.workHistory || [])]
-                      });
-                      setModalWhDraft({ ...modalWhDraft, details: '' });
-                    }}
-                    className="bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg px-3 py-1.5 font-bold"
-                  >
-                    + Incluir Histórico
-                  </button>
-                </div>
-              </div>
-
-              {/* Ocorrências Individuais */}
-              <div className="p-4 rounded-2xl bg-rose-50/50 border border-rose-200 space-y-3">
-                <strong className="text-rose-950 uppercase flex items-center gap-1.5">
-                  <ShieldAlert size={15} className="text-rose-600" />
-                  Ocorrências Individuais deste Plantonista
-                </strong>
-
-                <div className="space-y-1.5">
-                  {(docModalForm.individualOccurrences || []).map((oc: any) => (
-                    <div
-                      key={oc.id}
-                      className="p-2 rounded-lg bg-white border border-rose-200 flex items-center justify-between gap-2"
-                    >
-                      <div>
-                        <span className="px-2 py-0.5 rounded bg-rose-700 text-white font-black text-[9px] uppercase mr-1.5">
-                          {oc.severity}
-                        </span>
-                        <strong>
-                          {formatBrDate(oc.date)} — {oc.title}:
-                        </strong>{' '}
-                        <span>{oc.description}</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() =>
-                          setDocModalForm({
-                            ...docModalForm,
-                            individualOccurrences: (
-                              docModalForm.individualOccurrences || []
-                            ).filter((x: any) => x.id !== oc.id)
-                          })
-                        }
-                        className="text-slate-400 hover:text-red-600"
-                      >
-                        <Trash2 size={13} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 pt-1">
-                  <input
-                    type="date"
-                    value={modalOccDraft.date}
-                    onChange={e =>
-                      setModalOccDraft({ ...modalOccDraft, date: e.target.value })
-                    }
-                    className="border rounded-lg px-2 py-1.5 bg-white font-bold"
-                  />
-                  <select
-                    value={modalOccDraft.severity}
-                    onChange={e =>
-                      setModalOccDraft({ ...modalOccDraft, severity: e.target.value })
-                    }
-                    className="border rounded-lg px-2 py-1.5 bg-white font-bold"
-                  >
-                    <option value="Apontamento Operacional">Apontamento Operacional</option>
-                    <option value="Elogio / Destaque Assistencial">Elogio / Destaque</option>
-                    <option value="Atraso / Falta / Alinhamento">Atraso / Alinhamento</option>
-                    <option value="Advertência / Notificação">Advertência</option>
-                  </select>
-                  <input
-                    type="text"
-                    placeholder="Descrição da ocorrência individual..."
-                    value={modalOccDraft.description}
-                    onChange={e =>
-                      setModalOccDraft({ ...modalOccDraft, description: e.target.value })
-                    }
-                    className="border rounded-lg px-2.5 py-1.5 bg-white"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!modalOccDraft.description.trim()) return;
-                      const item = {
-                        id: `ind_occ_${Date.now()}`,
-                        date: modalOccDraft.date,
-                        severity: modalOccDraft.severity,
-                        title: modalOccDraft.title || modalOccDraft.severity,
-                        description: modalOccDraft.description.trim()
-                      };
-                      setDocModalForm({
-                        ...docModalForm,
-                        individualOccurrences: [
-                          item,
-                          ...(docModalForm.individualOccurrences || [])
-                        ]
-                      });
-                      setModalOccDraft({ ...modalOccDraft, description: '' });
-                    }}
-                    className="bg-rose-600 hover:bg-rose-700 text-white rounded-lg px-3 py-1.5 font-bold"
-                  >
-                    + Registar Ocorrência
-                  </button>
                 </div>
               </div>
 

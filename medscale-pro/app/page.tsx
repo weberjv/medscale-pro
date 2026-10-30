@@ -37,6 +37,36 @@ import GovernanceAndModals from './GovernanceAndModals';
 
 const ScheduleAndMapViews = ScheduleAndMapViewsOrig as any;
 
+// Determina automaticamente o código YYYY-MM da competência corrente (26 a 25) com base na data de hoje
+function resolveCurrentCompetenceMonthString(): string {
+  const now = new Date();
+  const todayIso = now.toISOString().split('T')[0];
+  const yr = now.getFullYear();
+  const mo = now.getMonth() + 1;
+
+  const candidates: string[] = [];
+  for (let offset = -1; offset <= 2; offset++) {
+    const d = new Date(yr, mo - 1 + offset, 1, 12, 0, 0);
+    const cYr = d.getFullYear();
+    const cMo = String(d.getMonth() + 1).padStart(2, '0');
+    candidates.push(`${cYr}-${cMo}`);
+  }
+
+  for (const ym of candidates) {
+    const win = getCompetenceWindow(ym);
+    if (win && win.startStr <= todayIso && todayIso <= win.endStr) {
+      return ym;
+    }
+  }
+
+  // Fallback caso o dia seja >= 26
+  if (now.getDate() >= 26) {
+    const nextD = new Date(yr, mo, 1, 12, 0, 0);
+    return `${nextD.getFullYear()}-${String(nextD.getMonth() + 1).padStart(2, '0')}`;
+  }
+  return `${yr}-${String(mo).padStart(2, '0')}`;
+}
+
 export default function MedScaleProApp() {
   const [isHydrated, setIsHydrated] = useState(false);
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -53,7 +83,6 @@ export default function MedScaleProApp() {
   const [shifts, setShifts] = useState<any[]>(initialShifts);
   const [openShifts, setOpenShifts] = useState<any[]>(initialOpenShifts);
   const [doctorAvailability, setDoctorAvailability] = useState<any[]>(initialDoctorAvailability);
-  // Ocorrências iniciam limpas (sem os registos antigos de teste)
   const [occurrences, setOccurrences] = useState<any[]>([]);
   const [announcements, setAnnouncements] = useState<any[]>(initialAnnouncements);
   const [swaps, setSwaps] = useState<any[]>(initialSwaps);
@@ -61,7 +90,10 @@ export default function MedScaleProApp() {
   const [courses, setCourses] = useState<any[]>(initialCourses);
   const [auditTrail, setAuditTrail] = useState<any[]>([]);
 
-  const [competenceMonth, setCompetenceMonth] = useState<string>('2026-10');
+  // Abre sempre na competência corrente (ex: se hoje é 30/10, abre na janela 26/10 a 25/11)
+  const [competenceMonth, setCompetenceMonth] = useState<string>(() =>
+    resolveCurrentCompetenceMonthString()
+  );
   const [payrollClosed, setPayrollClosed] = useState<boolean>(false);
   const [manualPayrollAdjustments, setManualPayrollAdjustments] = useState<
     Record<number, { description: string; amount: number }[]>
@@ -94,7 +126,6 @@ export default function MedScaleProApp() {
   const isCloudReadyRef = useRef<boolean>(false);
   const lastStateSignatureRef = useRef<string>('');
 
-  // Filtra ocorrências antigas que vieram de teste (IDs 1, 2, 3 ou textos padrão de demonstração)
   const filterOutLegacyTestOccurrences = (list: any[]) => {
     if (!Array.isArray(list)) return [];
     return list.filter((oc: any) => {
@@ -195,6 +226,7 @@ export default function MedScaleProApp() {
       console.error('Erro ao ler LocalStorage:', e);
     }
 
+    setCompetenceMonth(resolveCurrentCompetenceMonthString());
     setIsHydrated(true);
 
     const supabase = createClient();
@@ -376,7 +408,6 @@ export default function MedScaleProApp() {
     setAuditTrail(prev => [newEntry, ...prev.slice(0, 199)]);
   };
 
-  // Envio de Sugestão através do Pop-up Flutuante do Médico
   const handleSendDoctorSuggestion = (e: React.FormEvent) => {
     e.preventDefault();
     if (!suggestionContent.trim()) return;
@@ -393,7 +424,10 @@ export default function MedScaleProApp() {
 
     setConfig((prev: any) => ({
       ...prev,
-      doctorSuggestions: [newSuggestion, ...(Array.isArray(prev?.doctorSuggestions) ? prev.doctorSuggestions : [])]
+      doctorSuggestions: [
+        newSuggestion,
+        ...(Array.isArray(prev?.doctorSuggestions) ? prev.doctorSuggestions : [])
+      ]
     }));
 
     recordAction(`Nova sugestão enviada por ${newSuggestion.doctorName}: "${newSuggestion.title}"`);
@@ -448,6 +482,21 @@ export default function MedScaleProApp() {
     [competenceMonth]
   );
 
+  // Conta solicitações de troca com atualização para o médico logado
+  const doctorSwapUpdatesCount = useMemo(() => {
+    if (!effectiveCurrentUser?.id) return 0;
+    const myId = Number(effectiveCurrentUser.id);
+    const dismissedIds: number[] = Array.isArray(config?.dismissedSwapNotificationIds?.[myId])
+      ? config.dismissedSwapNotificationIds[myId]
+      : [];
+    return (Array.isArray(swaps) ? swaps : []).filter(
+      (sw: any) =>
+        (Number(sw?.requesterId) === myId || Number(sw?.targetDoctorId) === myId) &&
+        ['Aprovado', 'Recusado', 'Revisão Solicitada pelo Gestor'].includes(sw?.status) &&
+        !dismissedIds.includes(Number(sw?.id))
+    ).length;
+  }, [swaps, effectiveCurrentUser?.id, config?.dismissedSwapNotificationIds]);
+
   const handleToggleAdditionalOnExistingShift = (shiftId: number, additionalId: string) => {
     setShifts(prev =>
       prev.map(sh => {
@@ -456,7 +505,9 @@ export default function MedScaleProApp() {
         const exists = curr.includes(additionalId);
         return {
           ...sh,
-          additionals: exists ? curr.filter((id: string) => id !== additionalId) : [...curr, additionalId]
+          additionals: exists
+            ? curr.filter((id: string) => id !== additionalId)
+            : [...curr, additionalId]
         };
       })
     );
@@ -749,6 +800,7 @@ export default function MedScaleProApp() {
         onLoginSuccess={(user: any) => {
           setCurrentUser(user);
           setManagerViewMode(user.canManage || user.isAdmin ? 'admin' : 'doctor');
+          setCompetenceMonth(resolveCurrentCompetenceMonthString());
           setCurrentView('dashboard');
         }}
         recordAction={recordAction}
@@ -767,7 +819,7 @@ export default function MedScaleProApp() {
         { id: 'payroll', label: 'Folha PJ (26 a 25)', icon: DollarSign },
         { id: 'remuneration', label: 'Tabela de Remuneração', icon: Sliders },
         { id: 'vacations', label: 'Férias & Licenças', icon: Umbrella },
-        { id: 'courses', label: 'Cursos (ACLS/ATLS)', icon: GraduationCap },
+        { id: 'courses', label: 'Cursos & Agendamentos', icon: GraduationCap },
         {
           id: 'announcements',
           label: 'Gestão à Vista, Governança & Comunicados',
@@ -780,10 +832,15 @@ export default function MedScaleProApp() {
     : [
         { id: 'dashboard', label: 'Meu Painel', icon: LayoutDashboard },
         { id: 'schedule', label: 'Minha Escala', icon: Calendar },
-        { id: 'swaps', label: 'Minhas Trocas', icon: RefreshCw },
+        {
+          id: 'swaps',
+          label: 'Minhas Trocas',
+          icon: RefreshCw,
+          badgeCount: doctorSwapUpdatesCount
+        },
         { id: 'payroll', label: 'Meu Extrato PJ', icon: DollarSign },
         { id: 'vacations', label: 'Minhas Férias', icon: Umbrella },
-        { id: 'courses', label: 'Meus Certificados', icon: GraduationCap },
+        { id: 'courses', label: 'Meus cursos', icon: GraduationCap },
         {
           id: 'announcements',
           label: 'Gestão à Vista & Comunicados',
@@ -862,7 +919,7 @@ export default function MedScaleProApp() {
             mobileMenuOpen ? 'block' : 'hidden'
           } lg:block flex-1 p-3 space-y-1 overflow-y-auto`}
         >
-          {navItems.map(item => {
+          {navItems.map((item: any) => {
             const Icon = item.icon;
             const active = currentView === item.id;
             return (
@@ -870,17 +927,27 @@ export default function MedScaleProApp() {
                 key={item.id}
                 type="button"
                 onClick={() => {
+                  if (item.id === 'payroll') {
+                    setCompetenceMonth(resolveCurrentCompetenceMonthString());
+                  }
                   setCurrentView(item.id);
                   setMobileMenuOpen(false);
                 }}
-                className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-xs font-bold transition-all text-left ${
+                className={`w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-xl text-xs font-bold transition-all text-left ${
                   active
                     ? 'bg-blue-600 text-white shadow-sm'
                     : 'text-slate-300 hover:bg-slate-800'
                 }`}
               >
-                <Icon size={16} className="shrink-0" />
-                <span className="leading-tight">{item.label}</span>
+                <div className="flex items-center gap-2.5">
+                  <Icon size={16} className="shrink-0" />
+                  <span className="leading-tight">{item.label}</span>
+                </div>
+                {item.badgeCount > 0 && (
+                  <span className="px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 font-black text-[10px] animate-pulse">
+                    {item.badgeCount}
+                  </span>
+                )}
               </button>
             );
           })}
@@ -1061,13 +1128,11 @@ export default function MedScaleProApp() {
         />
       </main>
 
-      {/* ==========================================================================
-          ÍCONE + POP-UP FLUTUANTE DE SUGESTÕES NO LOGIN DO MÉDICO
-         ========================================================================== */}
+      {/* ÍCONE + POP-UP FLUTUANTE DE SUGESTÕES NO LOGIN DO MÉDICO */}
       {!isAdmin && (
         <div className="fixed bottom-5 right-5 z-50 flex flex-col items-end">
           {isSuggestionPopupOpen && (
-            <div className="mb-3 w-80 sm:w-96 bg-white rounded-3xl shadow-2xl border-2 border-blue-500 overflow-hidden text-xs text-slate-800 animate-in fade-in slide-in-from-bottom-3">
+            <div className="mb-3 w-80 sm:w-96 bg-white rounded-3xl shadow-2xl border-2 border-blue-500 overflow-hidden text-xs text-slate-800">
               <div className="bg-slate-900 text-white px-4 py-3.5 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Lightbulb size={17} className="text-amber-400" />
