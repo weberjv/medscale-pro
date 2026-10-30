@@ -37,7 +37,7 @@ import GovernanceAndModals from './GovernanceAndModals';
 
 const ScheduleAndMapViews = ScheduleAndMapViewsOrig as any;
 
-// Determina automaticamente o código YYYY-MM da competência corrente (26 a 25) com base na data de hoje
+// Determina automaticamente o código YYYY-MM da competência corrente (26 a 25) no cliente
 function resolveCurrentCompetenceMonthString(): string {
   const now = new Date();
   const todayIso = now.toISOString().split('T')[0];
@@ -59,7 +59,6 @@ function resolveCurrentCompetenceMonthString(): string {
     }
   }
 
-  // Fallback caso o dia seja >= 26
   if (now.getDate() >= 26) {
     const nextD = new Date(yr, mo, 1, 12, 0, 0);
     return `${nextD.getFullYear()}-${String(nextD.getMonth() + 1).padStart(2, '0')}`;
@@ -90,10 +89,8 @@ export default function MedScaleProApp() {
   const [courses, setCourses] = useState<any[]>(initialCourses);
   const [auditTrail, setAuditTrail] = useState<any[]>([]);
 
-  // Abre sempre na competência corrente (ex: se hoje é 30/10, abre na janela 26/10 a 25/11)
-  const [competenceMonth, setCompetenceMonth] = useState<string>(() =>
-    resolveCurrentCompetenceMonthString()
-  );
+  // Valor estático seguro para o prerender do Next.js 16; atualizado imediatamente no useEffect para a competência vigente
+  const [competenceMonth, setCompetenceMonth] = useState<string>('2026-11');
   const [payrollClosed, setPayrollClosed] = useState<boolean>(false);
   const [manualPayrollAdjustments, setManualPayrollAdjustments] = useState<
     Record<number, { description: string; amount: number }[]>
@@ -119,10 +116,6 @@ export default function MedScaleProApp() {
   const [suggestionSentFeedback, setSuggestionSentFeedback] = useState('');
 
   const clientIdRef = useRef<string>('');
-
-  if (!clientIdRef.current && typeof window !== 'undefined') {
-    clientIdRef.current = `client_${Math.random().toString(36).slice(2, 10)}_${Date.now()}`;
-  }
   const isCloudReadyRef = useRef<boolean>(false);
   const lastStateSignatureRef = useRef<string>('');
 
@@ -215,6 +208,10 @@ export default function MedScaleProApp() {
   };
 
   useEffect(() => {
+    if (!clientIdRef.current) {
+      clientIdRef.current = `client_${Math.random().toString(36).slice(2, 10)}_${Date.now()}`;
+    }
+
     let localParsed: any = null;
     try {
       const saved = localStorage.getItem('medscale_pro_state_v2');
@@ -226,6 +223,7 @@ export default function MedScaleProApp() {
       console.error('Erro ao ler LocalStorage:', e);
     }
 
+    // Define a competência corrente (ex: 26/10 a 25/11) assim que monta no cliente
     setCompetenceMonth(resolveCurrentCompetenceMonthString());
     setIsHydrated(true);
 
