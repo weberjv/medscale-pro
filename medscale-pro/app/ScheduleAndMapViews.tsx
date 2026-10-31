@@ -3,8 +3,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   Calendar, Clock, Users, Download, Printer, Plus, Trash2,
-  CheckCircle, AlertTriangle, ArrowLeftRight, Copy,
-  Sparkles, BarChart3, Scissors, UserPlus, ArrowUp, ArrowDown,
+  CheckCircle, ArrowLeftRight, Copy,
+  Sparkles, BarChart3, UserPlus, ArrowUp, ArrowDown,
   Edit3, X, Save, Palette, ChevronLeft, ChevronRight,
   Umbrella, RefreshCw, BookmarkCheck, Wand2, CalendarDays,
   BellRing, CalendarCheck, MapPin, Megaphone
@@ -64,7 +64,9 @@ export default function ScheduleAndMapViews(props: any) {
     if (typeof setCurrentView === 'function') setCurrentView(view);
   };
 
-  // Listas blindadas e SEMPRE em Ordem Alfabética (A-Z)
+  // ============================================================================
+  // 1. TODOS OS HOOKS (useMemo, useState, useEffect) NO TOPO ABSOLUTO DO COMPONENTE
+  // ============================================================================
   const safeDoctors = useMemo(() => {
     const raw = Array.isArray(doctors) ? [...doctors] : [];
     return raw.sort((a, b) =>
@@ -105,6 +107,120 @@ export default function ScheduleAndMapViews(props: any) {
     ? config.shiftAdditionals.filter((a: any) => a?.incidence !== 'monthly')
     : [];
 
+  // Estados de Navegação e Filtros
+  const [selectedDate, setSelectedDate] = useState<string>('2026-10-30');
+  const [doctorCalendarMonth, setDoctorCalendarMonth] = useState<string>('2026-10');
+  const [displayMode, setDisplayMode] = useState<'both' | 'weekly' | 'heatmap'>('both');
+  const [filterCategory, setFilterCategory] = useState<string>('Todas');
+  const [filterDoctorId, setFilterDoctorId] = useState<string>('Todos');
+  const [searchDoctorText, setSearchDoctorText] = useState<string>('');
+  const [onlyMyShifts, setOnlyMyShifts] = useState<boolean>(false);
+  const [scaleDownloadScope, setScaleDownloadScope] = useState<'8pages' | 'day' | '1page'>('8pages');
+  const [heatmapDownloadScope, setHeatmapDownloadScope] = useState<'day' | 'week'>('day');
+  const [cloneFeedbackMsg, setCloneFeedbackMsg] = useState<string>('');
+
+  // Pop-up Global de Confirmação "Solicitação enviada!"
+  const [requestSentPopup, setRequestSentPopup] = useState<{
+    open: boolean;
+    title: string;
+    subtitle: string;
+  }>({ open: false, title: '', subtitle: '' });
+
+  // Estados de Alocação e Edição de Plantão
+  const [newShiftForm, setNewShiftForm] = useState({
+    allocationMode: 'registered' as 'registered' | 'manual' | 'planned_open',
+    doctorId: safeActiveDoctors[0]?.id || 1,
+    manualDoctorName: '',
+    manualDoctorCrm: '',
+    manualDoctorLevel: 1,
+    date: '2026-10-30',
+    startTime: '07:00',
+    endTime: '19:00',
+    category: allFunctionNames[0] || 'Plantonista',
+    shiftType: 'Fixo' as 'Fixo' | 'Coringa/Extra' | 'Escala Periódica',
+    repeatWeeklyInMonth: false,
+    repeatWeeksCount: 4
+  });
+
+  const [editingShiftObj, setEditingShiftObj] = useState<any | null>(null);
+  const [editShiftForm, setEditShiftForm] = useState({
+    allocationMode: 'registered' as 'registered' | 'manual' | 'planned_open',
+    doctorId: 1,
+    manualDoctorName: '',
+    manualDoctorCrm: '',
+    manualDoctorLevel: 1,
+    date: '2026-10-30',
+    startTime: '07:00',
+    endTime: '19:00',
+    category: allFunctionNames[0] || 'Plantonista',
+    shiftType: 'Fixo' as 'Fixo' | 'Coringa/Extra' | 'Escala Periódica',
+    additionals: [] as string[]
+  });
+
+  // Estados do Modal Rápido de Troca / Passagem / Permuta / Dispensa
+  const [quickSwapShiftObj, setQuickSwapShiftObj] = useState<any | null>(null);
+  const [quickSwapForm, setQuickSwapForm] = useState({
+    type: 'Passagem de Plantão' as
+      | 'Passagem de Plantão'
+      | 'Permuta / Troca de Plantão'
+      | 'Cobertura Fracionada'
+      | 'Liberação / Dispensa Gerencial',
+    isPartialByTimeRange: false,
+    targetDoctorId: safeActiveDoctors[0]?.id || 1,
+    permutedShiftId: '',
+    permutedShiftInfo: '',
+    dispenseMode: 'vacant' as 'vacant' | 'substitute',
+    financialDispenseType: 'abonada' as 'abonada' | 'desconto',
+    titularDiscountMode: 'none' as
+      | 'none'
+      | 'full'
+      | 'level_diff'
+      | 'fraction'
+      | 'custom',
+    titularFractionPercent: 50,
+    titularCustomDiscountAmount: 0,
+    substituteBillingMode: 'payroll_extra' as 'payroll_extra' | 'direct_settlement',
+    managerFinancialComment: '',
+    reason: '',
+    autoApproveNow: true
+  });
+  const [quickSwapSegments, setQuickSwapSegments] = useState<
+    { id: string; startTime: string; endTime: string; targetDoctorId: number }[]
+  >([]);
+
+  // Estados de Plantões em Aberto e Disponibilidade (posicionados no topo antes de qualquer return)
+  const [newOpenShiftForm, setNewOpenShiftForm] = useState({
+    date: '2026-10-30',
+    category: allFunctionNames[0] || 'Plantonista',
+    startTime: '07:00',
+    endTime: '19:00',
+    bonusNote: 'Valor de Plantão Extra conforme Tabela'
+  });
+
+  const [newAvailForm, setNewAvailForm] = useState({
+    date: '2026-10-30',
+    period: 'Diurno (07:00 - 19:00)',
+    preferredCategory: allFunctionNames[0] || 'Plantonista',
+    notes: ''
+  });
+
+  // Posiciona automaticamente na data do dia presente ao abrir no cliente
+  useEffect(() => {
+    const todayIso = new Date().toISOString().split('T')[0];
+    setSelectedDate(todayIso);
+    setDoctorCalendarMonth(todayIso.slice(0, 7));
+    setNewShiftForm(prev => ({ ...prev, date: todayIso }));
+    setNewOpenShiftForm(prev => ({ ...prev, date: todayIso }));
+    setNewAvailForm(prev => ({ ...prev, date: todayIso }));
+  }, [currentView]);
+
+  // ============================================================================
+  // 2. FUNÇÕES AUXILIARES DE RESOLUÇÃO DE MÉDICOS, CORES E HORÁRIOS
+  // ============================================================================
+  const triggerRequestSentPopup = (title: string, subtitle: string) => {
+    setRequestSentPopup({ open: true, title, subtitle });
+  };
+
   const resolveDoctor = (id: any) => {
     if (typeof getDoctorById === 'function') {
       const found = getDoctorById(id);
@@ -113,7 +229,6 @@ export default function ScheduleAndMapViews(props: any) {
     return safeDoctors.find((d: any) => Number(d?.id) === Number(id)) || null;
   };
 
-  // Verifica se o plantão possui médico efetivamente alocado (entra nos PDFs, Heatmap e Folha PJ)
   const isShiftCovered = (s: any): boolean => {
     if (!s || s.isDispensedVacant || s.isPlannedOpenExtra) return false;
     if (s.isManualUnregisteredDoctor && String(s.manualDoctorName || '').trim()) {
@@ -122,7 +237,6 @@ export default function ScheduleAndMapViews(props: any) {
     return Boolean(s.doctorId);
   };
 
-  // Verifica se o plantão deve aparecer na Grade Semanal da tela (inclui Vagas Extras Planejadas em aberto para o Gestor)
   const isShiftVisibleOnWeeklyGrid = (s: any): boolean => {
     if (!s || s.isDispensedVacant) return false;
     if (isAdmin && s.isPlannedOpenExtra) return true;
@@ -170,9 +284,6 @@ export default function ScheduleAndMapViews(props: any) {
     };
   };
 
-  // ============================================================================
-  // RESOLUÇÃO EXATA DO NOME DA FUNÇÃO E DA COR DEFINIDA PELO GESTOR
-  // ============================================================================
   const resolveExactFunctionName = (s: any, docObj?: any): string => {
     const rawCat = String(s?.category || '').trim();
     const doc = docObj || resolveShiftDoctorInfo(s);
@@ -280,39 +391,6 @@ export default function ScheduleAndMapViews(props: any) {
       return false;
     });
   };
-
-  // ============================================================================
-  // DATAS, NAVEGADOR POR MESES / SEMANAS / DIAS (SEMPRE ABRE NA DATA PRESENTE)
-  // ============================================================================
-  const [selectedDate, setSelectedDate] = useState<string>('2026-10-30');
-  const [doctorCalendarMonth, setDoctorCalendarMonth] = useState<string>('2026-10');
-  const [displayMode, setDisplayMode] = useState<'both' | 'weekly' | 'heatmap'>('both');
-  const [filterCategory, setFilterCategory] = useState<string>('Todas');
-  const [filterDoctorId, setFilterDoctorId] = useState<string>('Todos');
-  const [searchDoctorText, setSearchDoctorText] = useState<string>('');
-  const [onlyMyShifts, setOnlyMyShifts] = useState<boolean>(false);
-  const [scaleDownloadScope, setScaleDownloadScope] = useState<'8pages' | 'day' | '1page'>('8pages');
-  const [heatmapDownloadScope, setHeatmapDownloadScope] = useState<'day' | 'week'>('day');
-  const [cloneFeedbackMsg, setCloneFeedbackMsg] = useState<string>('');
-
-  // Pop-up Global de Confirmação "Solicitação enviada!"
-  const [requestSentPopup, setRequestSentPopup] = useState<{
-    open: boolean;
-    title: string;
-    subtitle: string;
-  }>({ open: false, title: '', subtitle: '' });
-
-  const triggerRequestSentPopup = (title: string, subtitle: string) => {
-    setRequestSentPopup({ open: true, title, subtitle });
-  };
-
-  // Posiciona automaticamente na data do dia presente ao abrir no cliente (sem quebrar o prerender da Vercel)
-  useEffect(() => {
-    const todayIso = new Date().toISOString().split('T')[0];
-    setSelectedDate(todayIso);
-    setDoctorCalendarMonth(todayIso.slice(0, 7));
-    setNewShiftForm(prev => ({ ...prev, date: todayIso }));
-  }, [currentView]);
 
   const addDaysStr = (dateStr: string, daysToAdd: number): string => {
     const d = new Date(`${dateStr}T12:00:00`);
@@ -427,70 +505,6 @@ export default function ScheduleAndMapViews(props: any) {
     if (shiftType === 'Fixo') return 'Fixo (Cota)';
     return 'Por CH / Extra';
   };
-
-  // ============================================================================
-  // ESTADOS DE ALOCAÇÃO E EDIÇÃO DE PLANTÃO (COM OS 3 REGIMES + VAGA PLANEJADA)
-  // ============================================================================
-  const [newShiftForm, setNewShiftForm] = useState({
-    allocationMode: 'registered' as 'registered' | 'manual' | 'planned_open',
-    doctorId: safeActiveDoctors[0]?.id || 1,
-    manualDoctorName: '',
-    manualDoctorCrm: '',
-    manualDoctorLevel: 1,
-    date: '2026-10-30',
-    startTime: '07:00',
-    endTime: '19:00',
-    category: allFunctionNames[0] || 'Plantonista',
-    shiftType: 'Fixo' as 'Fixo' | 'Coringa/Extra' | 'Escala Periódica',
-    repeatWeeklyInMonth: false,
-    repeatWeeksCount: 4
-  });
-
-  const [editingShiftObj, setEditingShiftObj] = useState<any | null>(null);
-  const [editShiftForm, setEditShiftForm] = useState({
-    allocationMode: 'registered' as 'registered' | 'manual' | 'planned_open',
-    doctorId: 1,
-    manualDoctorName: '',
-    manualDoctorCrm: '',
-    manualDoctorLevel: 1,
-    date: '2026-10-30',
-    startTime: '07:00',
-    endTime: '19:00',
-    category: allFunctionNames[0] || 'Plantonista',
-    shiftType: 'Fixo' as 'Fixo' | 'Coringa/Extra' | 'Escala Periódica',
-    additionals: [] as string[]
-  });
-
-  // Estado para o Modal Rápido de Troca / Passagem / Permuta / Dispensa
-  const [quickSwapShiftObj, setQuickSwapShiftObj] = useState<any | null>(null);
-  const [quickSwapForm, setQuickSwapForm] = useState({
-    type: 'Passagem de Plantão' as
-      | 'Passagem de Plantão'
-      | 'Permuta / Troca de Plantão'
-      | 'Cobertura Fracionada'
-      | 'Liberação / Dispensa Gerencial',
-    isPartialByTimeRange: false,
-    targetDoctorId: safeActiveDoctors[0]?.id || 1,
-    permutedShiftId: '',
-    permutedShiftInfo: '',
-    dispenseMode: 'vacant' as 'vacant' | 'substitute',
-    financialDispenseType: 'abonada' as 'abonada' | 'desconto',
-    titularDiscountMode: 'none' as
-      | 'none'
-      | 'full'
-      | 'level_diff'
-      | 'fraction'
-      | 'custom',
-    titularFractionPercent: 50,
-    titularCustomDiscountAmount: 0,
-    substituteBillingMode: 'payroll_extra' as 'payroll_extra' | 'direct_settlement',
-    managerFinancialComment: '',
-    reason: '',
-    autoApproveNow: true
-  });
-  const [quickSwapSegments, setQuickSwapSegments] = useState<
-    { id: string; startTime: string; endTime: string; targetDoctorId: number }[]
-  >([]);
 
   const getTargetDoctorShiftsForPermuta = (targetDocId: number, excludeShiftId: any) => {
     return sortShiftsByManagerOrArrival(
@@ -942,7 +956,6 @@ export default function ScheduleAndMapViews(props: any) {
     return { effectiveDoctorId: Number(titularDocId), substitutedFromVacation: false };
   };
 
-  // Aplicar Escala Padrão substituindo a escala prévia na Semana ou no Mês
   const handleApplyStandardScheduleTemplate = (targetScope: 'week' | 'month') => {
     if (!isAdmin) return;
     if (savedStandardTemplate.length === 0) {
@@ -1018,7 +1031,6 @@ export default function ScheduleAndMapViews(props: any) {
 
     safeSetShifts((prev: any[]) => {
       const curr = Array.isArray(prev) ? prev : [];
-      // Exclui os plantões prévios vigentes nas datas-alvo e adiciona a Escala Padrão
       const withoutTargetDates = curr.filter(
         (s: any) => !targetDatesToReplace.has(String(s?.date || ''))
       );
@@ -1038,7 +1050,6 @@ export default function ScheduleAndMapViews(props: any) {
     );
   };
 
-  // Clonar da Semana Anterior para a Semana Atual (substituindo a semana atual)
   const handleCloneFromPreviousWeek = () => {
     if (!isAdmin) return;
     const prevMonday = addDaysStr(weekMonday, -7);
@@ -1080,7 +1091,6 @@ export default function ScheduleAndMapViews(props: any) {
     );
   };
 
-  // Clonar desta Semana para a Próxima Semana (substituindo a próxima semana)
   const handleCloneToNextWeek = () => {
     if (!isAdmin) return;
     const currMonday = weekDays[0].date;
@@ -1124,7 +1134,6 @@ export default function ScheduleAndMapViews(props: any) {
     );
   };
 
-  // Clonar para as 4 semanas do Próximo Mês (substituindo o período-alvo)
   const handleCloneToNextMonth = () => {
     if (!isAdmin) return;
     const currMonday = weekDays[0].date;
@@ -1928,7 +1937,8 @@ export default function ScheduleAndMapViews(props: any) {
   };
 
   // ============================================================================
-  // SE A ABA ATIVA FOR 'SWAPS', DELEGA PARA O COMPONENTE COMPARTIMENTALIZADO
+  // 3. SE A ABA ATIVA FOR 'SWAPS', DELEGA PARA O COMPONENTE COMPARTIMENTALIZADO
+  // (AGORA APÓS TODOS OS HOOKS TEREM SIDO LIDOS, ELIMINANDO O ERRO #300)
   // ============================================================================
   if (currentView === 'swaps') {
     return (
@@ -1989,23 +1999,8 @@ export default function ScheduleAndMapViews(props: any) {
   }
 
   // ============================================================================
-  // VIEW: PLANTÕES EM ABERTO & BANCO DE DISPONIBILIDADE (OPEN_SHIFTS)
+  // 4. VIEW: PLANTÕES EM ABERTO & BANCO DE DISPONIBILIDADE (OPEN_SHIFTS)
   // ============================================================================
-  const [newOpenShiftForm, setNewOpenShiftForm] = useState({
-    date: '2026-10-30',
-    category: allFunctionNames[0] || 'Plantonista',
-    startTime: '07:00',
-    endTime: '19:00',
-    bonusNote: 'Valor de Plantão Extra conforme Tabela'
-  });
-
-  const [newAvailForm, setNewAvailForm] = useState({
-    date: '2026-10-30',
-    period: 'Diurno (07:00 - 19:00)',
-    preferredCategory: allFunctionNames[0] || 'Plantonista',
-    notes: ''
-  });
-
   if (currentView === 'open_shifts') {
     const handleAddOpenShift = (e: React.FormEvent) => {
       e.preventDefault();
@@ -2391,7 +2386,7 @@ export default function ScheduleAndMapViews(props: any) {
       )
     : [];
 
-  // Modal Rápido de Troca / Passagem / Permuta / Dispensa (usado tanto no Meu Painel quanto na Escala)
+  // Modal Rápido de Troca / Passagem / Permuta / Dispensa
   const renderQuickSwapModal = () => {
     if (!quickSwapShiftObj) return null;
     return (
@@ -2803,8 +2798,7 @@ export default function ScheduleAndMapViews(props: any) {
   };
 
   // ============================================================================
-  // 1. VIEW: MEU PAINEL / DASHBOARD
-  // (COM CALENDÁRIO MENSAL, BOTÃO DE SOLICITAR TROCA NOS PLANTÕES E CURSOS AGENDADOS)
+  // 5. VIEW: MEU PAINEL / DASHBOARD
   // ============================================================================
   if (currentView === 'dashboard') {
     const pendingSwapsCount = safeSwaps.filter(
@@ -3179,7 +3173,6 @@ export default function ScheduleAndMapViews(props: any) {
               </div>
             </div>
 
-            {/* Lista dos plantões do médico com botão direto de "Solicitar Troca / Passagem" */}
             {myShiftsInSelectedMonth.length > 0 && (
               <div className="pt-2 border-t border-slate-100">
                 <span className="block text-[10px] font-extrabold uppercase text-slate-500 mb-2">
@@ -3298,7 +3291,7 @@ export default function ScheduleAndMapViews(props: any) {
   }
 
   // ============================================================================
-  // 2. VIEW: ESCALA OFICIAL SEMANAL (SEG-DOM) & MATRIZ HEATMAP 24H (07H ÀS 06H)
+  // 6. VIEW: ESCALA OFICIAL SEMANAL (SEG-DOM) & MATRIZ HEATMAP 24H (07H ÀS 06H)
   // ============================================================================
   const filteredShifts = safeShifts.filter((s: any) => {
     if (!isShiftVisibleOnWeeklyGrid(s)) return false;
@@ -3368,7 +3361,6 @@ export default function ScheduleAndMapViews(props: any) {
           </div>
 
           <div className="flex flex-wrap items-center gap-2 text-xs">
-            {/* Seletor + Download de PDF da Escala (Dia / 7 Dias) */}
             <div className="inline-flex items-center rounded-xl bg-slate-100 p-1 border border-slate-300">
               <select
                 value={scaleDownloadScope}
@@ -3396,7 +3388,6 @@ export default function ScheduleAndMapViews(props: any) {
               </button>
             </div>
 
-            {/* Seletor + Download de PDF do Heatmap 24h (Dia / 7 Dias) */}
             <div className="inline-flex items-center rounded-xl bg-indigo-50 p-1 border border-indigo-200">
               <select
                 value={heatmapDownloadScope}
@@ -3488,7 +3479,6 @@ export default function ScheduleAndMapViews(props: any) {
             </div>
           </div>
 
-          {/* Barra do Gestor: Escala Padrão (Molde Base) + Clonagem Rápida (Substituindo o destino) */}
           {isAdmin && (
             <div className="pt-2.5 border-t border-slate-800 flex flex-col xl:flex-row xl:items-center justify-between gap-2.5">
               <div className="flex flex-wrap items-center gap-1.5">
@@ -3499,7 +3489,6 @@ export default function ScheduleAndMapViews(props: any) {
                   type="button"
                   onClick={handleSaveCurrentWeekAsStandardTemplate}
                   className="px-2.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-black flex items-center gap-1 text-[11px]"
-                  title="Salva os plantonistas fixos e vagas extras planejadas desta semana como Escala Padrão"
                 >
                   <BookmarkCheck size={13} /> Salvar Semana como Escala Padrão
                 </button>
@@ -3578,7 +3567,7 @@ export default function ScheduleAndMapViews(props: any) {
           })}
         </div>
 
-        {/* BARRA DE FILTROS: POR FUNÇÃO E POR MÉDICO (SELETOR A-Z + BUSCA POR NOME) */}
+        {/* BARRA DE FILTROS */}
         <div className="pt-2 border-t border-slate-100 flex flex-col xl:flex-row xl:items-center justify-between gap-3 text-xs">
           <div className="flex flex-wrap items-center gap-2">
             <select
@@ -3680,7 +3669,7 @@ export default function ScheduleAndMapViews(props: any) {
         </div>
       </div>
 
-      {/* Formulário do Gestor para Alocar Plantão (Com os 3 Regimes + Vaga Extra Planejada + Recorrência) */}
+      {/* Formulário do Gestor para Alocar Plantão */}
       {isAdmin && (
         <form
           onSubmit={handleAddShiftWithRecurrence}
@@ -3937,7 +3926,6 @@ export default function ScheduleAndMapViews(props: any) {
 
       {/* ==========================================================================
           BLOCO 1: GRADE DA ESCALA SEMANAL ORIGINAL (SEG-DOM) COM ORDENAMENTO ▲/▼
-          E NAVEGADOR DE SEMANAS INTEGRADO NO CABEÇALHO DA CAIXA
          ========================================================================== */}
       {(displayMode === 'both' || displayMode === 'weekly') && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
@@ -3954,7 +3942,6 @@ export default function ScheduleAndMapViews(props: any) {
               </p>
             </div>
 
-            {/* NAVEGADOR DE SEMANAS E DOWNLOAD PDF DIRETO NA CAIXA DA GRADE SEMANAL */}
             <div className="flex flex-wrap items-center gap-1.5 text-xs shrink-0">
               <button
                 type="button"
@@ -3982,7 +3969,6 @@ export default function ScheduleAndMapViews(props: any) {
                 type="button"
                 onClick={() => handleDownloadScalePDF('day')}
                 className="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-bold flex items-center gap-1"
-                title="Baixar PDF detalhado apenas do dia selecionado"
               >
                 <Printer size={13} /> PDF Dia ({formatShortBrDate(selectedDate)})
               </button>
@@ -3990,7 +3976,6 @@ export default function ScheduleAndMapViews(props: any) {
                 type="button"
                 onClick={() => handleDownloadScalePDF('8pages')}
                 className="px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold flex items-center gap-1"
-                title="Baixar PDF da Semana + 7 Dias detalhados"
               >
                 <Printer size={13} /> PDF 7 Dias
               </button>
@@ -4126,11 +4111,7 @@ export default function ScheduleAndMapViews(props: any) {
                                       type="button"
                                       onClick={e => handleOpenEditShiftModal(s, e)}
                                       className="p-0.5 text-blue-700 hover:bg-blue-100 rounded"
-                                      title={
-                                        isPlannedOpen
-                                          ? 'Alocar médico nesta vaga extra planejada'
-                                          : 'Editar médico, horário, regime ou adicionais deste plantão'
-                                      }
+                                      title="Editar turno"
                                     >
                                       <Edit3 size={11} />
                                     </button>
@@ -4138,7 +4119,7 @@ export default function ScheduleAndMapViews(props: any) {
                                       type="button"
                                       onClick={e => handleDeleteShift(s.id, e)}
                                       className="p-0.5 text-red-500 hover:bg-red-100 rounded"
-                                      title="Excluir este plantão da escala"
+                                      title="Excluir turno"
                                     >
                                       <Trash2 size={11} />
                                     </button>
@@ -4181,7 +4162,7 @@ export default function ScheduleAndMapViews(props: any) {
         </div>
       )}
 
-      {/* PAINEL DE VISUALIZAÇÃO NA ESCALA OFICIAL: TROCAS DA SEMANA & FÉRIAS DO MÊS (COM SUBSTITUTOS) */}
+      {/* PAINEL DE VISUALIZAÇÃO NA ESCALA OFICIAL: TROCAS DA SEMANA & FÉRIAS DO MÊS */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
           <div className="flex items-center justify-between border-b border-slate-100 pb-2">
@@ -4362,7 +4343,6 @@ export default function ScheduleAndMapViews(props: any) {
               </div>
             </div>
 
-            {/* Seletor rápido dos 7 dias da semana (Seg a Dom) + Atalho de Meta Padrão Diurna/Noturna */}
             <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-2 pt-2 border-t border-slate-100 text-xs">
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="text-[10px] font-extrabold uppercase text-slate-500 mr-1">
@@ -4549,7 +4529,6 @@ export default function ScheduleAndMapViews(props: any) {
                 </td>
               </tr>
 
-              {/* LINHA EDITÁVEL PELO GESTOR: META IDEAL POR FAIXA HORÁRIA (07H ÀS 06H) */}
               {isAdmin && (
                 <tr className="bg-blue-50/70 border-t border-blue-200 text-[10px]">
                   <td colSpan={2} className="py-2 px-3 font-black text-blue-950 uppercase">
@@ -4616,10 +4595,8 @@ export default function ScheduleAndMapViews(props: any) {
         </div>
       )}
 
-      {/* MODAL RÁPIDO DE TROCA, PERMUTA BILATERAL, PASSAGEM OU DISPENSA GERENCIAL */}
       {renderQuickSwapModal()}
 
-      {/* POP-UP DE CONFIRMAÇÃO "SOLICITAÇÃO ENVIADA!" */}
       {requestSentPopup.open && (
         <div className="fixed inset-0 z-50 bg-slate-950/60 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl border-2 border-emerald-500 p-6 text-center space-y-4">
