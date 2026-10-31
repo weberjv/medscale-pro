@@ -4,7 +4,7 @@ import React, { useState, useMemo } from 'react';
 import {
   ArrowLeftRight, Search, Plus, Scissors, CheckCircle,
   RotateCcw, Edit3, AlertTriangle, Trash2, BellRing,
-  XCircle, MessageSquare, X
+  XCircle, MessageSquare
 } from 'lucide-react';
 
 // ============================================================================
@@ -15,10 +15,12 @@ export function syncSwapFinancialRuleHelper(
   competenceMonth: string,
   safeSetConfig: (updater: any) => void
 ) {
-  if (!swapItem || !swapItem.requesterId || !swapItem.date) return;
+  const swapDate = String(swapItem?.date || swapItem?.shiftDate || '');
+  const reqId = Number(swapItem?.requesterId || swapItem?.requestingDoctorId || 0);
+  if (!swapItem || !reqId || !swapDate || typeof safeSetConfig !== 'function') return;
 
-  const [yr, mo, dy] = String(swapItem.date).split('-').map(Number);
-  let targetCompMonth = competenceMonth;
+  const [yr, mo, dy] = swapDate.split('-').map(Number);
+  let targetCompMonth = competenceMonth || '2026-11';
   if (!isNaN(yr) && !isNaN(mo) && !isNaN(dy)) {
     if (dy >= 26) {
       const nextDate = new Date(yr, mo, 1, 12, 0, 0);
@@ -30,7 +32,6 @@ export function syncSwapFinancialRuleHelper(
     }
   }
 
-  const reqId = Number(swapItem.requesterId);
   const discountCfg = {
     mode: swapItem.titularDiscountMode || 'none',
     fractionPercent: Number(swapItem.titularFractionPercent ?? 50),
@@ -69,12 +70,13 @@ export function applySwapEffectOnShiftsHelper(
   safeSetShifts: (updater: any) => void,
   calcDurationHours: (st: string, et: string) => number
 ) {
+  const listShifts = Array.isArray(safeShifts) ? safeShifts : [];
   const origShift =
-    safeShifts.find((s: any) => String(s?.id) === String(swapItem.shiftId)) ||
-    swapItem.originalShiftSnapshot;
-  const snapshotA = origShift ? { ...origShift } : swapItem.originalShiftSnapshot;
+    listShifts.find((s: any) => String(s?.id) === String(swapItem?.shiftId)) ||
+    swapItem?.originalShiftSnapshot;
+  const snapshotA = origShift ? { ...origShift } : swapItem?.originalShiftSnapshot;
 
-  if (swapItem.type === 'Liberação / Dispensa Gerencial') {
+  if (swapItem?.type === 'Liberação / Dispensa Gerencial') {
     if (swapItem.dispenseMode === 'vacant') {
       safeSetShifts((prev: any[]) =>
         (Array.isArray(prev) ? prev : []).map((s: any) =>
@@ -114,14 +116,14 @@ export function applySwapEffectOnShiftsHelper(
   }
 
   if (
-    swapItem.isPartialByTimeRange &&
-    Array.isArray(swapItem.segments) &&
+    swapItem?.isPartialByTimeRange &&
+    Array.isArray(swapItem?.segments) &&
     swapItem.segments.length > 0
   ) {
     const generatedShifts = swapItem.segments.map((seg: any, idx: number) => ({
       ...(snapshotA || {}),
       id: Date.now() + idx + 10,
-      date: swapItem.date,
+      date: swapItem.date || swapItem.shiftDate,
       doctorId: Number(seg.targetDoctorId),
       startTime: seg.startTime,
       endTime: seg.endTime,
@@ -147,9 +149,9 @@ export function applySwapEffectOnShiftsHelper(
     };
   }
 
-  if (swapItem.type === 'Permuta / Troca de Plantão' && swapItem.permutedShiftId) {
+  if (swapItem?.type === 'Permuta / Troca de Plantão' && swapItem?.permutedShiftId) {
     const permutedShift =
-      safeShifts.find((s: any) => String(s?.id) === String(swapItem.permutedShiftId)) ||
+      listShifts.find((s: any) => String(s?.id) === String(swapItem.permutedShiftId)) ||
       swapItem.originalPermutedShiftSnapshot;
     const snapshotB = permutedShift
       ? { ...permutedShift }
@@ -188,7 +190,7 @@ export function applySwapEffectOnShiftsHelper(
 
   safeSetShifts((prev: any[]) =>
     (Array.isArray(prev) ? prev : []).map((s: any) =>
-      String(s?.id) === String(swapItem.shiftId)
+      String(s?.id) === String(swapItem?.shiftId)
         ? {
             ...s,
             doctorId: Number(swapItem.targetDoctorId),
@@ -210,7 +212,7 @@ export function applySwapEffectOnShiftsHelper(
   return {
     snapshotA,
     snapshotB: null,
-    generatedIds: [swapItem.shiftId]
+    generatedIds: [swapItem?.shiftId]
   };
 }
 
@@ -220,7 +222,7 @@ export function restoreTitularDoctorToShiftHelper(
 ) {
   const snapshotA = swapItem?.originalShiftSnapshot;
   const snapshotB = swapItem?.originalPermutedShiftSnapshot;
-  if (!snapshotA) return;
+  if (!snapshotA || typeof safeSetShifts !== 'function') return;
 
   safeSetShifts((prev: any[]) => {
     const currList = Array.isArray(prev) ? prev : [];
@@ -263,7 +265,7 @@ export default function SwapsManagementView(props: any) {
     safeSetShifts,
     safeSwaps = [],
     safeSetSwaps,
-    competenceMonth = '2026-10',
+    competenceMonth = '2026-11',
     resolveDoctor,
     resolveShiftDoctorInfo,
     resolveExactFunctionName,
@@ -276,18 +278,65 @@ export default function SwapsManagementView(props: any) {
     sortShiftsByManagerOrArrival,
     safeRecordAction,
     onTriggerRequestSentPopup
-  } = props;
+  } = props || {};
 
-  const myEligibleShifts = useMemo(
-    () =>
-      sortShiftsByManagerOrArrival(
-        safeShifts.filter((s: any) =>
-          isAdmin
-            ? isShiftCovered(s)
-            : Number(s?.doctorId) === Number(currentUser?.id) && isShiftCovered(s)
-        )
-      ),
-    [safeShifts, isAdmin, currentUser?.id]
+  // Funções auxiliares seguras caso alguma prop venha indefinida
+  const safeResolveDoc = (id: any) => {
+    if (!id) return null;
+    if (typeof resolveDoctor === 'function') return resolveDoctor(id);
+    return (Array.isArray(safeActiveDoctors) ? safeActiveDoctors : []).find(
+      (d: any) => Number(d?.id) === Number(id)
+    );
+  };
+
+  const safeFormatBr = (dStr?: string) => {
+    if (!dStr) return '—';
+    if (typeof formatBrDate === 'function') return formatBrDate(dStr);
+    const parts = String(dStr).split('-');
+    return parts.length === 3 ? `${parts[2]}/${parts[1]}/${parts[0]}` : String(dStr);
+  };
+
+  const safeResolveFnName = (s: any, doc?: any) => {
+    if (typeof resolveExactFunctionName === 'function') {
+      return resolveExactFunctionName(s, doc);
+    }
+    return s?.category || doc?.role || 'Plantonista';
+  };
+
+  const safeGetColor = (fnName?: string) => {
+    if (typeof getFunctionColorInfo === 'function') {
+      return getFunctionColorInfo(fnName);
+    }
+    return { hex: '#2563eb' };
+  };
+
+  const safeCheckCovered = (s: any) => {
+    if (typeof isShiftCovered === 'function') return isShiftCovered(s);
+    return Boolean(s && !s.isDispensedVacant && !s.isPlannedOpenExtra && s.doctorId);
+  };
+
+  const safeSortShifts = (list: any[]) => {
+    if (typeof sortShiftsByManagerOrArrival === 'function') {
+      return sortShiftsByManagerOrArrival(list);
+    }
+    return Array.isArray(list) ? [...list] : [];
+  };
+
+  const safeCalcHrs = (st: string, et: string) => {
+    if (typeof calcDurationHours === 'function') return calcDurationHours(st, et);
+    return 12;
+  };
+
+  const listActiveDoctors = Array.isArray(safeActiveDoctors) ? safeActiveDoctors : [];
+  const listShifts = Array.isArray(safeShifts) ? safeShifts : [];
+  const listSwaps = Array.isArray(safeSwaps) ? safeSwaps : [];
+
+  const myEligibleShifts = safeSortShifts(
+    listShifts.filter((s: any) =>
+      isAdmin
+        ? safeCheckCovered(s)
+        : Number(s?.doctorId) === Number(currentUser?.id) && safeCheckCovered(s)
+    )
   );
 
   // Padrão de abertura: 'Pendente' (Solicitações Pendentes de Aprovação)
@@ -304,7 +353,7 @@ export default function SwapsManagementView(props: any) {
       | 'Cobertura Fracionada'
       | 'Liberação / Dispensa Gerencial',
     isPartialByTimeRange: false,
-    targetDoctorId: safeActiveDoctors[1]?.id || safeActiveDoctors[0]?.id || 1,
+    targetDoctorId: listActiveDoctors[1]?.id || listActiveDoctors[0]?.id || 1,
     permutedShiftId: '',
     permutedShiftInfo: '',
     dispenseMode: 'vacant' as 'vacant' | 'substitute',
@@ -329,13 +378,13 @@ export default function SwapsManagementView(props: any) {
       id: 'seg_1',
       startTime: '07:00',
       endTime: '13:00',
-      targetDoctorId: safeActiveDoctors[0]?.id || 1
+      targetDoctorId: listActiveDoctors[0]?.id || 1
     },
     {
       id: 'seg_2',
       startTime: '13:00',
       endTime: '19:00',
-      targetDoctorId: safeActiveDoctors[1]?.id || safeActiveDoctors[0]?.id || 1
+      targetDoctorId: listActiveDoctors[1]?.id || listActiveDoctors[0]?.id || 1
     }
   ]);
 
@@ -357,12 +406,12 @@ export default function SwapsManagementView(props: any) {
   >({});
 
   const getTargetDoctorShiftsForPermuta = (targetDocId: number, excludeShiftId: any) => {
-    return sortShiftsByManagerOrArrival(
-      safeShifts.filter(
+    return safeSortShifts(
+      listShifts.filter(
         (s: any) =>
           Number(s?.doctorId) === Number(targetDocId) &&
           String(s?.id) !== String(excludeShiftId) &&
-          isShiftCovered(s)
+          safeCheckCovered(s)
       )
     );
   };
@@ -377,19 +426,21 @@ export default function SwapsManagementView(props: any) {
 
   const myUpdatedSwapsAlerts = useMemo(() => {
     if (isAdmin || !myUserId) return [];
-    return safeSwaps.filter(
-      (sw: any) =>
-        (Number(sw?.requesterId) === myUserId ||
-          Number(sw?.targetDoctorId) === myUserId) &&
+    return listSwaps.filter((sw: any) => {
+      const rId = Number(sw?.requesterId || sw?.requestingDoctorId || 0);
+      const tId = Number(sw?.targetDoctorId || sw?.substituteDoctorId || 0);
+      return (
+        (rId === myUserId || tId === myUserId) &&
         ['Aprovado', 'Recusado', 'Revisão Solicitada pelo Gestor'].includes(
           sw?.status
         ) &&
         !dismissedIdsForMe.includes(Number(sw?.id))
-    );
-  }, [safeSwaps, isAdmin, myUserId, dismissedIdsForMe]);
+      );
+    });
+  }, [listSwaps, isAdmin, myUserId, dismissedIdsForMe]);
 
   const handleDismissSwapUpdateNotification = (swapId: number) => {
-    if (!myUserId) return;
+    if (!myUserId || typeof safeSetConfig !== 'function') return;
     safeSetConfig((prev: any) => {
       const currMap = prev?.dismissedSwapNotificationIds || {};
       const currList: number[] = Array.isArray(currMap[myUserId])
@@ -407,7 +458,12 @@ export default function SwapsManagementView(props: any) {
   };
 
   const handleDismissAllMySwapNotifications = () => {
-    if (!myUserId || myUpdatedSwapsAlerts.length === 0) return;
+    if (
+      !myUserId ||
+      myUpdatedSwapsAlerts.length === 0 ||
+      typeof safeSetConfig !== 'function'
+    )
+      return;
     const idsToDismiss = myUpdatedSwapsAlerts.map((sw: any) => Number(sw.id));
     safeSetConfig((prev: any) => {
       const currMap = prev?.dismissedSwapNotificationIds || {};
@@ -425,8 +481,8 @@ export default function SwapsManagementView(props: any) {
     });
   };
 
-  // Unmark a swap ID from dismissed when manager changes its status again
   const clearDismissedForSwapId = (swapId: number) => {
+    if (typeof safeSetConfig !== 'function') return;
     safeSetConfig((prev: any) => {
       const currMap = { ...(prev?.dismissedSwapNotificationIds || {}) };
       Object.keys(currMap).forEach(uKey => {
@@ -445,8 +501,9 @@ export default function SwapsManagementView(props: any) {
 
   const handleCreateSwapRequest = (e: React.FormEvent) => {
     e.preventDefault();
-    const selectedShift = safeShifts.find(
-      (s: any) => String(s?.id) === String(swapForm.shiftId)
+    const chosenId = swapForm.shiftId || myEligibleShifts[0]?.id;
+    const selectedShift = listShifts.find(
+      (s: any) => String(s?.id) === String(chosenId)
     );
     if (!selectedShift) {
       alert('Selecione um plantão válido para registar a movimentação.');
@@ -455,15 +512,15 @@ export default function SwapsManagementView(props: any) {
 
     const permutedShiftObj =
       swapForm.type === 'Permuta / Troca de Plantão' && swapForm.permutedShiftId
-        ? safeShifts.find(
+        ? listShifts.find(
             (s: any) => String(s?.id) === String(swapForm.permutedShiftId)
           )
         : null;
 
     const autoPermutedDesc = permutedShiftObj
-      ? `${formatBrDate(permutedShiftObj.date)} (${permutedShiftObj.startTime}-${
+      ? `${safeFormatBr(permutedShiftObj.date)} (${permutedShiftObj.startTime}-${
           permutedShiftObj.endTime
-        } • ${resolveExactFunctionName(permutedShiftObj)})`
+        } • ${safeResolveFnName(permutedShiftObj)})`
       : swapForm.permutedShiftInfo.trim();
 
     const isDispense = swapForm.type === 'Liberação / Dispensa Gerencial';
@@ -474,7 +531,7 @@ export default function SwapsManagementView(props: any) {
       date: selectedShift.date,
       startTime: selectedShift.startTime || '07:00',
       endTime: selectedShift.endTime || '19:00',
-      category: resolveExactFunctionName(selectedShift),
+      category: safeResolveFnName(selectedShift),
       requesterId: Number(selectedShift.doctorId),
       type: swapForm.isPartialByTimeRange ? 'Passagem por Faixa Horária' : swapForm.type,
       isPartialByTimeRange: Boolean(swapForm.isPartialByTimeRange),
@@ -509,9 +566,9 @@ export default function SwapsManagementView(props: any) {
     if (isAdmin && isDispense) {
       const res = applySwapEffectOnShiftsHelper(
         newSwapObj,
-        safeShifts,
+        listShifts,
         safeSetShifts,
-        calcDurationHours
+        safeCalcHrs
       );
       newSwapObj.status = 'Aprovado';
       newSwapObj.originalShiftSnapshot = res.snapshotA;
@@ -520,11 +577,13 @@ export default function SwapsManagementView(props: any) {
     }
 
     safeSetSwaps((prev: any[]) => [newSwapObj, ...(Array.isArray(prev) ? prev : [])]);
-    safeRecordAction(
-      `Registo de ${newSwapObj.type} criado para o plantão de ${formatBrDate(
-        selectedShift.date
-      )}`
-    );
+    if (typeof safeRecordAction === 'function') {
+      safeRecordAction(
+        `Registo de ${newSwapObj.type} criado para o plantão de ${safeFormatBr(
+          selectedShift.date
+        )}`
+      );
+    }
     setSwapForm({
       ...swapForm,
       reason: '',
@@ -535,7 +594,7 @@ export default function SwapsManagementView(props: any) {
     if (typeof onTriggerRequestSentPopup === 'function') {
       onTriggerRequestSentPopup(
         'Solicitação enviada!',
-        `O seu pedido de ${newSwapObj.type} para o plantão de ${formatBrDate(
+        `O seu pedido de ${newSwapObj.type} para o plantão de ${safeFormatBr(
           selectedShift.date
         )} (${newSwapObj.startTime}-${
           newSwapObj.endTime
@@ -562,9 +621,9 @@ export default function SwapsManagementView(props: any) {
     if (!isAdmin) return;
     const res = applySwapEffectOnShiftsHelper(
       swapItem,
-      safeShifts,
+      listShifts,
       safeSetShifts,
-      calcDurationHours
+      safeCalcHrs
     );
     syncSwapFinancialRuleHelper(swapItem, competenceMonth, safeSetConfig);
     clearDismissedForSwapId(Number(swapItem.id));
@@ -584,11 +643,13 @@ export default function SwapsManagementView(props: any) {
       )
     );
 
-    safeRecordAction(
-      `${
-        swapItem.type || 'Troca/Passagem'
-      } #${swapItem.id} homologada pelo gestor (integrada à Escala e à Folha PJ).`
-    );
+    if (typeof safeRecordAction === 'function') {
+      safeRecordAction(
+        `${
+          swapItem.type || 'Troca/Passagem'
+        } #${swapItem.id} homologada pelo gestor (integrada à Escala e à Folha PJ).`
+      );
+    }
   };
 
   const handleRejectSwap = (swapItem: any) => {
@@ -610,9 +671,11 @@ export default function SwapsManagementView(props: any) {
       )
     );
 
-    safeRecordAction(
-      `Solicitação de ${swapItem.type || 'Troca/Passagem'} #${swapItem.id} reprovada/recusada pelo gestor.`
-    );
+    if (typeof safeRecordAction === 'function') {
+      safeRecordAction(
+        `Solicitação de ${swapItem.type || 'Troca/Passagem'} #${swapItem.id} reprovada/recusada pelo gestor.`
+      );
+    }
   };
 
   const handleUndoApprovedSwap = (swapItem: any) => {
@@ -636,9 +699,11 @@ export default function SwapsManagementView(props: any) {
       )
     );
 
-    safeRecordAction(
-      `Movimentação #${swapItem.id} desfeita pelo gestor. O plantonista titular retornou ao plantão na escala.`
-    );
+    if (typeof safeRecordAction === 'function') {
+      safeRecordAction(
+        `Movimentação #${swapItem.id} desfeita pelo gestor. O plantonista titular retornou ao plantão na escala.`
+      );
+    }
   };
 
   const handleRequestSwapReview = (swapItem: any) => {
@@ -671,9 +736,11 @@ export default function SwapsManagementView(props: any) {
         )
       );
       setOpenReviewBoxId(null);
-      safeRecordAction(
-        `Gestor solicitou revisão na troca #${swapId}. Plantonista titular retornou à escala e recebeu alerta de atualização.`
-      );
+      if (typeof safeRecordAction === 'function') {
+        safeRecordAction(
+          `Gestor solicitou revisão na troca #${swapId}. Plantonista titular retornou à escala e recebeu alerta de atualização.`
+        );
+      }
     } else {
       safeSetSwaps((prev: any[]) =>
         (Array.isArray(prev) ? prev : []).map((sw: any) =>
@@ -689,7 +756,9 @@ export default function SwapsManagementView(props: any) {
         )
       );
       setOpenReviewBoxId(null);
-      safeRecordAction(`Plantonista solicitou revisão na troca/passagem #${swapId}`);
+      if (typeof safeRecordAction === 'function') {
+        safeRecordAction(`Plantonista solicitou revisão na troca/passagem #${swapId}`);
+      }
     }
   };
 
@@ -702,7 +771,9 @@ export default function SwapsManagementView(props: any) {
     setTitularAdjustDraft(prev => ({
       ...prev,
       [swId]: {
-        targetDoctorId: Number(sw.targetDoctorId || safeActiveDoctors[0]?.id || 1),
+        targetDoctorId: Number(
+          sw.targetDoctorId || sw.substituteDoctorId || listActiveDoctors[0]?.id || 1
+        ),
         startTime: sw.startTime || '07:00',
         endTime: sw.endTime || '19:00',
         permutedShiftId: sw.permutedShiftId ? String(sw.permutedShiftId) : '',
@@ -720,15 +791,15 @@ export default function SwapsManagementView(props: any) {
 
     const permutedShiftObj =
       sw.type === 'Permuta / Troca de Plantão' && draft.permutedShiftId
-        ? safeShifts.find(
+        ? listShifts.find(
             (s: any) => String(s?.id) === String(draft.permutedShiftId)
           )
         : null;
 
     const autoPermutedDesc = permutedShiftObj
-      ? `${formatBrDate(permutedShiftObj.date)} (${permutedShiftObj.startTime}-${
+      ? `${safeFormatBr(permutedShiftObj.date)} (${permutedShiftObj.startTime}-${
           permutedShiftObj.endTime
-        } • ${resolveExactFunctionName(permutedShiftObj)})`
+        } • ${safeResolveFnName(permutedShiftObj)})`
       : draft.permutedShiftInfo;
 
     safeSetSwaps((prev: any[]) =>
@@ -759,11 +830,13 @@ export default function SwapsManagementView(props: any) {
     );
 
     setTitularAdjustOpenId(null);
-    safeRecordAction(
-      `Plantonista titular (${
-        resolveDoctor(sw.requesterId)?.name || 'Médico'
-      }) ajustou e reenviou a troca/permuta #${swId} após revisão do gestor.`
-    );
+    if (typeof safeRecordAction === 'function') {
+      safeRecordAction(
+        `Plantonista titular (${
+          safeResolveDoc(sw.requesterId || sw.requestingDoctorId)?.name || 'Médico'
+        }) ajustou e reenviou a troca/permuta #${swId} após revisão do gestor.`
+      );
+    }
 
     if (typeof onTriggerRequestSentPopup === 'function') {
       onTriggerRequestSentPopup(
@@ -780,26 +853,33 @@ export default function SwapsManagementView(props: any) {
         (sw: any) => String(sw?.id) !== String(swapId)
       )
     );
-    safeSetConfig((prev: any) => ({ ...prev, demoSwapsCleared: true }));
-    safeRecordAction(`Registo de troca/passagem #${swapId} excluído pelo gestor.`);
+    if (typeof safeSetConfig === 'function') {
+      safeSetConfig((prev: any) => ({ ...prev, demoSwapsCleared: true }));
+    }
+    if (typeof safeRecordAction === 'function') {
+      safeRecordAction(`Registo de troca/passagem #${swapId} excluído pelo gestor.`);
+    }
   };
 
-  // Listagem base para o perfil ativo
+  // Listagem base para o perfil ativo (suporta formatos novos e legados)
   const baseSwaps = useMemo(
     () =>
       isAdmin
-        ? safeSwaps
-        : safeSwaps.filter(
-            (sw: any) =>
-              Number(sw?.requesterId) === Number(currentUser?.id) ||
-              Number(sw?.targetDoctorId) === Number(currentUser?.id) ||
+        ? listSwaps
+        : listSwaps.filter((sw: any) => {
+            const reqId = Number(sw?.requesterId || sw?.requestingDoctorId || 0);
+            const targId = Number(sw?.targetDoctorId || sw?.substituteDoctorId || 0);
+            return (
+              reqId === Number(currentUser?.id) ||
+              targId === Number(currentUser?.id) ||
               (Array.isArray(sw?.segments) &&
                 sw.segments.some(
                   (seg: any) =>
                     Number(seg?.targetDoctorId) === Number(currentUser?.id)
                 ))
-          ),
-    [safeSwaps, isAdmin, currentUser?.id]
+            );
+          }),
+    [listSwaps, isAdmin, currentUser?.id]
   );
 
   // Contadores por Status para as Abas Rápidas
@@ -813,8 +893,14 @@ export default function SwapsManagementView(props: any) {
     (s: any) => s?.status === 'Em Revisão Solicitada'
   ).length;
 
-  const searchWeekMonday = swapSearchDate ? getMondayStr(swapSearchDate) : '';
-  const searchWeekSunday = searchWeekMonday ? addDaysStr(searchWeekMonday, 6) : '';
+  const searchWeekMonday =
+    swapSearchDate && typeof getMondayStr === 'function'
+      ? getMondayStr(swapSearchDate)
+      : swapSearchDate;
+  const searchWeekSunday =
+    searchWeekMonday && typeof addDaysStr === 'function'
+      ? addDaysStr(searchWeekMonday, 6)
+      : searchWeekMonday;
 
   const displayedSwaps = baseSwaps.filter((sw: any) => {
     const swDate = String(sw?.date || sw?.shiftDate || '');
@@ -833,15 +919,15 @@ export default function SwapsManagementView(props: any) {
     if (swapSearchDoctor.trim()) {
       const q = swapSearchDoctor.trim().toLowerCase();
       const reqName = String(
-        resolveDoctor(sw?.requesterId)?.name || ''
+        safeResolveDoc(sw?.requesterId || sw?.requestingDoctorId)?.name || ''
       ).toLowerCase();
       const targName = String(
-        resolveDoctor(sw?.targetDoctorId)?.name || ''
+        safeResolveDoc(sw?.targetDoctorId || sw?.substituteDoctorId)?.name || ''
       ).toLowerCase();
       const segMatch =
         Array.isArray(sw?.segments) &&
         sw.segments.some((seg: any) =>
-          String(resolveDoctor(seg?.targetDoctorId)?.name || '')
+          String(safeResolveDoc(seg?.targetDoctorId)?.name || '')
             .toLowerCase()
             .includes(q)
         );
@@ -887,8 +973,8 @@ export default function SwapsManagementView(props: any) {
 
           <div className="space-y-2">
             {myUpdatedSwapsAlerts.map((sw: any) => {
-              const reqDoc = resolveDoctor(sw.requesterId);
-              const targDoc = resolveDoctor(sw.targetDoctorId);
+              const reqDoc = safeResolveDoc(sw.requesterId || sw.requestingDoctorId);
+              const targDoc = safeResolveDoc(sw.targetDoctorId || sw.substituteDoctorId);
               const isAppr = sw.status === 'Aprovado';
               const isRej = sw.status === 'Recusado';
 
@@ -915,8 +1001,8 @@ export default function SwapsManagementView(props: any) {
                           : '⚠️ REVISÃO SOLICITADA PELO GESTOR'}
                       </span>
                       <strong className="text-slate-900 font-black">
-                        Plantão de {formatBrDate(sw.date)} ({sw.startTime}-{sw.endTime} •{' '}
-                        {sw.category})
+                        Plantão de {safeFormatBr(sw.date || sw.shiftDate)} ({sw.startTime || '07:00'}-
+                        {sw.endTime || '19:00'} • {sw.category || 'Plantonista'})
                       </strong>
                     </div>
                     <p className="text-slate-700 font-semibold">
@@ -1147,9 +1233,9 @@ export default function SwapsManagementView(props: any) {
               1. Selecione o Plantão Titular na Escala *
             </label>
             <select
-              value={swapForm.shiftId}
+              value={swapForm.shiftId || myEligibleShifts[0]?.id || ''}
               onChange={e => {
-                const chosen = safeShifts.find(
+                const chosen = listShifts.find(
                   (s: any) => String(s?.id) === String(e.target.value)
                 );
                 setSwapForm({ ...swapForm, shiftId: e.target.value });
@@ -1166,7 +1252,7 @@ export default function SwapsManagementView(props: any) {
                       startTime: '13:00',
                       endTime: chosen.endTime || '19:00',
                       targetDoctorId:
-                        safeActiveDoctors.find(
+                        listActiveDoctors.find(
                           (d: any) => Number(d.id) !== Number(chosen.doctorId)
                         )?.id || Number(chosen.doctorId)
                     }
@@ -1176,11 +1262,14 @@ export default function SwapsManagementView(props: any) {
               className="w-full border border-slate-300 rounded-xl px-3 py-2 bg-white font-bold"
             >
               {myEligibleShifts.map((s: any) => {
-                const d = resolveShiftDoctorInfo(s);
-                const fn = resolveExactFunctionName(s, d);
+                const d =
+                  typeof resolveShiftDoctorInfo === 'function'
+                    ? resolveShiftDoctorInfo(s)
+                    : safeResolveDoc(s.doctorId);
+                const fn = safeResolveFnName(s, d);
                 return (
                   <option key={s.id} value={s.id}>
-                    {formatBrDate(s.date)} • {s.startTime || '07:00'}-
+                    {safeFormatBr(s.date)} • {s.startTime || '07:00'}-
                     {s.endTime || '19:00'} — {d?.name || 'Médico'} ({fn})
                   </option>
                 );
@@ -1248,7 +1337,7 @@ export default function SwapsManagementView(props: any) {
                 }}
                 className="w-full border border-slate-300 rounded-xl px-3 py-2 bg-white font-bold"
               >
-                {safeActiveDoctors.map((d: any) => (
+                {listActiveDoctors.map((d: any) => (
                   <option key={d.id} value={d.id}>
                     {d.name} ({d.crm})
                   </option>
@@ -1297,12 +1386,12 @@ export default function SwapsManagementView(props: any) {
                 >
                   <option value="">
                     -- Selecionar plantão de{' '}
-                    {resolveDoctor(swapForm.targetDoctorId)?.name || 'Colega'} na escala --
+                    {safeResolveDoc(swapForm.targetDoctorId)?.name || 'Colega'} na escala --
                   </option>
                   {targetCandidateShiftsForForm.map((cs: any) => (
                     <option key={cs.id} value={cs.id}>
-                      {formatBrDate(cs.date)} • {cs.startTime}-{cs.endTime} (
-                      {resolveExactFunctionName(cs)})
+                      {safeFormatBr(cs.date)} • {cs.startTime}-{cs.endTime} (
+                      {safeResolveFnName(cs)})
                     </option>
                   ))}
                 </select>
@@ -1365,7 +1454,7 @@ export default function SwapsManagementView(props: any) {
                   }
                   className="w-full border border-purple-300 rounded-xl px-3 py-2 bg-white font-bold"
                 >
-                  {safeActiveDoctors.map((d: any) => (
+                  {listActiveDoctors.map((d: any) => (
                     <option key={d.id} value={d.id}>
                       {d.name} ({d.crm})
                     </option>
@@ -1392,7 +1481,7 @@ export default function SwapsManagementView(props: any) {
                       id: `seg_${Date.now()}`,
                       startTime: '13:00',
                       endTime: '19:00',
-                      targetDoctorId: safeActiveDoctors[0]?.id || 1
+                      targetDoctorId: listActiveDoctors[0]?.id || 1
                     }
                   ])
                 }
@@ -1449,7 +1538,7 @@ export default function SwapsManagementView(props: any) {
                     }
                     className="flex-1 border rounded-lg px-2.5 py-1 bg-white font-bold"
                   >
-                    {safeActiveDoctors.map((d: any) => (
+                    {listActiveDoctors.map((d: any) => (
                       <option key={d.id} value={d.id}>
                         {d.name}{' '}
                         {Number(d.id) === Number(currentUser?.id)
@@ -1509,8 +1598,8 @@ export default function SwapsManagementView(props: any) {
           </div>
         ) : (
           displayedSwaps.map((sw: any) => {
-            const reqDoc = resolveDoctor(sw.requesterId);
-            const targDoc = resolveDoctor(sw.targetDoctorId);
+            const reqDoc = safeResolveDoc(sw.requesterId || sw.requestingDoctorId);
+            const targDoc = safeResolveDoc(sw.targetDoctorId || sw.substituteDoctorId);
             const isPendingAnalysis =
               sw.status === 'Pendente' ||
               sw.status === 'Em Revisão Solicitada' ||
@@ -1520,8 +1609,9 @@ export default function SwapsManagementView(props: any) {
             const isManagerRequestedReview =
               sw.status === 'Revisão Solicitada pelo Gestor';
             const isMyTitularSwap =
-              Number(sw.requesterId) === Number(currentUser?.id);
-            const cInfo = getFunctionColorInfo(sw.category);
+              Number(sw.requesterId || sw.requestingDoctorId) ===
+              Number(currentUser?.id);
+            const cInfo = safeGetColor(sw.category);
             const adjustDraft = titularAdjustDraft[Number(sw.id)];
 
             return (
@@ -1542,7 +1632,7 @@ export default function SwapsManagementView(props: any) {
                 <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="px-2.5 py-1 rounded-lg bg-slate-900 text-white font-extrabold">
-                      {formatBrDate(sw.date)}
+                      {safeFormatBr(sw.date || sw.shiftDate)}
                     </span>
                     <span
                       className={`px-2.5 py-1 rounded-lg font-black ${
@@ -1551,7 +1641,7 @@ export default function SwapsManagementView(props: any) {
                           : 'bg-indigo-50 text-indigo-950'
                       }`}
                     >
-                      {sw.type || 'Passagem de Plantão'}
+                      {sw.type || sw.movementType || 'Passagem de Plantão'}
                     </span>
                     <span
                       style={{ backgroundColor: cInfo.hex }}
@@ -1681,7 +1771,6 @@ export default function SwapsManagementView(props: any) {
                                 }))
                               }
                               className="w-14 border border-rose-400 rounded-lg px-1.5 py-1 bg-white font-black text-center"
-                              title="Percentual de desconto (%)"
                             />
                           )}
 
@@ -1860,7 +1949,7 @@ export default function SwapsManagementView(props: any) {
                           }
                           className="w-full border border-blue-300 rounded-xl px-3 py-1.5 bg-white font-bold"
                         >
-                          {safeActiveDoctors.map((d: any) => (
+                          {listActiveDoctors.map((d: any) => (
                             <option key={d.id} value={d.id}>
                               {d.name} (Nível {d.remunerationLevel || 1})
                             </option>
