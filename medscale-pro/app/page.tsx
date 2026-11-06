@@ -5,7 +5,7 @@ import {
   Calendar, Users, DollarSign, RefreshCw, Umbrella, GraduationCap,
   Sliders, ShieldAlert, LayoutDashboard, LogOut, Menu, X, Flame,
   Megaphone, ClipboardList, History, UserCheck, Shield, Wifi, WifiOff,
-  Lightbulb, Send, CheckCircle
+  Lightbulb, Send, CheckCircle, BarChart3
 } from 'lucide-react';
 import { createClient } from '@/supabase/client';
 import {
@@ -34,6 +34,7 @@ import AuthScreen from './AuthScreen';
 import ScheduleAndMapViewsOrig from './ScheduleAndMapViews';
 import StaffAndFinanceViews from './StaffAndFinanceViews';
 import GovernanceAndModals from './GovernanceAndModals';
+import EmergencyAnalyticsView from './EmergencyAnalyticsView';
 
 const ScheduleAndMapViews = ScheduleAndMapViewsOrig as any;
 
@@ -208,6 +209,8 @@ export default function MedScaleProApp() {
   };
 
   useEffect(() => {
+    let isMounted = true;
+
     if (!clientIdRef.current) {
       clientIdRef.current = `client_${Math.random().toString(36).slice(2, 10)}_${Date.now()}`;
     }
@@ -233,6 +236,8 @@ export default function MedScaleProApp() {
     const initCloudAndRealtime = async () => {
       try {
         const cloudPayload = await fetchStateFromSupabase(supabase);
+        if (!isMounted) return;
+
         if (
           cloudPayload &&
           typeof cloudPayload === 'object' &&
@@ -264,16 +269,25 @@ export default function MedScaleProApp() {
             updatedByClientId: clientIdRef.current
           });
         }
+        if (!isMounted) return;
         isCloudReadyRef.current = true;
         setRealtimeStatus('online');
       } catch (err) {
+        if (!isMounted) return;
         console.warn('Modo local ativo:', err);
         isCloudReadyRef.current = true;
         setRealtimeStatus('offline');
       }
 
+      if (!isMounted) return;
+
+      // Canal com identificador único por montagem para evitar conflito no React StrictMode
+      const uniqueChannelName = `medscale_live_sync_${Date.now()}_${Math.random()
+        .toString(36)
+        .slice(2, 7)}`;
+
       channel = supabase
-        .channel('medscale_live_sync')
+        .channel(uniqueChannelName)
         .on(
           'postgres_changes',
           {
@@ -283,6 +297,7 @@ export default function MedScaleProApp() {
             filter: `id=eq.${CLOUD_STATE_ROW_ID}`
           },
           (eventPayload: any) => {
+            if (!isMounted) return;
             const incoming = eventPayload?.new?.payload;
             if (!incoming) return;
             if (incoming.updatedByClientId === clientIdRef.current) return;
@@ -291,7 +306,7 @@ export default function MedScaleProApp() {
           }
         )
         .subscribe((status: string) => {
-          if (status === 'SUBSCRIBED') {
+          if (isMounted && status === 'SUBSCRIBED') {
             setRealtimeStatus('online');
           }
         });
@@ -300,8 +315,10 @@ export default function MedScaleProApp() {
     initCloudAndRealtime();
 
     return () => {
+      isMounted = false;
       if (channel) {
         supabase.removeChannel(channel);
+        channel = null;
       }
     };
   }, []);
@@ -809,6 +826,7 @@ export default function MedScaleProApp() {
   const navItems = isAdmin
     ? [
         { id: 'dashboard', label: 'Painel Geral', icon: LayoutDashboard },
+        { id: 'emergency_analytics', label: 'Inteligência CATE', icon: BarChart3 },
         { id: 'schedule', label: 'Escala Oficial', icon: Calendar },
         { id: 'heatmap', label: 'Mapa 24h (Heatmap)', icon: Flame },
         { id: 'open_shifts', label: 'Plantões em Aberto', icon: Megaphone },
@@ -984,6 +1002,33 @@ export default function MedScaleProApp() {
           <div className="p-3 bg-blue-50 border border-blue-200 text-blue-900 rounded-xl text-xs font-bold">
             {syncStatusMsg}
           </div>
+        )}
+
+        {isAdmin && currentView === 'emergency_analytics' && (
+          <EmergencyAnalyticsView
+            onPublishToGovernance={kpis => {
+              setConfig((prev: any) => ({
+                ...prev,
+                latestCateKpis: kpis,
+                governanceIndicators: {
+                  ...(prev?.governanceIndicators || {}),
+                  doorToDoctorMinutes: Number(kpis.doorToDoctorAvg.toFixed(1)),
+                  doorToDoctorP90Minutes: Number(kpis.doorToDoctorP90.toFixed(1)),
+                  outcomeMinutes: Number(kpis.lengthOfStayAvg.toFixed(0)),
+                  conversionRate: Number(kpis.admissionRate.toFixed(1)),
+                  labSlaRate: Number(kpis.labSlaRate.toFixed(1)),
+                  ctSlaRate: Number(kpis.ctSlaRate.toFixed(1)),
+                  earlyReturnRate: Number(kpis.earlyReturnRate.toFixed(2)),
+                  evasionRate: Number(kpis.evasionRate.toFixed(2)),
+                  totalMonthlyAttendance: kpis.totalVolume,
+                  referenceMonth: kpis.monthLabel
+                }
+              }));
+              recordAction(
+                `Indicadores CATE (${kpis.monthLabel}) publicados na Gestão à Vista`
+              );
+            }}
+          />
         )}
 
         {['dashboard', 'schedule', 'heatmap', 'open_shifts', 'swaps'].includes(
