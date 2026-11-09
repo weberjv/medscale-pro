@@ -1,1451 +1,1491 @@
-// app/EmergencyAnalyticsView.tsx
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
-import * as XLSX from 'xlsx';
-import html2canvas from 'html2canvas';
-import jsPDF from 'jspdf';
+import React, { useState, useMemo } from 'react';
 import {
-  parseEmergencyData,
-  compareMonthlyMetrics,
-  EmergencyMetrics,
-  ShiftPeriodMetrics,
-  HourlySlotStats,
+  parseEmergencyExcel,
+  mergeVsmSupplementaryFiles,
+  EmergencyAnalyticsData,
+  VsmSliceMetrics,
+  MetricStats,
+  HourlySimultaneousPoint,
 } from '../lib/analytics/emergency-parser';
-import { generateExecutiveExcel } from '../lib/reports/excel-generator';
-import { generateExecutivePDF } from '../lib/reports/pdf-generator';
-interface EmergencyAnalyticsViewProps {
-  onPublishToGovernance?: (kpis: {
-    monthLabel: string;
-    totalVolume: number;
-    doorToDoctorAvg: number;
-    doorToDoctorP90: number;
-    lengthOfStayAvg: number;
-    labSlaRate: number;
-    ctSlaRate: number;
-    admissionRate: number;
-    earlyReturnRate: number;
-    evasionRate: number;
-  }) => void;
+import {
+  generateEmergencyExcel,
+  generateComparisonExcel,
+} from '../lib/reports/excel-generator';
+import {
+  generateEmergencyPdf,
+  generateVsmPngImage,
+  generateComparisonPdf,
+} from '../lib/reports/pdf-generator';
+
+const WEEKDAY_NAMES = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo'];
+const HOURS_7_TO_6 = [7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2, 3, 4, 5, 6];
+
+type MainTab =
+  | 'vsm_journey'
+  | 'simultaneous_census'
+  | 'boarding_convenios'
+  | 'doctors_conduct'
+  | 'clinical_governance'
+  | 'temporal_mom'
+  | 'methodology_audit';
+
+type VsmFilterCategory = 'monthly' | 'shift' | 'week' | 'weekday';
+type CensusLayerFilter = 'total' | 'porta' | 'fastReav' | 'exames' | 'boarding';
+type HeatmapDisplayMode = 'mean_sd' | 'median_range' | 'total_sum';
+
+export interface EmergencyAnalyticsViewProps {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  onPublishToGovernance?: (kpis: any) => void;
 }
 
-const STORAGE_SNAPSHOTS_KEY = 'medscale_cate_anonymous_snapshots_v1';
+function fmtStatBadge(st: MetricStats, unit = 'm'): string {
+  if (!st || st.count === 0) return '—';
+  return `${st.mean.toFixed(1)}${unit} (±${st.stdDev.toFixed(1)}) | Med: ${st.median.toFixed(1)}${unit}`;
+}
 
-// ============================================================================
-// CONVERSOR NATIVO DE CORES CSS (lab / oklch / oklab / lch -> rgb/rgba)
-// Elimina 100% o erro 'Attempting to parse an unsupported color function "lab"'
-// ============================================================================
-const convertModernCssColorToRgb = (() => {
-  let ctx: CanvasRenderingContext2D | null = null;
-  const cache: Record<string, string> = {};
-
-  const getCtx = () => {
-    if (!ctx && typeof document !== 'undefined') {
-      const canvas = document.createElement('canvas');
-      canvas.width = 1;
-      canvas.height = 1;
-      ctx = canvas.getContext('2d', { willReadFrequently: true });
-    }
-    return ctx;
-  };
-
-  const singleTokenToRgb = (token: string): string => {
-    if (cache[token]) return cache[token];
-    const c = getCtx();
-    if (!c) return 'rgb(15, 23, 42)';
-    try {
-      c.clearRect(0, 0, 1, 1);
-      c.fillStyle = '#000000';
-      c.fillStyle = token;
-      c.fillRect(0, 0, 1, 1);
-      const [r, g, b, a] = c.getImageData(0, 0, 1, 1).data;
-      const res =
-        a === 0
-          ? 'rgba(0, 0, 0, 0)'
-          : a < 255
-          ? `rgba(${r}, ${g}, ${b}, ${(a / 255).toFixed(3)})`
-          : `rgb(${r}, ${g}, ${b})`;
-      cache[token] = res;
-      return res;
-    } catch {
-      return 'rgb(15, 23, 42)';
-    }
-  };
-
-  const MODERN_COLOR_REGEX = /(?:oklch|oklab|lab|lch|color)\([^)]+\)/gi;
-
-  return (cssValue: string): string => {
-    if (!cssValue || !/(?:lab|lch|color)\(/i.test(cssValue)) return cssValue;
-    return cssValue.replace(MODERN_COLOR_REGEX, (match) => singleTokenToRgb(match));
-  };
-})();
-
-const sanitizeClonedDomForHtml2Canvas = (
-  originalRoot: HTMLElement,
-  clonedDoc: Document,
-  clonedRoot: HTMLElement
-) => {
-  // 1. Limpa funções lab()/oklch() de todas as tags <style> no documento clonado
-  clonedDoc.querySelectorAll('style').forEach((styleEl) => {
-    if (styleEl.textContent && /(?:lab|lch|color)\(/i.test(styleEl.textContent)) {
-      styleEl.textContent = convertModernCssColorToRgb(styleEl.textContent);
-    }
-  });
-
-  // 2. Aplica cores RGB já resolvidas diretamente em cada elemento clonado
-  const origNodes = [
-    originalRoot,
-    ...Array.from(originalRoot.querySelectorAll<HTMLElement>('*')),
-  ];
-  const cloneNodes = [
-    clonedRoot,
-    ...Array.from(clonedRoot.querySelectorAll<HTMLElement>('*')),
-  ];
-
-  const colorProps = [
-    'color',
-    'background-color',
-    'border-top-color',
-    'border-right-color',
-    'border-bottom-color',
-    'border-left-color',
-    'outline-color',
-    'text-decoration-color',
-    'fill',
-    'stroke',
-  ];
-
-  origNodes.forEach((origEl, idx) => {
-    const cloneEl = cloneNodes[idx];
-    if (!cloneEl || !cloneEl.style) return;
-    const computed = window.getComputedStyle(origEl);
-
-    colorProps.forEach((prop) => {
-      const val = computed.getPropertyValue(prop);
-      if (val && /(?:lab|lch|color)\(/i.test(val)) {
-        cloneEl.style.setProperty(prop, convertModernCssColorToRgb(val), 'important');
-      }
-    });
-
-    // Sanitiza sombras e gradientes que possam conter lab() ou oklch()
-    const boxShadow = computed.getPropertyValue('box-shadow');
-    if (boxShadow && /(?:lab|lch|color)\(/i.test(boxShadow)) {
-      cloneEl.style.setProperty(
-        'box-shadow',
-        convertModernCssColorToRgb(boxShadow),
-        'important'
-      );
-    }
-    const bgImage = computed.getPropertyValue('background-image');
-    if (bgImage && /(?:lab|lch|color)\(/i.test(bgImage)) {
-      cloneEl.style.setProperty(
-        'background-image',
-        convertModernCssColorToRgb(bgImage),
-        'important'
-      );
-    }
-  });
-
-  // Garante que html e body do clone também tenham fundo RGB seguro
-  if (clonedDoc.documentElement) {
-    clonedDoc.documentElement.style.backgroundColor = '#f8fafc';
-    clonedDoc.documentElement.style.color = '#0f172a';
-  }
-  if (clonedDoc.body) {
-    clonedDoc.body.style.backgroundColor = '#f8fafc';
-    clonedDoc.body.style.color = '#0f172a';
-  }
-};
-
-export default function EmergencyAnalyticsView({
+export function EmergencyAnalyticsView({
   onPublishToGovernance,
-}: EmergencyAnalyticsViewProps) {
-  const [metrics, setMetrics] = useState<EmergencyMetrics | null>(null);
-  const [prevMetrics, setPrevMetrics] = useState<EmergencyMetrics | null>(null);
-  const [savedSnapshots, setSavedSnapshots] = useState<Record<string, EmergencyMetrics>>({});
+}: EmergencyAnalyticsViewProps = {}) {
+  // Lista de competências carregadas em memória RAM (LGPD Stateless)
+  const [loadedMonths, setLoadedMonths] = useState<EmergencyAnalyticsData[]>([]);
+  const [activeMonthKey, setActiveMonthKey] = useState<string>('');
+  const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [publishSuccessMsg, setPublishSuccessMsg] = useState<string | null>(null);
 
-  const [monthLabel, setMonthLabel] = useState<string>('Outubro/2026');
-  const [prevMonthLabel, setPrevMonthLabel] = useState<string>('Setembro/2026');
-  const [activeFileName, setActiveFileName] = useState<string>('');
+  // Navegação principal entre as 7 sub-abas executivas
+  const [activeTab, setActiveTab] = useState<MainTab>('vsm_journey');
 
-  const [selectedDayIndex, setSelectedDayIndex] = useState<number | 'ALL'>('ALL');
-  const [selectedShift, setSelectedShift] = useState<'ALL' | 'DIURNO' | 'NOTURNO'>('ALL');
-  const [chartStatMode, setChartStatMode] = useState<'MEAN_SD' | 'MEDIAN_RANGE' | 'TOTAL'>(
-    'MEAN_SD'
-  );
-  const [activeSubTab, setActiveSubTab] = useState<
-    'OVERVIEW' | 'PRODUCTIVITY' | 'CIDS' | 'COMPARISON'
-  >('OVERVIEW');
+  // Filtros globais do VSM (Mês, Turno, Semana S1-S5, Dia da Semana)
+  const [vsmFilterType, setVsmFilterType] = useState<VsmFilterCategory>('monthly');
+  const [selectedShift, setSelectedShift] = useState<'day' | 'night'>('day');
+  const [selectedWeekLabel, setSelectedWeekLabel] = useState<string>('Semana 1 (01–07)');
+  const [selectedWeekdayName, setSelectedWeekdayName] = useState<string>('Segunda');
 
-  const [isProcessing, setIsProcessing] = useState<boolean>(false);
-  const [isExporting, setIsExporting] = useState<boolean>(false);
-  const [feedbackMsg, setFeedbackMsg] = useState<string | null>(null);
+  // Filtros da Aba de Censo Simultâneo & Heatmaps 24x7
+  const [selectedCensusDayIdx, setSelectedCensusDayIdx] = useState<number | 'all'>('all');
+  const [selectedCensusTurnFilter, setSelectedCensusTurnFilter] = useState<'24h' | 'day' | 'night'>('24h');
+  const [censusHeatLayer, setCensusHeatLayer] = useState<CensusLayerFilter>('total');
+  const [censusHeatMode, setCensusHeatMode] = useState<'mean_sd' | 'median_range' | 'breakdown'>('mean_sd');
+  const [arrivalHeatMode, setArrivalHeatMode] = useState<HeatmapDisplayMode>('mean_sd');
 
-  const dashboardRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const prevFileInputRef = useRef<HTMLInputElement>(null);
+  // Filtros da Aba de Equipe Médica
+  const [doctorSearch, setDoctorSearch] = useState<string>('');
+  const [doctorViewMode, setDoctorViewMode] = useState<'conduct_matrix' | 'shift_productivity'>('conduct_matrix');
 
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_SNAPSHOTS_KEY);
-      if (raw) {
-        setSavedSnapshots(JSON.parse(raw));
-      }
-    } catch (e) {
-      console.error('Erro ao ler histórico anónimo local:', e);
+  // Competência ativa selecionada
+  const activeData: EmergencyAnalyticsData | null = useMemo(() => {
+    if (loadedMonths.length === 0) return null;
+    return loadedMonths.find((m) => m.monthKey === activeMonthKey) || loadedMonths[loadedMonths.length - 1];
+  }, [loadedMonths, activeMonthKey]);
+
+  // Recorte ativo do VSM conforme os filtros selecionados
+  const activeVsmSlice: VsmSliceMetrics | null = useMemo(() => {
+    if (!activeData) return null;
+    const vsm = activeData.vsm;
+    if (vsmFilterType === 'monthly') return vsm.monthlyOverall;
+    if (vsmFilterType === 'shift') {
+      return selectedShift === 'day' ? vsm.byShift.day : vsm.byShift.night;
     }
-  }, []);
+    if (vsmFilterType === 'week') {
+      return vsm.byWeekOfMonth[selectedWeekLabel] || Object.values(vsm.byWeekOfMonth)[0] || vsm.monthlyOverall;
+    }
+    if (vsmFilterType === 'weekday') {
+      return vsm.byDayOfWeek[selectedWeekdayName] || vsm.monthlyOverall;
+    }
+    return vsm.monthlyOverall;
+  }, [activeData, vsmFilterType, selectedShift, selectedWeekLabel, selectedWeekdayName]);
 
-  const showToast = (msg: string) => {
-    setFeedbackMsg(msg);
-    setTimeout(() => setFeedbackMsg(null), 4000);
+  // Curva horária ativa do Censo Simultâneo (Geral ou Dia da Semana específico + filtro de Turno)
+  const activeSimultaneousCurve: HourlySimultaneousPoint[] = useMemo(() => {
+    if (!activeData) return [];
+    const baseCurve =
+      selectedCensusDayIdx === 'all'
+        ? activeData.vsm.hourlySimultaneousOverall
+        : activeData.vsm.hourlySimultaneousByDayOfWeek[selectedCensusDayIdx] ||
+          activeData.vsm.hourlySimultaneousOverall;
+
+    if (selectedCensusTurnFilter === 'day') {
+      return baseCurve.filter((pt) => pt.hour >= 7 && pt.hour < 19);
+    }
+    if (selectedCensusTurnFilter === 'night') {
+      return baseCurve.filter((pt) => pt.hour >= 19 || pt.hour < 7);
+    }
+    return baseCurve;
+  }, [activeData, selectedCensusDayIdx, selectedCensusTurnFilter]);
+
+  // ==========================================================================
+  // HANDLERS DE UPLOAD, FUSÃO EM MEMÓRIA E PUBLICAÇÃO NA GOVERNANÇA
+  // ==========================================================================
+
+  const handlePublishToGovernance = () => {
+    if (!activeData || !onPublishToGovernance) return;
+    onPublishToGovernance({
+      ...activeData,
+      period: activeData.periodLabel,
+      doorToDocMean: activeData.doorToDoctor.overall.mean,
+      doorToDocMedian: activeData.doorToDoctor.overall.median,
+      losMean: activeData.losOverall.overall.mean,
+      losMedian: activeData.losOverall.overall.median,
+      boardingMean: activeData.vsm.monthlyOverall.totalBoardingStats.mean,
+      boardingMedian: activeData.vsm.monthlyOverall.totalBoardingStats.median,
+      directDischargePct: activeData.vsm.monthlyOverall.directDischargePct,
+      fastReavMedOnlyPct: activeData.vsm.monthlyOverall.fastReavMedOnlyPct,
+      postReportReavalWaitMean: activeData.vsm.monthlyOverall.postReportReavalWaitStats.mean,
+      pceEfficiencyPct: activeData.vsm.monthlyOverall.pceEfficiencyPct,
+    });
+    setPublishSuccessMsg(`KPIs de ${activeData.periodLabel} sincronizados com a Governança!`);
+    setTimeout(() => setPublishSuccessMsg(null), 4000);
   };
 
-  const processSpreadsheetFile = async (
-    file: File,
-    label: string,
-    isComparisonFile = false
-  ) => {
-    setIsProcessing(true);
+  const handleUploadCate3333 = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+    setIsLoading(true);
+    setErrorMessage(null);
+
     try {
-      const arrayBuffer = await file.arrayBuffer();
-      const workbook = XLSX.read(arrayBuffer, { type: 'array', cellDates: true });
-      const firstSheetName = workbook.SheetNames[0];
-      const worksheet = workbook.Sheets[firstSheetName];
-      const rawJson = XLSX.utils.sheet_to_json(worksheet, { defval: null });
+      const parsedList: EmergencyAnalyticsData[] = [];
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i];
+        const buffer = await file.arrayBuffer();
+        const parsed = parseEmergencyExcel(buffer, file.name);
+        if (parsed.totalAttendances === 0) {
+          throw new Error(
+            `O ficheiro "${file.name}" não contém atendimentos válidos de PS Adulto / Clínica Médica. Verifique se enviou o relatório CATE 3333 correto.`
+          );
+        }
+        parsedList.push(parsed);
+      }
 
-      const parsed = parseEmergencyData(rawJson, label);
+      setLoadedMonths((prev) => {
+        const map = new Map<string, EmergencyAnalyticsData>();
+        prev.forEach((m) => map.set(m.monthKey, m));
+        parsedList.forEach((m) => map.set(m.monthKey, m));
+        return Array.from(map.values()).sort((a, b) => a.monthKey.localeCompare(b.monthKey));
+      });
 
-      if (isComparisonFile) {
-        setPrevMetrics(parsed);
-        showToast(`Mês de comparação (${label}) processado em memória!`);
-      } else {
-        setMetrics(parsed);
-        setActiveFileName(file.name);
-        showToast(
-          `Planilha processada com sucesso (${parsed.overall.full24h.totalVolume} atendimentos de Clínica Médica)!`
+      if (parsedList.length > 0) {
+        const last = parsedList[parsedList.length - 1];
+        setActiveMonthKey(last.monthKey);
+        const firstWeekKey = Object.keys(last.vsm.byWeekOfMonth)[0];
+        if (firstWeekKey) setSelectedWeekLabel(firstWeekKey);
+      }
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Erro ao processar planilha CATE 3333.';
+      setErrorMessage(msg);
+    } finally {
+      setIsLoading(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleUploadCate3493 = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !activeData) return;
+    setIsLoading(true);
+    setErrorMessage(null);
+
+    try {
+      const buf3493 = await file.arrayBuffer();
+      const updated = mergeVsmSupplementaryFiles(activeData, buf3493, null);
+      if (!updated.vsm.hasCate3493Data || updated.vsm.matched3493Count === 0) {
+        throw new Error(
+          `Nenhum número de atendimento do CATE 3493 ("${file.name}") coincidiu com a competência ativa (${activeData.periodLabel}). Verifique se ambos os ficheiros são do mesmo mês.`
         );
       }
-    } catch (err) {
-      console.error(err);
-      alert(
-        'Erro ao processar a planilha. Verifique se o ficheiro corresponde ao relatório bruto do CATE (.xls ou .xlsx).'
+      setLoadedMonths((prev) =>
+        prev.map((m) => (m.monthKey === updated.monthKey ? updated : m))
       );
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Erro ao cruzar o relatório CATE 3493.';
+      setErrorMessage(msg);
     } finally {
-      setIsProcessing(false);
+      setIsLoading(false);
+      e.target.value = '';
     }
   };
 
-  const handleSaveAnonymousSnapshot = () => {
-    if (!metrics) return;
+  const handleUploadChaa3704 = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file || !activeData) return;
+    setIsLoading(true);
+    setErrorMessage(null);
+
     try {
-      const updated = { ...savedSnapshots, [metrics.monthLabel]: metrics };
-      localStorage.setItem(STORAGE_SNAPSHOTS_KEY, JSON.stringify(updated));
-      setSavedSnapshots(updated);
-      showToast(`Resumo estatístico anónimo de ${metrics.monthLabel} guardado no histórico!`);
-    } catch (e) {
-      console.error(e);
-      alert('Não foi possível guardar o resumo no armazenamento local.');
-    }
-  };
-
-  const getActivePeriodMetrics = (): ShiftPeriodMetrics | null => {
-    if (!metrics) return null;
-    const shiftKey =
-      selectedShift === 'ALL'
-        ? 'full24h'
-        : selectedShift === 'DIURNO'
-        ? 'diurno'
-        : 'noturno';
-
-    if (selectedDayIndex === 'ALL') {
-      return metrics.overall[shiftKey];
-    }
-    const foundDay = metrics.byDayOfWeek.find((d) => d.dayIndex === selectedDayIndex);
-    return foundDay ? foundDay[shiftKey] : metrics.overall[shiftKey];
-  };
-
-  const currentPeriod = getActivePeriodMetrics();
-
-  const selectedDayLabel =
-    selectedDayIndex === 'ALL'
-      ? 'Consolidado Mensal'
-      : metrics?.byDayOfWeek.find((d) => d.dayIndex === selectedDayIndex)?.dayName ||
-        'Dia Selecionado';
-
-  const selectedShiftLabel =
-    selectedShift === 'ALL'
-      ? '24h (07h-06h59)'
-      : selectedShift === 'DIURNO'
-      ? 'Diurno (07h-18h59)'
-      : 'Noturno (19h-06h59)';
-
-  // Captura segura convertendo qualquer cor lab()/oklch() do Tailwind v4
-  const captureDashboardCanvas = async () => {
-    const targetEl = dashboardRef.current;
-    if (!targetEl) throw new Error('Elemento do dashboard não encontrado');
-
-    return await html2canvas(targetEl, {
-      scale: 2,
-      backgroundColor: '#f8fafc',
-      useCORS: true,
-      logging: false,
-      onclone: (clonedDoc, clonedElement) => {
-        sanitizeClonedDomForHtml2Canvas(targetEl, clonedDoc, clonedElement);
-      },
-    });
-  };
-
-  // Exportação PNG (Geral ou do Dia/Turno Selecionado)
-  const handleExportPNG = async (mode: 'GENERAL' | 'CURRENT_VIEW') => {
-    if (!dashboardRef.current || !metrics) return;
-    setIsExporting(true);
-    try {
-      const prevDay = selectedDayIndex;
-      if (mode === 'GENERAL' && selectedDayIndex !== 'ALL') {
-        setSelectedDayIndex('ALL');
-        await new Promise((r) => setTimeout(r, 250));
+      const buf3704 = await file.arrayBuffer();
+      const updated = mergeVsmSupplementaryFiles(activeData, null, buf3704);
+      if (!updated.vsm.hasChaa3704Data || updated.vsm.matched3704Count === 0) {
+        throw new Error(
+          `Nenhum atendimento do CHAA 3704 ("${file.name}") coincidiu com a competência ativa (${activeData.periodLabel}). Verifique se o relatório pertence ao mesmo mês.`
+        );
       }
-
-      const canvas = await captureDashboardCanvas();
-      const url = canvas.toDataURL('image/png');
-      const a = document.createElement('a');
-      const scopeTag =
-        mode === 'GENERAL'
-          ? 'Geral_Mensal'
-          : `${selectedDayLabel.replace(/\s+/g, '_')}_${selectedShift}`;
-      a.href = url;
-      a.download = `Painel_Inteligencia_PS_${metrics.monthLabel.replace(
-        /\s+/g,
-        '_'
-      )}_${scopeTag}.png`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-
-      if (mode === 'GENERAL' && prevDay !== 'ALL') {
-        setSelectedDayIndex(prevDay);
-      }
-      showToast('Imagem PNG transferida com sucesso!');
-    } catch (e) {
-      console.error(e);
-      alert('Erro ao gerar imagem PNG. Verifique o console.');
-    } finally {
-      setIsExporting(false);
-    }
-  };
-
- // Exportação PDF Executivo Multipáginas Vetorial (Sem Cortes + Todas as Abas da Planilha)
-  const handleExportPDF = async () => {
-    if (!metrics || !currentPeriod) return;
-    setIsExporting(true);
-    try {
-      generateExecutivePDF(
-        metrics,
-        currentPeriod,
-        selectedDayLabel,
-        selectedShiftLabel,
-        chartStatMode,
-        prevMetrics
+      setLoadedMonths((prev) =>
+        prev.map((m) => (m.monthKey === updated.monthKey ? updated : m))
       );
-      showToast('Dossiê PDF Executivo multipáginas gerado com sucesso!');
-    } catch (e) {
-      console.error(e);
-      alert('Erro ao gerar o ficheiro PDF.');
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : 'Erro ao cruzar o relatório CHAA 3704.';
+      setErrorMessage(msg);
     } finally {
-      setIsExporting(false);
+      setIsLoading(false);
+      e.target.value = '';
     }
   };
 
-  // Geração de Prompt Executivo (Custo Zero) para IA Externa
-  const handleCopyPromptForAI = () => {
-    if (!metrics || !currentPeriod) return;
+  // ==========================================================================
+  // RENDERIZAÇÃO: TELA INICIAL QUANDO NENHUM CATE 3333 FOI CARREGADO AINDA
+  // ==========================================================================
 
-    const compSection = prevMetrics
-      ? `\n=== COMPARATIVO EVOLUTIVO (${prevMetrics.monthLabel} vs ${metrics.monthLabel}) ===\n` +
-        compareMonthlyMetrics(prevMetrics, metrics)
-          .map(
-            (c) =>
-              `- ${c.indicator}: de ${c.prevValue.toFixed(1)}${c.unit} para ${c.currValue.toFixed(
-                1
-              )}${c.unit} (${c.deltaPct >= 0 ? '+' : ''}${c.deltaPct.toFixed(1)}%) -> ${
-                c.diagnosticNote
-              }`
-          )
-          .join('\n')
-      : '';
-
-    const promptText = `Atue como um Diretor Médico e Consultor Sénior de Operações de Emergência Hospitalar.
-Analise os indicadores determinísticos consolidados e 100% anonimizados (em estrita conformidade com a LGPD) do Pronto-Socorro Adulto (Clínica Médica - Fluxo Fast Track: Totem -> Recepção -> Médico):
-
-=== COMPETÊNCIA: ${metrics.monthLabel} | RECORTE: ${selectedDayLabel} - ${selectedShiftLabel} ===
-1. VOLUME E DISPERSÃO DIÁRIA:
-- Volume Total no Recorte: ${currentPeriod.totalVolume} atendimentos (${currentPeriod.distinctDays} dias operacionais)
-- Média Diária: ${currentPeriod.dailyVolume.avg.toFixed(1)} pac/dia (Desvio-Padrão: ±${currentPeriod.dailyVolume.stdDev.toFixed(1)})
-- Mediana Diária: ${currentPeriod.dailyVolume.median.toFixed(1)} pac/dia (Amplitude Mín-Máx: ${currentPeriod.dailyVolume.min} a ${currentPeriod.dailyVolume.max} pac/dia)
-
-2. TEMPOS OPERACIONAIS E SLAs DE PORTA (FAST TRACK):
-- Tempo Porta-Médico: Média ${currentPeriod.doorToDoctor.avg.toFixed(1)} min | Mediana ${currentPeriod.doorToDoctor.median.toFixed(1)} min | P90 ${currentPeriod.doorToDoctor.p90.toFixed(1)} min | DP ±${currentPeriod.doorToDoctor.stdDev.toFixed(1)} min (Meta Institucional <= 20 min)
-- Cumprimento de SLA Porta-Médico (<= 20 min): ${currentPeriod.doorToDoctor.slaRate20m.toFixed(1)}%
-- Tempo de Consulta Médica: Média ${currentPeriod.medicalAttendance.avg.toFixed(1)} min | Mediana ${currentPeriod.medicalAttendance.median.toFixed(1)} min | P90 ${currentPeriod.medicalAttendance.p90.toFixed(1)} min (Meta <= 25 min)
-- Tempo Total de Permanência (Entrada-Desfecho): Média ${currentPeriod.lengthOfStay.avg.toFixed(1)} min | Mediana ${currentPeriod.lengthOfStay.median.toFixed(1)} min | P90 ${currentPeriod.lengthOfStay.p90.toFixed(1)} min (Meta <= 240 min)
-- Decomposição do Tempo de Permanência: Pré-Médico/Porta ${currentPeriod.losDecomposition.preMedicalPct.toFixed(0)}% (${currentPeriod.losDecomposition.preMedicalAvgMin.toFixed(1)}m) | Consulta Inicial ${currentPeriod.losDecomposition.consultationPct.toFixed(0)}% (${currentPeriod.losDecomposition.consultationAvgMin.toFixed(1)}m) | Propedêutica/Exames/Medicação ${currentPeriod.losDecomposition.propaedeuticPct.toFixed(0)}% (${currentPeriod.losDecomposition.propaedeuticAvgMin.toFixed(1)}m)
-
-3. APOIO DIAGNÓSTICO E SALA DE MEDICAÇÃO:
-- Exames Laboratoriais: solicitados em ${currentPeriod.lab.requestRate.toFixed(1)}% dos casos | Cumprimento SLA Lab (<= 90 min): ${currentPeriod.lab.slaRate90m.toFixed(1)}% (Espera média: ${currentPeriod.lab.waitStats.avg.toFixed(1)} min)
-- Tomografia Computadorizada (TC): solicitada em ${currentPeriod.ct.requestRate.toFixed(1)}% dos casos | Cumprimento SLA TC (<= 120 min): ${currentPeriod.ct.slaRate120m.toFixed(1)}% (Espera média: ${currentPeriod.ct.waitStats.avg.toFixed(1)} min)
-- Sala de Medicação: Espera média p/ início ${currentPeriod.medication.waitStats.avg.toFixed(1)} min | Tempo médio de administração ${currentPeriod.medication.adminStats.avg.toFixed(1)} min
-
-4. QUALIDADE ASSISTENCIAL, DESFECHOS E CAPACIDADE INSTALADA:
-- Taxa de Conversão em Internação: ${currentPeriod.outcomes.admissionRate.toFixed(2)}% (Espera média por leito: ${currentPeriod.outcomes.admissionWaitStats.avg.toFixed(0)} min)
-- Taxa de Retorno Precoce (< 48h): ${currentPeriod.outcomes.earlyReturn48hRate.toFixed(2)}% (Meta < 5%)
-- Taxa de Evasão: ${currentPeriod.outcomes.evasionRate.toFixed(2)}% (Meta < 3%)
-- Capacidade Médica Instalada: Média de ${currentPeriod.hourlyProductivity.avgActiveDoctorsPerHour.toFixed(1)} médicos ativos/hora | Produtividade: Média ${currentPeriod.hourlyProductivity.patientsPerDoctorHour.avg.toFixed(2)} pac/médico/hora (Mediana ${currentPeriod.hourlyProductivity.patientsPerDoctorHour.median.toFixed(1)} | DP ±${currentPeriod.hourlyProductivity.patientsPerDoctorHour.stdDev.toFixed(2)})
-
-5. PERFIL EPIDEMIOLÓGICO (TOP CLUSTERS SINDRÔMICOS):
-${metrics.syndromeClusters
-  .slice(0, 5)
-  .map((s) => `- ${s.syndrome}: ${s.count} casos (${s.pct.toFixed(1)}%)`)
-  .join('\n')}
-${compSection}
-
-TAREFA EXECUTIVA:
-Elabore um Parecer Gerencial Executivo estruturado para a Coordenação Médica e Direção Hospitalar contendo:
-1. Diagnóstico Executivo de Desempenho (destacando os pontos críticos fora de meta e os pontos de excelência).
-2. Análise de Gargalos Operacionais (avaliando se a retenção ocorre na porta médica ou na etapa pós-consulta/laboratório/TC/medicação).
-3. Recomendações Práticas de Dimensionamento de Escala Médica (ajustes por faixa horária das 07h às 06h59 e divisão entre porta e reavaliação).
-4. Plano de Ação de 30 dias com metas claras para a equipa multidisciplinar.`;
-
-    navigator.clipboard.writeText(promptText);
-    showToast('Resumo + Prompt Executivo copiado! Cole no ChatGPT, Claude ou Gemini.');
-  };
-
-  const handlePublishGovernance = () => {
-    if (!metrics) return;
-    const m = metrics.overall.full24h;
-    const payload = {
-      monthLabel: metrics.monthLabel,
-      totalVolume: m.totalVolume,
-      doorToDoctorAvg: m.doorToDoctor.avg,
-      doorToDoctorP90: m.doorToDoctor.p90,
-      lengthOfStayAvg: m.lengthOfStay.avg,
-      labSlaRate: m.lab.slaRate90m,
-      ctSlaRate: m.ct.slaRate120m,
-      admissionRate: m.outcomes.admissionRate,
-      earlyReturnRate: m.outcomes.earlyReturn48hRate,
-      evasionRate: m.outcomes.evasionRate,
-    };
-    localStorage.setItem('medscale_governance_latest_cate_kpis', JSON.stringify(payload));
-    if (onPublishToGovernance) {
-      onPublishToGovernance(payload);
-    }
-    showToast('Indicadores publicados com sucesso para a Gestão à Vista!');
-  };
-
-  // Helper para buscar as estatísticas horárias conforme o filtro ativo
-  const getSlotStatsForHour = (h: number): HourlySlotStats => {
-    if (!metrics) {
-      return { avg: 0, median: 0, p90: 0, stdDev: 0, min: 0, max: 0, count: 0, total: 0 };
-    }
-    if (selectedDayIndex === 'ALL') {
-      return (
-        metrics.heatmap.hourlyStats[h] || {
-          avg: 0,
-          median: 0,
-          p90: 0,
-          stdDev: 0,
-          min: 0,
-          max: 0,
-          count: 0,
-          total: 0,
-        }
-      );
-    }
+  if (!activeData || !activeVsmSlice) {
     return (
-      metrics.heatmap.cellStats[`${selectedDayIndex}_${h}`] || {
-        avg: 0,
-        median: 0,
-        p90: 0,
-        stdDev: 0,
-        min: 0,
-        max: 0,
-        count: 0,
-        total: 0,
-      }
+      <div className="min-h-[80vh] bg-slate-50 p-6 flex flex-col items-center justify-center">
+        <div className="max-w-4xl w-full bg-white rounded-2xl shadow-sm border border-slate-200 p-8">
+          <div className="flex items-center justify-between border-b border-slate-100 pb-6 mb-6">
+            <div>
+              <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200 mb-2">
+                ENGENHARIA DE OPERAÇÕES &amp; LEAN HEALTHCARE • LGPD STATELESS (RAM)
+              </span>
+              <h1 className="text-2xl font-extrabold text-slate-900">
+                Central de Inteligência VSM, Jornada do Paciente &amp; Censo Ocupacional
+              </h1>
+              <p className="text-sm text-slate-600 mt-1">
+                Cruzamento determinístico em memória pelo nº de atendimento: <strong>CATE 3333</strong> (Porta &amp; Throughput) +{' '}
+                <strong>CATE 3493</strong> (Boarding Físico UI/UTI) + <strong>CHAA 3704</strong> (Governança &amp; Mudança de CID).
+              </p>
+            </div>
+          </div>
+
+          {errorMessage && (
+            <div className="mb-6 p-4 rounded-xl bg-red-50 border border-red-200 text-red-800 text-sm font-medium">
+              ⚠️ {errorMessage}
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
+            <div className="p-4 rounded-xl bg-slate-50 border border-slate-200">
+              <div className="text-xs font-bold text-blue-700 uppercase">Passo 1 (Obrigatório)</div>
+              <div className="text-base font-bold text-slate-900 mt-1">1. Relatório CATE 3333</div>
+              <p className="text-xs text-slate-600 mt-1">
+                Base mestra da porta ao desfecho: tempos de recepção, porta-médico, alta direta no 1º atendimento, medicação, lab, RX, TC, USG, fila pós-laudo, handoff e retorno &lt;48h.
+              </p>
+            </div>
+            <div className="p-4 rounded-xl bg-slate-50 border border-slate-200">
+              <div className="text-xs font-bold text-rose-700 uppercase">Passo 2 (Complementar)</div>
+              <div className="text-base font-bold text-slate-900 mt-1">2. Relatório CATE 3493</div>
+              <p className="text-xs text-slate-600 mt-1">
+                Desmembra o Boarding real em 2 etapas: tempo de aprovação do plano/leito virtual vs. subida física ao andar (UI/UTI), centro cirúrgico e ranking por operadora.
+              </p>
+            </div>
+            <div className="p-4 rounded-xl bg-slate-50 border border-slate-200">
+              <div className="text-xs font-bold text-teal-700 uppercase">Passo 3 (Complementar)</div>
+              <div className="text-base font-bold text-slate-900 mt-1">3. Relatório CHAA 3704</div>
+              <p className="text-xs text-slate-600 mt-1">
+                Auditoria de Governança Clínica e Assertividade Diagnóstica: compara o CID de entrada na porta com o CID definitivo na solicitação de internação.
+              </p>
+            </div>
+          </div>
+
+          <label className="flex flex-col items-center justify-center w-full h-48 border-2 border-dashed border-blue-400 rounded-2xl cursor-pointer bg-blue-50/40 hover:bg-blue-50 transition-all">
+            <div className="flex flex-col items-center justify-center pt-5 pb-6 text-center px-4">
+              <div className="w-12 h-12 rounded-full bg-blue-600 text-white flex items-center justify-center text-xl font-bold mb-3 shadow">
+                ↑
+              </div>
+              <p className="mb-1 text-base font-bold text-slate-800">
+                {isLoading ? 'A processar planilha em memória RAM...' : 'Clique para selecionar ou arraste o ficheiro CATE 3333 (.xls ou .xlsx)'}
+              </p>
+              <p className="text-xs text-slate-500">
+                Pode selecionar 1 ou vários meses em simultâneo • Nomes, endereços e datas de nascimento são descartados instantaneamente.
+              </p>
+            </div>
+            <input
+              type="file"
+              accept=".xls,.xlsx"
+              multiple
+              onChange={handleUploadCate3333}
+              className="hidden"
+              disabled={isLoading}
+            />
+          </label>
+        </div>
+      </div>
     );
-  };
+  }
+
+  const vsm = activeData.vsm;
+  const s = activeVsmSlice;
+
+  // Filtro de médicos na matriz de condutas
+  const filteredDoctorConduct = vsm.doctorConductMatrix.filter((d) =>
+    d.name.toLowerCase().includes(doctorSearch.toLowerCase())
+  );
+  const filteredDoctorProd = activeData.doctorProductivity.filter((d) =>
+    d.name.toLowerCase().includes(doctorSearch.toLowerCase())
+  );
+
+  // ==========================================================================
+  // RENDERIZAÇÃO PRINCIPAL DA DASHBOARD INTERATIVA
+  // ==========================================================================
 
   return (
-    <div className="space-y-6 pb-12 text-slate-800">
-      {/* TOAST DE FEEDBACK */}
-      {feedbackMsg && (
-        <div className="fixed bottom-6 right-6 z-50 bg-slate-900 text-white px-5 py-3 rounded-xl shadow-2xl border border-blue-500/40 flex items-center gap-3 animate-bounce">
-          <span className="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
-          <span className="text-sm font-medium">{feedbackMsg}</span>
-        </div>
-      )}
-
-      {/* CABEÇALHO DO MÓDULO */}
-      <div className="bg-slate-900 text-white p-6 rounded-2xl shadow-lg border border-slate-800 flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-        <div>
-          <div className="flex items-center gap-2.5">
-            <span className="px-2.5 py-0.5 text-xs font-bold uppercase tracking-wider bg-blue-600/30 text-blue-300 border border-blue-500/40 rounded-full">
-              LGPD Stateless • Custo Zero
-            </span>
-            <span className="text-xs text-slate-400">
-              PS Adulto • Clínica Médica • Plantão 07h às 06h59
-            </span>
-          </div>
-          <h1 className="text-2xl font-bold mt-1">
-            Painel Gerencial de Inteligência e Análise de Atendimentos (CATE)
-          </h1>
-          <p className="text-slate-400 text-sm mt-0.5">
-            Processamento determinístico em memória RAM com descarte automático de identificadores pessoais.
-          </p>
-        </div>
-
-        {/* BARRA DE UPLOAD RÁPIDO */}
-        <div className="flex flex-wrap items-center gap-3">
-          <div className="flex items-center bg-slate-800 border border-slate-700 rounded-xl px-3 py-1.5">
-            <span className="text-xs text-slate-400 mr-2">Competência:</span>
-            <input
-              type="text"
-              value={monthLabel}
-              onChange={(e) => setMonthLabel(e.target.value)}
-              className="bg-transparent text-white text-sm font-semibold focus:outline-none w-32"
-              placeholder="Ex: Outubro/2026"
-            />
+    <div className="min-h-screen bg-slate-100 pb-16">
+      {/* BARRA SUPERIOR EXECUTIVA: SELETOR DE MÊS, FUSÃO MULTI-RELATÓRIOS E EXPORTAÇÕES */}
+      <div className="bg-slate-900 text-white border-b border-slate-800 px-6 py-4 shadow-md">
+        <div className="max-w-[1600px] mx-auto flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
+          <div>
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <span className="px-2.5 py-0.5 rounded bg-blue-600 text-[11px] font-bold uppercase tracking-wider">
+                VSM Lean Healthcare
+              </span>
+              <span className="text-xs text-slate-400">
+                PS Adulto • Clínica Médica • Processamento Stateless (LGPD)
+              </span>
+              {vsm.hasCate3493Data ? (
+                <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 text-xs font-semibold">
+                  ✓ CATE 3493 Integrado ({vsm.matched3493Count} internados c/ Boarding Físico)
+                </span>
+              ) : (
+                <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 border border-amber-400/40 text-amber-300 text-xs">
+                  ⚠️ CATE 3493 não anexado (Boarding restrito ao Leito Virtual)
+                </span>
+              )}
+              {vsm.hasChaa3704Data ? (
+                <span className="px-2.5 py-0.5 rounded-full bg-teal-500/20 border border-teal-400/40 text-teal-300 text-xs font-semibold">
+                  ✓ CHAA 3704 Integrado ({vsm.matched3704Count} CIDs auditados)
+                </span>
+              ) : (
+                <span className="px-2.5 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-slate-400 text-xs">
+                  CHAA 3704 opcional pendente
+                </span>
+              )}
+            </div>
+            <h1 className="text-xl font-extrabold tracking-tight mt-1">
+              Jornada do Paciente, Censo Simultâneo &amp; Governança Clínica — {activeData.periodLabel} (N = {activeData.totalAttendances})
+            </h1>
           </div>
 
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".xlsx,.xls"
-            className="hidden"
-            onChange={(e) => {
-              const f = e.target.files?.[0];
-              if (f) processSpreadsheetFile(f, monthLabel, false);
-            }}
-          />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isProcessing}
-            className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-4 py-2.5 rounded-xl text-sm shadow transition flex items-center gap-2 cursor-pointer"
-          >
-            <span>📂 Carregar Planilha CATE (.xlsx)</span>
-          </button>
+          {/* Botões de Upload Complementar e Exportação de Documentos */}
+          <div className="flex flex-wrap items-center gap-2">
+            {loadedMonths.length > 1 && (
+              <select
+                value={activeData.monthKey}
+                onChange={(e) => setActiveMonthKey(e.target.value)}
+                className="bg-slate-800 text-white text-xs font-bold px-3 py-2 rounded-lg border border-slate-700"
+              >
+                {loadedMonths.map((m) => (
+                  <option key={m.monthKey} value={m.monthKey}>
+                    Competência: {m.periodLabel} ({m.totalAttendances} pac.)
+                  </option>
+                ))}
+              </select>
+            )}
 
-          {metrics && (
+            <label className="cursor-pointer px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600 text-xs font-semibold text-slate-200 transition">
+              + CATE 3333 (Mês)
+              <input type="file" accept=".xls,.xlsx" multiple onChange={handleUploadCate3333} className="hidden" />
+            </label>
+
+            <label className="cursor-pointer px-3 py-2 rounded-lg bg-rose-900/60 hover:bg-rose-800 border border-rose-500/50 text-xs font-bold text-rose-100 transition">
+              {vsm.hasCate3493Data ? '↻ Atualizar CATE 3493' : '+ Anexar CATE 3493 (Boarding)'}
+              <input type="file" accept=".xls,.xlsx" onChange={handleUploadCate3493} className="hidden" />
+            </label>
+
+            <label className="cursor-pointer px-3 py-2 rounded-lg bg-teal-900/60 hover:bg-teal-800 border border-teal-500/50 text-xs font-bold text-teal-100 transition">
+              {vsm.hasChaa3704Data ? '↻ Atualizar CHAA 3704' : '+ Anexar CHAA 3704 (CIDs)'}
+              <input type="file" accept=".xls,.xlsx" onChange={handleUploadChaa3704} className="hidden" />
+            </label>
+
+            <div className="h-5 w-[1px] bg-slate-700 mx-1 hidden sm:block" />
+
+            {onPublishToGovernance && (
+              <button
+                onClick={handlePublishToGovernance}
+                className="px-3.5 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold shadow transition"
+              >
+                📤 Publicar na Governança
+              </button>
+            )}
+
             <button
-              onClick={handleSaveAnonymousSnapshot}
-              className="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3.5 py-2.5 rounded-xl text-sm font-medium transition cursor-pointer"
-              title="Guardar apenas o resumo matemático anónimo no navegador para comparar nos próximos meses"
+              onClick={() => generateEmergencyExcel(activeData)}
+              className="px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow transition"
             >
-              💾 Guardar no Histórico Anónimo
+              📊 Excel Executivo (8 Abas)
             </button>
-          )}
+
+            <button
+              onClick={() => generateEmergencyPdf(activeData, s)}
+              className="px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow transition"
+            >
+              📄 Dossiê PDF Vetorial (7 Págs)
+            </button>
+
+            <button
+              onClick={() => generateVsmPngImage(activeData, s)}
+              className="px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow transition"
+            >
+              🖼️ Mapa VSM p/ Slide (.png)
+            </button>
+          </div>
+        </div>
+
+        {/* SUB-ABAS DE NAVEGAÇÃO DO MÓDULO (7 ABAS EXECUTIVAS) */}
+        <div className="max-w-[1600px] mx-auto mt-4 pt-3 border-t border-slate-800 flex flex-wrap gap-2">
+          {[
+            { id: 'vsm_journey', label: '🗺️ 1. Mapa da Jornada & VSM (Lean)' },
+            { id: 'simultaneous_census', label: '🔥 2. Censo Simultâneo & Heatmaps 24x7' },
+            { id: 'boarding_convenios', label: '🛏️ 3. Boarding Real & Convênios' },
+            { id: 'doctors_conduct', label: '👨‍⚕️ 4. Condutas Médicas (1º vs. Último Atend)' },
+            { id: 'clinical_governance', label: '🧬 5. Governança Clínica, CIDs & Retorno <48h' },
+            { id: 'temporal_mom', label: `📈 6. Série Diária, Semanas & Comparativo (${loadedMonths.length})` },
+            { id: 'methodology_audit', label: '📐 7. Metodologia & Auditoria' },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id as MainTab)}
+              className={`px-3.5 py-2 rounded-lg text-xs font-bold transition ${
+                activeTab === tab.id
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'bg-slate-800/80 text-slate-300 hover:bg-slate-800 hover:text-white'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* ÁREA DRAG AND DROP QUANDO NENHUM FICHEIRO ESTÁ CARREGADO */}
-      {!metrics && (
-        <div
-          onDragOver={(e) => e.preventDefault()}
-          onDrop={(e) => {
-            e.preventDefault();
-            const f = e.dataTransfer.files?.[0];
-            if (f) processSpreadsheetFile(f, monthLabel, false);
-          }}
-          onClick={() => fileInputRef.current?.click()}
-          className="border-2 border-dashed border-slate-300 hover:border-blue-500 bg-white rounded-2xl p-12 text-center cursor-pointer transition-all shadow-sm hover:shadow-md"
-        >
-          <div className="w-16 h-16 mx-auto mb-4 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center text-3xl font-bold">
-            📊
+      {publishSuccessMsg && (
+        <div className="max-w-[1600px] mx-auto mt-4 px-6">
+          <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs font-bold">
+            ✓ {publishSuccessMsg}
           </div>
-          <h3 className="text-lg font-bold text-slate-800">
-            Arraste e solte aqui o relatório mensal bruto do CATE (.xls ou .xlsx)
-          </h3>
-          <p className="text-sm text-slate-500 mt-1 max-w-xl mx-auto">
-            Colunas sensíveis (<code className="text-xs bg-slate-100 px-1 py-0.5 rounded">Paciente</code>,{' '}
-            <code className="text-xs bg-slate-100 px-1 py-0.5 rounded">Email</code>,{' '}
-            <code className="text-xs bg-slate-100 px-1 py-0.5 rounded">Endereço</code>,{' '}
-            <code className="text-xs bg-slate-100 px-1 py-0.5 rounded">Numero</code>,{' '}
-            <code className="text-xs bg-slate-100 px-1 py-0.5 rounded">bairro</code>) são descartadas
-            instantaneamente em memória RAM antes de qualquer cálculo.
-          </p>
-          {isProcessing && (
-            <p className="mt-4 text-blue-600 font-semibold animate-pulse">
-              A processar dados e calcular estatísticas de dispersão...
-            </p>
-          )}
         </div>
       )}
 
-      {/* PAINEL ATIVO APÓS UPLOAD */}
-      {metrics && currentPeriod && (
-        <>
-          {/* BARRA DE FILTROS E EXPORTAÇÕES */}
-          <div className="bg-white p-4 rounded-2xl shadow-sm border border-slate-200 flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="flex items-center gap-2 bg-slate-100 px-3 py-1.5 rounded-xl border border-slate-200">
-                <span className="text-xs font-bold text-slate-500 uppercase">Recorte:</span>
-                <select
-                  value={selectedDayIndex}
-                  onChange={(e) =>
-                    setSelectedDayIndex(
-                      e.target.value === 'ALL' ? 'ALL' : Number(e.target.value)
-                    )
-                  }
-                  className="bg-transparent text-sm font-bold text-slate-800 focus:outline-none cursor-pointer"
-                >
-                  <option value="ALL">📅 Consolidado Mensal (Todos os Dias)</option>
-                  {metrics.byDayOfWeek.map((d) => (
-                    <option key={d.dayIndex} value={d.dayIndex}>
-                      📍 {d.dayName} (Média: {d.full24h.dailyVolume.avg.toFixed(1)}/dia)
-                    </option>
-                  ))}
-                </select>
+      {errorMessage && (
+        <div className="max-w-[1600px] mx-auto mt-4 px-6">
+          <div className="p-3.5 rounded-xl bg-red-50 border border-red-300 text-red-800 text-xs font-semibold flex items-center justify-between">
+            <span>⚠️ {errorMessage}</span>
+            <button onClick={() => setErrorMessage(null)} className="text-red-600 font-bold underline ml-4">
+              Fechar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* CONTEÚDO PRINCIPAL */}
+      <div className="max-w-[1600px] mx-auto px-6 mt-5 space-y-6">
+        {/* ====================================================================
+            ABA 1: MAPA DA JORNADA DO PACIENTE & VSM (LEAN HEALTHCARE)
+           ==================================================================== */}
+        {activeTab === 'vsm_journey' && (
+          <div className="space-y-6">
+            {/* Barra de Filtros Globais de Recorte do VSM */}
+            <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-bold text-slate-500 uppercase mr-1">Recorte Analítico do VSM:</span>
+                {[
+                  { id: 'monthly', label: '📅 Consolidado Mensal' },
+                  { id: 'shift', label: '☀️/🌙 Por Turno (Diurno vs. Noturno)' },
+                  { id: 'week', label: '📊 Por Semana do Mês (S1–S5)' },
+                  { id: 'weekday', label: '📆 Por Dia da Semana (Seg–Dom)' },
+                ].map((f) => (
+                  <button
+                    key={f.id}
+                    onClick={() => setVsmFilterType(f.id as VsmFilterCategory)}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${
+                      vsmFilterType === f.id
+                        ? 'bg-slate-900 text-white border-slate-900'
+                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+
+                {vsmFilterType === 'shift' && (
+                  <div className="flex items-center gap-1.5 ml-2 pl-2 border-l border-slate-200">
+                    <button
+                      onClick={() => setSelectedShift('day')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold ${
+                        selectedShift === 'day' ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-700'
+                      }`}
+                    >
+                      ☀️ Plantão Diurno (07h–18h59)
+                    </button>
+                    <button
+                      onClick={() => setSelectedShift('night')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold ${
+                        selectedShift === 'night' ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-700'
+                      }`}
+                    >
+                      🌙 Plantão Noturno (19h–06h59)
+                    </button>
+                  </div>
+                )}
+
+                {vsmFilterType === 'week' && (
+                  <select
+                    value={selectedWeekLabel}
+                    onChange={(e) => setSelectedWeekLabel(e.target.value)}
+                    className="ml-2 px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-bold bg-white text-slate-800"
+                  >
+                    {Object.keys(vsm.byWeekOfMonth).map((wKey) => (
+                      <option key={wKey} value={wKey}>
+                        {wKey}
+                      </option>
+                    ))}
+                  </select>
+                )}
+
+                {vsmFilterType === 'weekday' && (
+                  <div className="flex flex-wrap items-center gap-1 ml-2 pl-2 border-l border-slate-200">
+                    {WEEKDAY_NAMES.map((dName) => (
+                      <button
+                        key={dName}
+                        onClick={() => setSelectedWeekdayName(dName)}
+                        className={`px-2.5 py-1 rounded text-xs font-bold ${
+                          selectedWeekdayName === dName ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700'
+                        }`}
+                      >
+                        {dName.slice(0, 3)}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
 
-              {/* Botões de Turno */}
-              <div className="inline-flex rounded-xl bg-slate-100 p-1 border border-slate-200">
-                {(
-                  [
-                    { id: 'ALL', label: '24h (07h-06h59)' },
-                    { id: 'DIURNO', label: '☀️ Diurno (07h-18h59)' },
-                    { id: 'NOTURNO', label: '🌙 Noturno (19h-06h59)' },
-                  ] as const
-                ).map((t) => (
+              <div className="text-xs font-bold text-slate-700 bg-slate-100 px-3 py-1.5 rounded-lg">
+                Recorte Ativo: <span className="text-blue-700">{s.label}</span> ({s.totalInput} atendimentos)
+              </div>
+            </div>
+
+            {/* 6 Cards Executivos de Topo */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3.5">
+              <div className="bg-white rounded-xl p-4 border-l-4 border-blue-600 shadow-sm">
+                <div className="text-[11px] font-bold text-slate-500 uppercase">1. Input Porta</div>
+                <div className="text-2xl font-extrabold text-slate-900 mt-1">{s.totalInput} pac.</div>
+                <div className="text-xs text-slate-600 mt-1">
+                  Atendidos: <strong>{s.attendedByDoctorCount}</strong> ({s.attendedByDoctorPct}%) | Evasão Pré: {s.preMedEvasionCount}
+                </div>
+              </div>
+
+              <div
+                className={`bg-white rounded-xl p-4 border-l-4 shadow-sm ${
+                  s.doorToDocTotalStats.mean <= 20 ? 'border-emerald-600' : 'border-red-600'
+                }`}
+              >
+                <div className="text-[11px] font-bold text-slate-500 uppercase">2. Porta-Médico (SLA ≤20m)</div>
+                <div className="text-2xl font-extrabold text-slate-900 mt-1">{s.doorToDocTotalStats.mean} min</div>
+                <div className="text-xs text-slate-600 mt-1">
+                  Med: <strong>{s.doorToDocTotalStats.median}m</strong> | P90: {s.doorToDocTotalStats.p90}m | Recepção: {s.waitTotemToRecepStats.mean + s.recepRegistrationStats.mean}m
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl p-4 border-l-4 border-emerald-600 shadow-sm">
+                <div className="text-[11px] font-bold text-slate-500 uppercase">3. Alta 1º Atend vs. Giro</div>
+                <div className="text-2xl font-extrabold text-slate-900 mt-1">
+                  {s.directDischargePct}% / {s.propaedeuticLoopPct}%
+                </div>
+                <div className="text-xs text-slate-600 mt-1">
+                  Alta 1ºAt: <strong>{s.directDischargeCount}</strong> | Fast Reav Med: <strong>{s.fastReavMedOnlyCount}</strong> ({s.fastReavMedOnlyPct}%)
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl p-4 border-l-4 border-amber-500 shadow-sm">
+                <div className="text-[11px] font-bold text-slate-500 uppercase">4. Fila Invisível Pós-Laudo</div>
+                <div className="text-2xl font-extrabold text-amber-700 mt-1">{s.postReportReavalWaitStats.mean} min</div>
+                <div className="text-xs text-slate-600 mt-1">
+                  Mediana: <strong>{s.postReportReavalWaitStats.median}m</strong> (±{s.postReportReavalWaitStats.stdDev}m) após último laudo
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl p-4 border-l-4 border-purple-600 shadow-sm">
+                <div className="text-[11px] font-bold text-slate-500 uppercase">5. Pedágio de Handoff</div>
+                <div className="text-2xl font-extrabold text-purple-700 mt-1">{s.handoffDoctorPct}% trocam</div>
+                <div className="text-xs text-slate-600 mt-1">
+                  Mesmo Méd: Med <strong>{s.sameDoctorLosStats.median}m</strong> vs. Troca: Med <strong>{s.handoffDoctorLosStats.median}m</strong>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl p-4 border-l-4 border-rose-600 shadow-sm">
+                <div className="text-[11px] font-bold text-slate-500 uppercase">6. Boarding Real (UI/UTI)</div>
+                <div className="text-2xl font-extrabold text-rose-700 mt-1">{s.totalBoardingStats.mean} min</div>
+                <div className="text-xs text-slate-600 mt-1">
+                  Med: <strong>{s.totalBoardingStats.median}m</strong> | {s.admittedTotalCount} int. ({s.admittedUiCount} UI / {s.admittedUtiCount} UTI)
+                </div>
+              </div>
+            </div>
+
+            {/* FLUXOGRAMA HORIZONTAL INTERATIVO DO VSM (INPUT -> THROUGHPUT -> OUTPUT & BOARDING) */}
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-slate-100 pb-4 mb-6">
+                <div>
+                  <h2 className="text-base font-extrabold text-slate-900">
+                    FLUXOGRAMA DE VALOR LEAN HEALTHCARE (VALUE STREAM MAPPING — {s.label.toUpperCase()})
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Rastreamento integral de ponta a ponta: Entrada na Porta → Triagem/Consulta Inicial → Bifurcação por Rota de Throughput → Fila Pós-Laudo → Desfecho e Boarding em 2 Etapas.
+                  </p>
+                </div>
+                <span className="mt-2 sm:mt-0 px-3 py-1 rounded-full bg-blue-50 border border-blue-200 text-blue-800 text-xs font-bold">
+                  Eficiência Lean (PCE): {s.pceEfficiencyPct}% Valor Agregado ({s.vaMinutesMean}m VA vs. {s.nvaMinutesMean}m Espera)
+                </span>
+              </div>
+
+              {/* Grid Horizontal de 4 Colunas do Fluxograma VSM */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
+                {/* COLUNA 1: INPUT (TOTEM & RECEPÇÃO) */}
+                <div className="lg:col-span-2 flex flex-col justify-center">
+                  <div className="rounded-xl border-2 border-slate-400 bg-slate-50 overflow-hidden shadow-sm">
+                    <div className="bg-slate-900 text-white px-3 py-2 text-xs font-bold text-center">
+                      1. INPUT: TOTEM &amp; RECEPÇÃO
+                    </div>
+                    <div className="p-3.5 space-y-2 text-xs">
+                      <div className="text-sm font-extrabold text-slate-900 text-center">
+                        N = {s.totalInput} (100%)
+                      </div>
+                      <div className="p-2 rounded bg-white border border-slate-200">
+                        <div className="font-bold text-slate-700">Fila Totem → Guichê:</div>
+                        <div className="text-slate-600">{fmtStatBadge(s.waitTotemToRecepStats)}</div>
+                      </div>
+                      <div className="p-2 rounded bg-white border border-slate-200">
+                        <div className="font-bold text-slate-700">Cadastro Recepção:</div>
+                        <div className="text-slate-600">{fmtStatBadge(s.recepRegistrationStats)}</div>
+                      </div>
+                      <div className="text-[11px] font-bold text-rose-700 text-center pt-1">
+                        Evasão Pré-Médica: {s.preMedEvasionCount} ({s.preMedEvasionPct}%)
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* COLUNA 2: 1º ATENDIMENTO MÉDICO (GATEKEEPER) */}
+                <div className="lg:col-span-3 flex flex-col justify-center">
+                  <div className="mb-2 text-center">
+                    <span className="inline-block px-2.5 py-1 rounded-full bg-red-50 border border-red-200 text-red-700 text-[11px] font-bold">
+                      ➔ Fila Pós-Recepção p/ Médico: Méd {s.waitRecepToDocStats.mean}m (Med {s.waitRecepToDocStats.median}m)
+                    </span>
+                  </div>
+                  <div className="rounded-xl border-2 border-blue-500 bg-blue-50/40 overflow-hidden shadow-sm">
+                    <div className="bg-blue-700 text-white px-3 py-2 text-xs font-bold text-center">
+                      2. 1º ATENDIMENTO MÉDICO (GATEKEEPER)
+                    </div>
+                    <div className="p-3.5 space-y-2 text-xs">
+                      <div className="text-sm font-extrabold text-slate-900 text-center">
+                        N = {s.attendedByDoctorCount} ({s.attendedByDoctorPct}% Atendidos)
+                      </div>
+                      <div className="p-2 rounded bg-white border border-blue-200">
+                        <div className="font-bold text-blue-900">Tempo Porta-Médico Total:</div>
+                        <div className="text-slate-700">{fmtStatBadge(s.doorToDocTotalStats)}</div>
+                        <div className="text-[11px] font-semibold text-blue-700 mt-0.5">
+                          P90: {s.doorToDocTotalStats.p90}m | Mín–Máx: {s.doorToDocTotalStats.min}–{s.doorToDocTotalStats.max}m
+                        </div>
+                      </div>
+                      <div className="p-2 rounded bg-white border border-blue-200">
+                        <div className="font-bold text-blue-900">Duração 1ª Consulta (Anamnese):</div>
+                        <div className="text-slate-700">{fmtStatBadge(s.firstConsultDurationStats)}</div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* COLUNA 3: BIFURCAÇÃO DE THROUGHPUT (RAMO A vs. RAMO B1 FAST REAV vs. RAMO B2 EXAMES) */}
+                <div className="lg:col-span-4 flex flex-col justify-between gap-3">
+                  {/* RAMO A: ALTA DIRETA NO 1º ATENDIMENTO */}
+                  <div className="rounded-xl border-2 border-emerald-500 bg-emerald-50/50 overflow-hidden shadow-sm">
+                    <div className="bg-emerald-700 text-white px-3 py-1.5 text-xs font-bold flex justify-between">
+                      <span>RAMO A: ALTA DIRETA 1º ATENDIMENTO</span>
+                      <span>{s.directDischargePct}% do PS</span>
+                    </div>
+                    <div className="p-3 text-xs space-y-1">
+                      <div className="font-extrabold text-slate-900">
+                        N = {s.directDischargeCount} pacientes (Sem Exames e Sem Medicação Interna)
+                      </div>
+                      <div className="text-slate-700">
+                        <strong>Permanência Total (Porta → Alta):</strong> {fmtStatBadge(s.directDischargeLosStats)} | P90: {s.directDischargeLosStats.p90}m
+                      </div>
+                      <div className="text-[11px] font-bold text-emerald-800">
+                        ✓ Resolução Single-Touch no Consultório (Zero Fila de Retaguarda)
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* SUB-RAMO B1: FAST REAV (APENAS MEDICAÇÃO, SEM EXAMES) */}
+                  <div className="rounded-xl border-2 border-amber-400 bg-amber-50/60 overflow-hidden shadow-sm">
+                    <div className="bg-amber-600 text-white px-3 py-1.5 text-xs font-bold flex justify-between">
+                      <span>SUB-RAMO B1: FAST REAV (SÓ MEDICAÇÃO)</span>
+                      <span>{s.fastReavMedOnlyPct}% do PS</span>
+                    </div>
+                    <div className="p-3 text-xs space-y-1">
+                      <div className="font-extrabold text-slate-900">
+                        N = {s.fastReavMedOnlyCount} pacientes (Medicados sem Lab e sem Imagem)
+                      </div>
+                      <div className="text-slate-700">
+                        <strong>Espera Início Med:</strong> {s.waitMedStartStats.mean}m (Med {s.waitMedStartStats.median}m) |{' '}
+                        <strong>Infusão ADM:</strong> {s.medInfusionDurationStats.mean}m
+                      </div>
+                      <div className="text-slate-700">
+                        <strong>Permanência Total Fast Reav:</strong> {fmtStatBadge(s.fastReavMedOnlyLosStats)}
+                      </div>
+                      <div className="text-[11px] font-bold text-amber-900">
+                        ⚡ Candidatos a Reavaliação Rápida (Não dependem de laudo externo)
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* SUB-RAMO B2: GIRO DIAGNÓSTICO (EXAMES LAB / TC / RX / USG) */}
+                  <div className="rounded-xl border-2 border-orange-500 bg-orange-50/50 overflow-hidden shadow-sm">
+                    <div className="bg-orange-700 text-white px-3 py-1.5 text-xs font-bold flex justify-between">
+                      <span>SUB-RAMO B2: GIRO DIAGNÓSTICO (EXAMES)</span>
+                      <span>{s.diagnosticExamsLoopPct}% do PS</span>
+                    </div>
+                    <div className="p-3 text-xs space-y-1.5">
+                      <div className="font-extrabold text-slate-900">
+                        N = {s.diagnosticExamsLoopCount} pacientes em Investigação Propedêutica
+                      </div>
+                      <div className="grid grid-cols-2 gap-1.5 text-[11px]">
+                        <div className="p-1.5 rounded bg-white border border-orange-200">
+                          <strong>🧪 Lab:</strong> {s.labCount} ({s.labPct}%)
+                          <br />
+                          Coleta: {s.waitLabCollectStats.mean}m | Laudo: {s.waitLabReportStats.mean}m
+                        </div>
+                        <div className="p-1.5 rounded bg-white border border-orange-200">
+                          <strong>🖥️ TC:</strong> {s.tcCount} ({s.tcPct}%)
+                          <br />
+                          Ciclo Total: {s.waitTcTotalStats.mean}m (Med {s.waitTcTotalStats.median}m)
+                        </div>
+                        <div className="p-1.5 rounded bg-white border border-orange-200">
+                          <strong>🩻 RX:</strong> {s.rxCount} ({s.rxPct}%)
+                          <br />
+                          Execução: {s.waitRxExecStats.mean}m (Med {s.waitRxExecStats.median}m)
+                        </div>
+                        <div className="p-1.5 rounded bg-white border border-orange-200">
+                          <strong>🔊 USG:</strong> {s.usgCount} ({s.usgPct}%)
+                          <br />
+                          Ciclo: {s.waitUsgTotalStats.mean}m | Med Total: {s.medicatedPct}%
+                        </div>
+                      </div>
+                      <div className="text-slate-800 font-semibold pt-0.5">
+                        Permanência c/ Exames: {fmtStatBadge(s.diagnosticExamsLoopLosStats)}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* COLUNA 4: FILA PÓS-LAUDO, OUTPUT DE ALTA PÓS-PROPEDÊUTICA & BOARDING REAL */}
+                <div className="lg:col-span-3 flex flex-col justify-between gap-3">
+                  {/* Alerta da Fila Invisível Pós-Laudo */}
+                  <div className="p-2.5 rounded-xl bg-red-50 border border-red-300 text-center">
+                    <div className="text-[11px] font-extrabold text-red-800 uppercase">
+                      ⚠️ Gargalo Oculto: Fila Pós-Laudo p/ Reavaliação
+                    </div>
+                    <div className="text-xs font-bold text-red-900 mt-0.5">
+                      Média: {s.postReportReavalWaitStats.mean} min | Mediana: {s.postReportReavalWaitStats.median} min (P90: {s.postReportReavalWaitStats.p90}m)
+                    </div>
+                    <div className="text-[10px] text-red-700">
+                      Tempo entre liberação do último laudo (Lab/TC) e decisão médica final
+                    </div>
+                  </div>
+
+                  {/* OUTPUT 1: ALTA PÓS-PROPEDÊUTICA + PEDÁGIO DE HANDOFF */}
+                  <div className="rounded-xl border-2 border-sky-500 bg-sky-50/50 overflow-hidden shadow-sm">
+                    <div className="bg-sky-700 text-white px-3 py-1.5 text-xs font-bold flex justify-between">
+                      <span>OUTPUT 1: ALTA PÓS-REAVALIAÇÃO</span>
+                      <span>{s.postPropDischargePct}% do PS</span>
+                    </div>
+                    <div className="p-3 text-xs space-y-1.5">
+                      <div className="font-extrabold text-slate-900">
+                        N = {s.postPropDischargeCount} altas pós-giro (+{s.postConsultEvasionCount} evasões)
+                      </div>
+                      <div className="text-slate-700">
+                        <strong>Permanência Total:</strong> {fmtStatBadge(s.postPropDischargeLosStats)}
+                      </div>
+                      <div className="p-2 rounded bg-white border border-sky-200">
+                        <div className="font-bold text-sky-900">Impacto de Handoff ({s.handoffDoctorPct}% trocam de médico):</div>
+                        <div className="text-slate-700 text-[11px]">
+                          • Mesmo Médico ({s.sameDoctorCount}): Méd <strong>{s.sameDoctorLosStats.mean}m</strong> | Med <strong>{s.sameDoctorLosStats.median}m</strong>
+                          <br />• Troca Médico ({s.handoffDoctorCount}): Méd <strong>{s.handoffDoctorLosStats.mean}m</strong> | Med <strong>{s.handoffDoctorLosStats.median}m</strong>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* OUTPUT 2: INTERNAÇÃO HOSPITALAR & BOARDING REAL EM 2 ETAPAS */}
+                  <div className="rounded-xl border-2 border-rose-600 bg-rose-50/60 overflow-hidden shadow-sm">
+                    <div className="bg-rose-700 text-white px-3 py-1.5 text-xs font-bold flex justify-between">
+                      <span>OUTPUT 2: INTERNAÇÃO &amp; BOARDING REAL</span>
+                      <span>{s.admittedTotalPct}% Internam</span>
+                    </div>
+                    <div className="p-3 text-xs space-y-1.5">
+                      <div className="font-extrabold text-slate-900">
+                        N = {s.admittedTotalCount} Internados (UI: {s.admittedUiCount} [{s.admittedUiPct}%] | UTI: {s.admittedUtiCount} [{s.admittedUtiPct}%])
+                      </div>
+                      <div className="p-2 rounded bg-white border border-rose-200 space-y-1 text-[11px]">
+                        <div>
+                          <strong className="text-rose-900">Etapa 1 (Desfecho → Leito Virtual/Plano):</strong>{' '}
+                          {fmtStatBadge(s.t1DecisionToVirtualBedStats)}
+                        </div>
+                        <div>
+                          <strong className="text-rose-900">Etapa 2 (Virtual → Leito Físico UI/UTI):</strong>{' '}
+                          {vsm.hasCate3493Data
+                            ? `+${s.t2VirtualToPhysicalBedStats.mean}m (Med ${s.t2VirtualToPhysicalBedStats.median}m | P90 ${s.t2VirtualToPhysicalBedStats.p90}m)`
+                            : 'Anexe o CATE 3493 p/ medir subida física'}
+                        </div>
+                        <div className="pt-1 border-t border-rose-100 font-bold text-rose-800">
+                          Boarding Total no PS: Méd {s.totalBoardingStats.mean}m (Med {s.totalBoardingStats.median}m | P90 {s.totalBoardingStats.p90}m)
+                        </div>
+                      </div>
+                      <div className="text-[11px] font-bold text-rose-900 flex justify-between">
+                        <span>Mudança CID: {vsm.diagnosticGovernance.reclassifiedPct}%</span>
+                        <span>CC (Cirúrgico): {vsm.surgicalAdmissionsPct}%</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* LINHA DO TEMPO LEAN "DENTE DE SERRA" (VALOR AGREGADO vs. DESPERDÍCIO / ESPERA) */}
+              <div className="mt-6 pt-5 border-t border-slate-200">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs font-extrabold text-slate-800 uppercase">
+                    Linha do Tempo Lean VSM (&quot;Dente de Serra&quot;): Cuidado Ativo de Valor Agregado (VA) vs. Esperas Sistêmicas (NVA)
+                  </span>
+                  <span className="text-xs font-bold text-slate-600">
+                    Soma VA: <strong className="text-emerald-700">{s.vaMinutesMean} min</strong> vs. Soma NVA (s/ Boarding):{' '}
+                    <strong className="text-red-700">{s.nvaMinutesMean} min</strong> (PCE = {s.pceEfficiencyPct}%)
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-2 sm:grid-cols-5 lg:grid-cols-10 gap-2">
+                  {[
+                    { step: '1. Fila Totem', val: `${s.waitTotemToRecepStats.mean}m`, med: `Med ${s.waitTotemToRecepStats.median}m`, va: false },
+                    { step: '2. Recepção', val: `${s.recepRegistrationStats.mean}m`, med: `Med ${s.recepRegistrationStats.median}m`, va: true },
+                    { step: '3. Fila Porta-Méd', val: `${s.waitRecepToDocStats.mean}m`, med: `Med ${s.waitRecepToDocStats.median}m`, va: false },
+                    { step: '4. 1ª Consulta', val: `${s.firstConsultDurationStats.mean}m`, med: `Med ${s.firstConsultDurationStats.median}m`, va: true },
+                    { step: '5. Fila Coleta/Med', val: `${s.waitLabCollectStats.mean}m`, med: `Med ${s.waitLabCollectStats.median}m`, va: false },
+                    { step: '6. ADM Med/Exame', val: `${s.medInfusionDurationStats.mean}m`, med: `Med ${s.medInfusionDurationStats.median}m`, va: true },
+                    { step: '7. Espera Laudo', val: `${s.waitLabReportStats.mean}m`, med: `Med ${s.waitLabReportStats.median}m`, va: false },
+                    { step: '8. Fila Pós-Laudo', val: `${s.postReportReavalWaitStats.mean}m`, med: `Med ${s.postReportReavalWaitStats.median}m`, va: false },
+                    { step: '9. Reaval/Decisão', val: '12.0m', med: 'Cuidado Ativo', va: true },
+                    { step: '10. Boarding PS', val: `${s.totalBoardingStats.mean}m`, med: `Med ${s.totalBoardingStats.median}m`, va: false },
+                  ].map((item, idx) => (
+                    <div
+                      key={idx}
+                      className={`p-2.5 rounded-xl border text-center transition ${
+                        item.va
+                          ? 'bg-emerald-50 border-emerald-300 text-emerald-950 -translate-y-1 shadow-sm'
+                          : 'bg-red-50/70 border-red-200 text-red-950 translate-y-1'
+                      }`}
+                    >
+                      <div className="text-[10px] font-bold uppercase opacity-75">{item.step}</div>
+                      <div className="text-sm font-extrabold mt-0.5">{item.val}</div>
+                      <div className="text-[10px] font-semibold opacity-80">
+                        {item.va ? '✓ Valor Agregado' : '⏳ Espera (NVA)'} • {item.med}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ====================================================================
+            ABA 2: CENSO SIMULTÂNEO ESTRATIFICADO & DUPLO HEATMAP 24x7
+           ==================================================================== */}
+        {activeTab === 'simultaneous_census' && (
+          <div className="space-y-6">
+            {/* Barra de Filtros do Censo Simultâneo */}
+            <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-4">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-bold text-slate-500 uppercase">Filtrar Dia da Semana:</span>
+                <button
+                  onClick={() => setSelectedCensusDayIdx('all')}
+                  className={`px-3 py-1.5 rounded-lg text-xs font-bold ${
+                    selectedCensusDayIdx === 'all' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'
+                  }`}
+                >
+                  Todos os Dias (Média Mensal)
+                </button>
+                {WEEKDAY_NAMES.map((dName, idx) => (
+                  <button
+                    key={dName}
+                    onClick={() => setSelectedCensusDayIdx(idx)}
+                    className={`px-2.5 py-1.5 rounded-lg text-xs font-bold ${
+                      selectedCensusDayIdx === idx ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-700'
+                    }`}
+                  >
+                    {dName}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex items-center gap-1.5">
+                <span className="text-xs font-bold text-slate-500 uppercase mr-1">Turno:</span>
+                {[
+                  { id: '24h', label: '24h (07h–06h)' },
+                  { id: 'day', label: '☀️ Diurno (07h–18h)' },
+                  { id: 'night', label: '🌙 Noturno (19h–06h)' },
+                ].map((t) => (
                   <button
                     key={t.id}
-                    onClick={() => setSelectedShift(t.id)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-                      selectedShift === t.id
-                        ? 'bg-slate-900 text-white shadow-sm'
-                        : 'text-slate-600 hover:text-slate-900'
+                    onClick={() => setSelectedCensusTurnFilter(t.id as '24h' | 'day' | 'night')}
+                    className={`px-3 py-1.5 rounded-lg text-xs font-bold ${
+                      selectedCensusTurnFilter === t.id ? 'bg-indigo-600 text-white' : 'bg-slate-100 text-slate-700'
                     }`}
                   >
                     {t.label}
                   </button>
                 ))}
               </div>
-
-              {/* Navegação de Sub-Abas */}
-              <div className="inline-flex rounded-xl bg-blue-50/80 p-1 border border-blue-100">
-                {(
-                  [
-                    { id: 'OVERVIEW', label: '📈 Visão Geral & Heatmap' },
-                    { id: 'PRODUCTIVITY', label: '👨‍⚕️ Produtividade Médica' },
-                    { id: 'CIDS', label: '🧬 Top CIDs & Síndromes' },
-                    { id: 'COMPARISON', label: '⚖️ Comparativo Mensal (MoM)' },
-                  ] as const
-                ).map((tab) => (
-                  <button
-                    key={tab.id}
-                    onClick={() => setActiveSubTab(tab.id)}
-                    className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-                      activeSubTab === tab.id
-                        ? 'bg-blue-600 text-white shadow-sm'
-                        : 'text-blue-900 hover:bg-blue-100/60'
-                    }`}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
-              </div>
             </div>
 
-            {/* Botões de Exportação e Ações */}
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                onClick={() => generateExecutiveExcel(metrics, metrics.monthLabel, prevMetrics)}
-                className="bg-emerald-600 hover:bg-emerald-500 text-white px-3.5 py-2 rounded-xl text-xs font-bold shadow-sm transition cursor-pointer"
-              >
-                ⬇️ Excel (.xlsx)
-              </button>
-              <button
-                onClick={handleExportPDF}
-                disabled={isExporting}
-                className="bg-rose-600 hover:bg-rose-500 text-white px-3.5 py-2 rounded-xl text-xs font-bold shadow-sm transition cursor-pointer disabled:opacity-50"
-              >
-                {isExporting ? '⏳ Gerando...' : '📄 PDF Executivo'}
-              </button>
-              <button
-                onClick={() => handleExportPNG('GENERAL')}
-                disabled={isExporting}
-                className="bg-slate-800 hover:bg-slate-700 text-white px-3 py-2 rounded-xl text-xs font-bold shadow-sm transition cursor-pointer disabled:opacity-50"
-                title="Exportar imagem PNG do consolidado mensal"
-              >
-                🖼️ PNG Geral
-              </button>
-              <button
-                onClick={() => handleExportPNG('CURRENT_VIEW')}
-                disabled={isExporting}
-                className="bg-slate-700 hover:bg-slate-600 text-white px-3 py-2 rounded-xl text-xs font-bold shadow-sm transition cursor-pointer disabled:opacity-50"
-                title="Exportar imagem PNG do dia/turno selecionado atualmente"
-              >
-                🖼️ PNG ({selectedDayIndex === 'ALL' ? 'Atual' : selectedDayLabel.split('-')[0]})
-              </button>
-              <button
-                onClick={handleCopyPromptForAI}
-                className="bg-indigo-600 hover:bg-indigo-500 text-white px-3.5 py-2 rounded-xl text-xs font-bold shadow-sm transition cursor-pointer"
-              >
-                🤖 Copiar Prompt p/ IA
-              </button>
-              <button
-                onClick={handlePublishGovernance}
-                className="bg-amber-500 hover:bg-amber-400 text-slate-950 px-3.5 py-2 rounded-xl text-xs font-bold shadow-sm transition cursor-pointer"
-              >
-                📊 Publicar na Gestão à Vista
-              </button>
-            </div>
-          </div>
-
-          {/* ÁREA CAPTURÁVEL PARA PDF / PNG */}
-          <div ref={dashboardRef} className="space-y-6 bg-slate-50 p-2 rounded-2xl">
-            {/* FAIXA DE IDENTIFICAÇÃO DO RECORTE ATIVO */}
-            <div className="bg-white px-5 py-3 rounded-xl border border-slate-200 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600">
-              <div>
-                <span className="font-bold text-slate-900">Ficheiro em Memória:</span>{' '}
-                {activeFileName || 'Relatório CATE'} •{' '}
-                <span className="font-bold text-blue-700">{metrics.monthLabel}</span>
-              </div>
-              <div className="flex items-center gap-4">
-                <span>
-                  <strong>Recorte Ativo:</strong> {selectedDayLabel} — {selectedShiftLabel}
-                </span>
-                <span>
-                  <strong>Dias Operacionais Completos:</strong> {currentPeriod.distinctDays} dias
-                </span>
-              </div>
-            </div>
-
-            {/* 6 CARDS DE KPIS SEMAFORIZADOS (COM MÉDIA, MEDIANA, DP E AMPLITUDE) */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-4">
-              {/* Card 1: Volume Diário e Mensal */}
-              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-500 uppercase">
-                    Média Diária (±DP)
-                  </span>
-                  <span className="w-3 h-3 rounded-full bg-blue-500"></span>
+            {/* GRÁFICO EMPILHADO DE CENSO SIMULTÂNEO NAS 4 FRENTES DE TRABALHO vs. CHEGADAS */}
+            <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2 pb-4 border-b border-slate-100">
+                <div>
+                  <h2 className="text-base font-extrabold text-slate-900">
+                    CURVA DE PRESSÃO ASSISTENCIAL REAL: CENSO SIMULTÂNEO POR FRENTE DE TRABALHO vs. CHEGADAS NA PORTA
+                  </h2>
+                  <p className="text-xs text-slate-500">
+                    Bússola de dimensionamento de escala médica: separa quem aguarda consulta inicial (Porta) de quem precisa de Fast Reav (Só Medicação), Giro de Exames (Lab/TC/RX) e Boarding (UI/UTI).
+                  </p>
                 </div>
-                <div className="text-2xl font-extrabold text-slate-900 mt-2">
-                  {currentPeriod.dailyVolume.avg.toFixed(1)}{' '}
-                  <span className="text-sm font-bold text-slate-500">
-                    ±{currentPeriod.dailyVolume.stdDev.toFixed(1)}
+                <div className="flex flex-wrap items-center gap-3 text-xs font-bold">
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-3 h-3 rounded bg-blue-500 inline-block" /> 1. Porta / 1º Atend
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-3 h-3 rounded bg-amber-400 inline-block" /> 2A. Fast Reav (Só Med)
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-3 h-3 rounded bg-orange-600 inline-block" /> 2B. Giro Exames (Lab/TC)
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="w-3 h-3 rounded bg-rose-600 inline-block" /> 3. Boarding (UI/UTI)
                   </span>
                 </div>
-                <div className="text-[11px] text-slate-500 mt-1">
-                  Mediana: <strong>{currentPeriod.dailyVolume.median.toFixed(0)}</strong> (Mín-Máx:{' '}
-                  <strong>
-                    {currentPeriod.dailyVolume.min}-{currentPeriod.dailyVolume.max}
-                  </strong>
-                  ) | Total: {currentPeriod.totalVolume}
-                </div>
               </div>
 
-              {/* Card 2: Tempo Porta-Médico */}
-              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-500 uppercase">
-                    Porta-Médico (P90)
-                  </span>
-                  <span
-                    className={`w-3 h-3 rounded-full ${
-                      currentPeriod.doorToDoctor.p90 <= 20
-                        ? 'bg-emerald-500'
-                        : currentPeriod.doorToDoctor.avg <= 20
-                        ? 'bg-amber-500'
-                        : 'bg-rose-500'
-                    }`}
-                  ></span>
-                </div>
-                <div className="text-2xl font-extrabold text-slate-900 mt-2">
-                  {currentPeriod.doorToDoctor.p90.toFixed(1)} min
-                </div>
-                <div className="text-[11px] text-slate-500 mt-1">
-                  Méd: <strong>{currentPeriod.doorToDoctor.avg.toFixed(1)}m</strong> (±
-                  {currentPeriod.doorToDoctor.stdDev.toFixed(1)}) | Med:{' '}
-                  <strong>{currentPeriod.doorToDoctor.median.toFixed(0)}m</strong> | SLA:{' '}
-                  <strong>{currentPeriod.doorToDoctor.slaRate20m.toFixed(0)}%</strong>
-                </div>
-              </div>
-
-              {/* Card 3: SLA Laboratório */}
-              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-500 uppercase">
-                    SLA Laboratório (&le;90m)
-                  </span>
-                  <span
-                    className={`w-3 h-3 rounded-full ${
-                      currentPeriod.lab.slaRate90m >= 90
-                        ? 'bg-emerald-500'
-                        : currentPeriod.lab.slaRate90m >= 75
-                        ? 'bg-amber-500'
-                        : 'bg-rose-500'
-                    }`}
-                  ></span>
-                </div>
-                <div className="text-2xl font-extrabold text-slate-900 mt-2">
-                  {currentPeriod.lab.slaRate90m.toFixed(1)}%
-                </div>
-                <div className="text-[11px] text-slate-500 mt-1">
-                  Coleta: <strong>{currentPeriod.lab.requestRate.toFixed(1)}%</strong> | Esp. Méd:{' '}
-                  <strong>{currentPeriod.lab.waitStats.avg.toFixed(0)}m</strong> (Med:{' '}
-                  {currentPeriod.lab.waitStats.median.toFixed(0)}m)
-                </div>
-              </div>
-
-              {/* Card 4: SLA Tomografia */}
-              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-500 uppercase">
-                    SLA Tomografia (&le;120m)
-                  </span>
-                  <span
-                    className={`w-3 h-3 rounded-full ${
-                      currentPeriod.ct.slaRate120m >= 90
-                        ? 'bg-emerald-500'
-                        : currentPeriod.ct.slaRate120m >= 75
-                        ? 'bg-amber-500'
-                        : 'bg-rose-500'
-                    }`}
-                  ></span>
-                </div>
-                <div className="text-2xl font-extrabold text-slate-900 mt-2">
-                  {currentPeriod.ct.slaRate120m.toFixed(1)}%
-                </div>
-                <div className="text-[11px] text-slate-500 mt-1">
-                  Solic.: <strong>{currentPeriod.ct.requestRate.toFixed(1)}%</strong> | Esp. Méd:{' '}
-                  <strong>{currentPeriod.ct.waitStats.avg.toFixed(0)}m</strong> (Med:{' '}
-                  {currentPeriod.ct.waitStats.median.toFixed(0)}m)
-                </div>
-              </div>
-
-              {/* Card 5: Permanência / Desfecho */}
-              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-500 uppercase">
-                    Tempo p/ Desfecho
-                  </span>
-                  <span
-                    className={`w-3 h-3 rounded-full ${
-                      currentPeriod.lengthOfStay.avg <= 240 ? 'bg-emerald-500' : 'bg-rose-500'
-                    }`}
-                  ></span>
-                </div>
-                <div className="text-2xl font-extrabold text-slate-900 mt-2">
-                  {currentPeriod.lengthOfStay.avg.toFixed(0)} min
-                </div>
-                <div className="text-[11px] text-slate-500 mt-1">
-                  Med: <strong>{currentPeriod.lengthOfStay.median.toFixed(0)}m</strong> | P90:{' '}
-                  <strong>{currentPeriod.lengthOfStay.p90.toFixed(0)}m</strong> | Int:{' '}
-                  <strong>{currentPeriod.outcomes.admissionRate.toFixed(1)}%</strong>
-                </div>
-              </div>
-
-              {/* Card 6: Retorno Precoce & Evasão */}
-              <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-sm">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold text-slate-500 uppercase">
-                    Retorno &lt;48h / Evasão
-                  </span>
-                  <span
-                    className={`w-3 h-3 rounded-full ${
-                      currentPeriod.outcomes.earlyReturn48hRate < 5 &&
-                      currentPeriod.outcomes.evasionRate < 3
-                        ? 'bg-emerald-500'
-                        : 'bg-rose-500'
-                    }`}
-                  ></span>
-                </div>
-                <div className="text-2xl font-extrabold text-slate-900 mt-2">
-                  {currentPeriod.outcomes.earlyReturn48hRate.toFixed(1)}%{' '}
-                  <span className="text-sm font-normal text-slate-400">/</span>{' '}
-                  {currentPeriod.outcomes.evasionRate.toFixed(1)}%
-                </div>
-                <div className="text-[11px] text-slate-500 mt-1">
-                  Metas: Retorno <strong>&lt;5%</strong> | Evasão <strong>&lt;3%</strong>
-                </div>
-              </div>
-            </div>
-
-            {/* ========================================================= */}
-            {/* SUB-ABA 1: VISÃO GERAL, DECOMPOSIÇÃO, CURVA HORÁRIA & HEATMAP */}
-            {/* ========================================================= */}
-            {activeSubTab === 'OVERVIEW' && (
-              <div className="space-y-6">
-                {/* Decomposição de Gargalos + Sala de Medicação + Demografia */}
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                  <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm lg:col-span-2">
-                    <div className="flex items-center justify-between mb-3">
-                      <h3 className="text-sm font-bold text-slate-800 uppercase">
-                        Decomposição Determinística do Tempo Total de Permanência (Análise de Gargalos)
-                      </h3>
-                      <span className="text-xs font-semibold text-slate-500">
-                        Média Total: {currentPeriod.lengthOfStay.avg.toFixed(1)} min (Mediana:{' '}
-                        {currentPeriod.lengthOfStay.median.toFixed(0)}m)
-                      </span>
-                    </div>
-
-                    <div className="w-full h-7 rounded-xl overflow-hidden flex bg-slate-100 border border-slate-200">
-                      <div
-                        style={{
-                          width: `${Math.max(5, currentPeriod.losDecomposition.preMedicalPct)}%`,
-                        }}
-                        className="bg-blue-600 text-white text-[11px] font-bold flex items-center justify-center"
-                      >
-                        {currentPeriod.losDecomposition.preMedicalPct.toFixed(0)}%
-                      </div>
-                      <div
-                        style={{
-                          width: `${Math.max(5, currentPeriod.losDecomposition.consultationPct)}%`,
-                        }}
-                        className="bg-indigo-500 text-white text-[11px] font-bold flex items-center justify-center"
-                      >
-                        {currentPeriod.losDecomposition.consultationPct.toFixed(0)}%
-                      </div>
-                      <div
-                        style={{
-                          width: `${Math.max(5, currentPeriod.losDecomposition.propaedeuticPct)}%`,
-                        }}
-                        className="bg-amber-500 text-slate-950 text-[11px] font-bold flex items-center justify-center"
-                      >
-                        {currentPeriod.losDecomposition.propaedeuticPct.toFixed(0)}%
-                      </div>
-                    </div>
-
-                    <div className="grid grid-cols-3 gap-3 mt-4 text-xs">
-                      <div className="p-2.5 rounded-xl bg-blue-50 border border-blue-100">
-                        <div className="font-bold text-blue-900">1. Pré-Médico (Porta)</div>
-                        <div className="text-lg font-extrabold text-blue-700">
-                          {currentPeriod.losDecomposition.preMedicalAvgMin.toFixed(1)} min
-                        </div>
-                        <div className="text-slate-500">
-                          Mediana: {currentPeriod.doorToDoctor.median.toFixed(0)}m | DP: ±
-                          {currentPeriod.doorToDoctor.stdDev.toFixed(1)}m
-                        </div>
-                      </div>
-                      <div className="p-2.5 rounded-xl bg-indigo-50 border border-indigo-100">
-                        <div className="font-bold text-indigo-900">2. Consulta Médica</div>
-                        <div className="text-lg font-extrabold text-indigo-700">
-                          {currentPeriod.losDecomposition.consultationAvgMin.toFixed(1)} min
-                        </div>
-                        <div className="text-slate-500">
-                          Mediana: {currentPeriod.medicalAttendance.median.toFixed(0)}m | DP: ±
-                          {currentPeriod.medicalAttendance.stdDev.toFixed(1)}m
-                        </div>
-                      </div>
-                      <div className="p-2.5 rounded-xl bg-amber-50 border border-amber-100">
-                        <div className="font-bold text-amber-900">
-                          3. Propedêutica / Medicação
-                        </div>
-                        <div className="text-lg font-extrabold text-amber-700">
-                          {currentPeriod.losDecomposition.propaedeuticAvgMin.toFixed(1)} min
-                        </div>
-                        <div className="text-slate-500">
-                          Medicação: Esp {currentPeriod.medication.waitStats.avg.toFixed(0)}m + ADM{' '}
-                          {currentPeriod.medication.adminStats.avg.toFixed(0)}m
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Demografia e Espera de Leito */}
-                  <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm flex flex-col justify-between">
-                    <div>
-                      <h3 className="text-sm font-bold text-slate-800 uppercase mb-3">
-                        Perfil Etário (Anonimizado) & Retaguarda
-                      </h3>
-                      <div className="grid grid-cols-2 gap-2 text-xs">
-                        <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200">
-                          <span className="text-slate-500">Jovens (18-35a):</span>
-                          <div className="text-base font-bold text-slate-800">
-                            {currentPeriod.demographics.age18to35} pac
-                          </div>
-                        </div>
-                        <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200">
-                          <span className="text-slate-500">Adultos (36-59a):</span>
-                          <div className="text-base font-bold text-slate-800">
-                            {currentPeriod.demographics.age36to59} pac
-                          </div>
-                        </div>
-                        <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200">
-                          <span className="text-slate-500">Idosos (&ge;60a):</span>
-                          <div className="text-base font-bold text-slate-800">
-                            {currentPeriod.demographics.age60plus} pac
-                          </div>
-                        </div>
-                        <div className="p-2.5 bg-slate-50 rounded-xl border border-slate-200">
-                          <span className="text-slate-500">Idade Média:</span>
-                          <div className="text-base font-bold text-slate-800">
-                            {currentPeriod.demographics.avgAge.toFixed(1)} anos
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="mt-3 p-3 rounded-xl bg-slate-900 text-white text-xs flex items-center justify-between">
-                      <span>🛏️ Espera Média por Leito (Internação):</span>
-                      <strong className="text-sm text-amber-400">
-                        {currentPeriod.outcomes.admissionWaitStats.avg.toFixed(0)} min (P90:{' '}
-                        {currentPeriod.outcomes.admissionWaitStats.p90.toFixed(0)}m)
-                      </strong>
-                    </div>
-                  </div>
-                </div>
-
-                {/* SELETOR DE MÉTRICA ESTATÍSTICA DOS GRÁFICOS (MÉDIA ± DP vs MEDIANA [MÍN-MÁX] vs ACUMULADO) */}
-                <div className="bg-white px-5 py-3.5 rounded-2xl border border-slate-200 shadow-sm flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                  <div>
-                    <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-800">
-                      Medida Estatística e Dispersão nos Gráficos (Curva Horária & Heatmap 24x7)
-                    </h4>
-                    <p className="text-[11px] text-slate-500">
-                      A Média Diária (±DP) e a Mediana Diária (Mín–Máx) evitam distorções de meses com 5 ocorrências de um dia da semana vs. 4 de outro.
-                    </p>
-                  </div>
-                  <div className="inline-flex rounded-xl bg-slate-100 p-1 border border-slate-200 shrink-0">
-                    {(
-                      [
-                        { id: 'MEAN_SD', label: '📊 Média Diária (±DP)' },
-                        { id: 'MEDIAN_RANGE', label: '📐 Mediana Diária (Mín–Máx)' },
-                        { id: 'TOTAL', label: '∑ Volume Acumulado no Mês' },
-                      ] as const
-                    ).map((m) => (
-                      <button
-                        key={m.id}
-                        type="button"
-                        onClick={() => setChartStatMode(m.id)}
-                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition cursor-pointer ${
-                          chartStatMode === m.id
-                            ? 'bg-blue-600 text-white shadow-sm'
-                            : 'text-slate-600 hover:text-slate-900'
-                        }`}
-                      >
-                        {m.label}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* GRÁFICO 1: CURVA DE CHEGADAS DIÁRIA VS MÉDICOS ATIVOS POR HORA (07h às 06h) */}
-                <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                  <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm">
-                    <div className="flex items-center justify-between mb-4">
-                      <div>
-                        <h3 className="text-base font-bold text-slate-900">
-                          Curva de Chegadas por Hora (07h às 06h) —{' '}
-                          {chartStatMode === 'MEAN_SD'
-                            ? 'Média Diária ± DP'
-                            : chartStatMode === 'MEDIAN_RANGE'
-                            ? 'Mediana Diária (Mín–Máx)'
-                            : 'Acumulado Mensal'}
-                        </h3>
-                        <p className="text-xs text-slate-500">
-                          Topo da barra:{' '}
-                          {chartStatMode === 'MEAN_SD'
-                            ? 'Média de pacientes/h e Desvio-Padrão (±DP) abaixo'
-                            : chartStatMode === 'MEDIAN_RANGE'
-                            ? 'Mediana de pacientes/h e Amplitude (Mín–Máx) abaixo'
-                            : 'Soma bruta acumulada no mês e Média/dia abaixo'}
-                        </p>
-                      </div>
-                      <span className="text-xs font-bold px-2.5 py-1 bg-blue-50 text-blue-700 rounded-lg shrink-0">
-                        Médicos Ativos: {currentPeriod.hourlyProductivity.avgActiveDoctorsPerHour.toFixed(1)}{' '}
-                        méd/h
-                      </span>
-                    </div>
-
-                    <div className="h-72 flex items-end gap-1 pt-8 pb-2 px-1 border-b border-slate-200">
-                      {metrics.operationalHoursOrder.map((h) => {
-                        const st = getSlotStatsForHour(h);
-                        const primaryVal =
-                          chartStatMode === 'MEAN_SD'
-                            ? st.avg
-                            : chartStatMode === 'MEDIAN_RANGE'
-                            ? st.median
-                            : st.total;
-
-                        const maxVal = Math.max(
-                          0.1,
-                          ...metrics.operationalHoursOrder.map((hr) => {
-                            const s = getSlotStatsForHour(hr);
-                            return chartStatMode === 'MEAN_SD'
-                              ? s.avg
-                              : chartStatMode === 'MEDIAN_RANGE'
-                              ? s.median
-                              : s.total;
-                          })
-                        );
-                        const heightPct = Math.max(5, Math.round((primaryVal / maxVal) * 100));
-                        const avgDocs = metrics.heatmap.hourlyAvgActiveDoctors[h] || 0;
-                        const isNight = h >= 19 || h < 7;
-
-                        const topText =
-                          chartStatMode === 'TOTAL'
-                            ? String(st.total)
-                            : primaryVal.toFixed(1);
-                        const subDispersionText =
-                          chartStatMode === 'MEAN_SD'
-                            ? `±${st.stdDev.toFixed(1)}`
-                            : chartStatMode === 'MEDIAN_RANGE'
-                            ? `${st.min}-${st.max}`
-                            : `${st.avg.toFixed(1)}/d`;
+              {/* Barras Empilhadas Interativas */}
+              {(() => {
+                const maxBarVal = Math.max(
+                  ...activeSimultaneousCurve.map((p) => p.totalSimultaneousMean),
+                  ...activeSimultaneousCurve.map((p) => p.newArrivalsMean),
+                  10
+                );
+                return (
+                  <div className="mt-6">
+                    <div className="grid grid-cols-12 sm:grid-cols-24 gap-1.5 items-end h-64 pt-6 pb-2 px-2 border-b border-slate-200">
+                      {activeSimultaneousCurve.map((pt) => {
+                        const hPorta = (pt.portaMean / maxBarVal) * 185;
+                        const hFast = (pt.fastReavMedMean / maxBarVal) * 185;
+                        const hExam = (pt.giroExamesMean / maxBarVal) * 185;
+                        const hBoard = (pt.boardingMean / maxBarVal) * 185;
 
                         return (
-                          <div
-                            key={h}
-                            className="flex-1 flex flex-col items-center group relative h-full justify-end"
-                          >
-                            {/* Tooltip Completo no Hover */}
-                            <div className="opacity-0 group-hover:opacity-100 transition pointer-events-none absolute -top-16 z-20 bg-slate-900 text-white text-[10px] px-2.5 py-1.5 rounded-lg shadow-xl whitespace-nowrap leading-tight">
-                              <div>
-                                <strong>Faixa {String(h).padStart(2, '0')}h:</strong> Média{' '}
-                                <strong>{st.avg.toFixed(1)}</strong> (±{st.stdDev.toFixed(1)}) | Mediana{' '}
-                                <strong>{st.median.toFixed(1)}</strong> (Mín {st.min} – Máx {st.max})
+                          <div key={pt.hour} className="flex flex-col items-center group relative">
+                            {/* Tooltip detalhado no hover */}
+                            <div className="hidden group-hover:block absolute -top-28 z-20 w-52 p-2.5 rounded-xl bg-slate-900 text-white text-[11px] shadow-xl pointer-events-none">
+                              <div className="font-extrabold border-b border-slate-700 pb-1 mb-1">
+                                Faixa {pt.label} • Total: {pt.totalSimultaneousMean.toFixed(1)} pac. (Pico: {pt.totalSimultaneousMax})
                               </div>
-                              <div className="text-slate-300">
-                                Acumulado Mês: {st.total} pac ({st.count} dias) | Médicos ativos:{' '}
-                                {avgDocs.toFixed(1)}/h
+                              <div>🚪 Porta / 1º Atend: <strong>{pt.portaMean.toFixed(1)}</strong></div>
+                              <div>⚡ Fast Reav (Só Med): <strong>{pt.fastReavMedMean.toFixed(1)}</strong></div>
+                              <div>🔬 Giro Exames (Lab/TC): <strong>{pt.giroExamesMean.toFixed(1)}</strong></div>
+                              <div>🛏️ Boarding Internação: <strong>{pt.boardingMean.toFixed(1)}</strong></div>
+                              <div className="mt-1 pt-1 border-t border-slate-700 text-sky-300">
+                                📥 Novas Chegadas/h: <strong>{pt.newArrivalsMean.toFixed(1)}</strong>
                               </div>
                             </div>
 
-                            <span className="text-[10px] font-extrabold text-slate-800 leading-none">
-                              {topText}
-                            </span>
-                            <span className="text-[9px] font-semibold text-slate-400 mb-1 leading-none">
-                              {subDispersionText}
-                            </span>
+                            <div className="text-[10px] font-extrabold text-slate-800 mb-1">
+                              {pt.totalSimultaneousMean.toFixed(1)}
+                            </div>
 
-                            <div
-                              style={{ height: `${heightPct}%` }}
-                              className={`w-full rounded-t-md transition-all ${
-                                isNight
-                                  ? 'bg-indigo-600 hover:bg-indigo-500'
-                                  : 'bg-blue-600 hover:bg-blue-500'
-                              }`}
-                            ></div>
-                            <span className="text-[10px] font-semibold text-slate-500 mt-1.5">
-                              {String(h).padStart(2, '0')}h
-                            </span>
+                            <div className="w-full max-w-[28px] flex flex-col-reverse rounded-t overflow-hidden shadow-xs">
+                              <div style={{ height: `${Math.max(hPorta, 2)}px` }} className="bg-blue-500" />
+                              <div style={{ height: `${Math.max(hFast, 0)}px` }} className="bg-amber-400" />
+                              <div style={{ height: `${Math.max(hExam, 0)}px` }} className="bg-orange-600" />
+                              <div style={{ height: `${Math.max(hBoard, 0)}px` }} className="bg-rose-600" />
+                            </div>
+
+                            <div className="text-[10px] font-bold text-slate-600 mt-1.5">{pt.label}</div>
+                            <div className="text-[9px] font-semibold text-blue-700" title="Novas chegadas na porta por hora">
+                              +{pt.newArrivalsMean.toFixed(1)}
+                            </div>
                           </div>
                         );
                       })}
                     </div>
-                    <div className="flex flex-wrap items-center justify-between text-xs text-slate-500 mt-3 gap-2">
-                      <div className="flex items-center gap-4">
-                        <span className="flex items-center gap-1.5">
-                          <span className="w-3 h-3 rounded bg-blue-600 inline-block"></span> Plantão
-                          Diurno (07h–18h)
-                        </span>
-                        <span className="flex items-center gap-1.5">
-                          <span className="w-3 h-3 rounded bg-indigo-600 inline-block"></span>{' '}
-                          Plantão Noturno (19h–06h)
-                        </span>
-                      </div>
-                      <span>
-                        Produtividade Média:{' '}
-                        <strong>
-                          {currentPeriod.hourlyProductivity.patientsPerDoctorHour.avg.toFixed(2)}{' '}
-                          pac/médico/h
-                        </strong>{' '}
-                        (Mediana: {currentPeriod.hourlyProductivity.patientsPerDoctorHour.median.toFixed(1)}{' '}
-                        | ±{currentPeriod.hourlyProductivity.patientsPerDoctorHour.stdDev.toFixed(2)})
-                      </span>
+                    <div className="text-[11px] text-slate-500 mt-2 flex justify-between">
+                      <span>* Os valores no topo das barras indicam o Censo Simultâneo Médio dentro do PS naquela hora.</span>
+                      <span>* Os valores azuis (+X.X) abaixo do eixo indicam a média de Novas Chegadas na porta naquela hora.</span>
                     </div>
                   </div>
+                );
+              })()}
+            </div>
 
-                  {/* GRÁFICO 2: HEATMAP 24x7 FIDEDIGNO (MÉDIA DIÁRIA ± DP OU MEDIANA [MÍN-MÁX]) */}
-                  <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
-                    <div className="flex items-center justify-between mb-4">
-                      <div>
-                        <h3 className="text-base font-bold text-slate-900">
-                          Heatmap de Pressão Assistencial 24x7 —{' '}
-                          {chartStatMode === 'MEAN_SD'
-                            ? 'Média Diária (±DP)'
-                            : chartStatMode === 'MEDIAN_RANGE'
-                            ? 'Mediana Diária (Mín–Máx)'
-                            : 'Acumulado Mensal'}
-                        </h3>
-                        <p className="text-xs text-slate-500">
-                          Cada célula exibe a{' '}
-                          {chartStatMode === 'MEAN_SD'
-                            ? 'média diária de chegadas na faixa horária e o desvio-padrão (±DP)'
-                            : chartStatMode === 'MEDIAN_RANGE'
-                            ? 'mediana diária de chegadas na faixa horária e a amplitude (Mín–Máx)'
-                            : 'soma acumulada no mês e a média diária abaixo'}
-                        </p>
-                      </div>
-                    </div>
-
-                    <table className="w-full text-center border-collapse text-[10px]">
-                      <thead>
-                        <tr>
-                          <th className="p-1.5 text-left font-bold text-slate-600 border-b border-slate-200">
-                            Dia \ Hora
-                          </th>
-                          {metrics.operationalHoursOrder.map((h) => (
-                            <th
-                              key={h}
-                              className="p-1 font-bold text-slate-500 border-b border-slate-200"
-                            >
-                              {String(h).padStart(2, '0')}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {metrics.byDayOfWeek.map((day) => (
-                          <tr key={day.dayIndex} className="border-b border-slate-100">
-                            <td className="p-1.5 text-left font-bold text-slate-700 whitespace-nowrap">
-                              {day.dayName.split('-')[0]}
-                            </td>
-                            {metrics.operationalHoursOrder.map((h) => {
-                              const st = metrics.heatmap.cellStats[`${day.dayIndex}_${h}`] || {
-                                avg: 0,
-                                median: 0,
-                                stdDev: 0,
-                                min: 0,
-                                max: 0,
-                                total: 0,
-                                count: 0,
-                              };
-
-                              // A cor do Heatmap é sempre ancorada na pressão diária real (Média ou Mediana de pac/h)
-                              const refIntensity =
-                                chartStatMode === 'MEDIAN_RANGE' ? st.median : st.avg;
-
-                              let bgClass = 'bg-slate-50 text-slate-400';
-                              let subClass = 'text-slate-400';
-                              if (refIntensity >= 12) {
-                                bgClass = 'bg-rose-700 text-white font-bold';
-                                subClass = 'text-rose-100';
-                              } else if (refIntensity >= 9) {
-                                bgClass = 'bg-rose-500 text-white font-bold';
-                                subClass = 'text-rose-100';
-                              } else if (refIntensity >= 6) {
-                                bgClass = 'bg-orange-400 text-slate-950 font-bold';
-                                subClass = 'text-slate-800';
-                              } else if (refIntensity >= 3) {
-                                bgClass = 'bg-amber-200 text-slate-900 font-semibold';
-                                subClass = 'text-slate-700';
-                              } else if (refIntensity >= 1) {
-                                bgClass = 'bg-yellow-50 text-slate-700';
-                                subClass = 'text-slate-500';
-                              }
-
-                              const mainCellText =
-                                chartStatMode === 'MEAN_SD'
-                                  ? st.avg.toFixed(1)
-                                  : chartStatMode === 'MEDIAN_RANGE'
-                                  ? st.median.toFixed(0)
-                                  : String(st.total);
-
-                              const subCellText =
-                                chartStatMode === 'MEAN_SD'
-                                  ? `±${st.stdDev.toFixed(1)}`
-                                  : chartStatMode === 'MEDIAN_RANGE'
-                                  ? `${st.min}-${st.max}`
-                                  : `${st.avg.toFixed(1)}/d`;
-
-                              return (
-                                <td
-                                  key={h}
-                                  className={`px-0.5 py-1 border border-white rounded leading-tight ${bgClass}`}
-                                  title={`${day.dayName} às ${String(h).padStart(
-                                    2,
-                                    '0'
-                                  )}h (${st.count} dias no mês):\n• Média Diária: ${st.avg.toFixed(
-                                    1
-                                  )} pac/h (DP: ±${st.stdDev.toFixed(
-                                    1
-                                  )})\n• Mediana Diária: ${st.median.toFixed(
-                                    1
-                                  )} pac/h (Amplitude: ${st.min} a ${
-                                    st.max
-                                  })\n• Acumulado no Mês: ${st.total} pac`}
-                                >
-                                  <div className="text-[10px] font-extrabold">{mainCellText}</div>
-                                  <div className={`text-[8px] font-normal ${subClass}`}>
-                                    {subCellText}
-                                  </div>
-                                </td>
-                              );
-                            })}
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+            {/* HEATMAP 24x7 #1: CENSO OCUPACIONAL SIMULTÂNEO (COM SELETOR DE FRENTE DE TRABALHO) */}
+            <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+              <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4 pb-4 border-b border-slate-100 mb-4">
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900">
+                    HEATMAP 24x7 DE CENSO OCUPACIONAL SIMULTÂNEO (SEGUNDA A DOMINGO, 07h ÀS 06h)
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Selecione abaixo a frente de trabalho para visualizar onde alocar médicos de Porta, Fast Reav (Só Medicação), Reavaliação de Exames ou Suporte de Boarding.
+                  </p>
                 </div>
 
-                {/* TABELA RESUMO POR DIA DA SEMANA (COM MÉDIA, MEDIANA, DP E AMPLITUDE) */}
-                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
-                  <h3 className="text-base font-bold text-slate-900 mb-3">
-                    Desempenho Consolidado e Dispersão por Dia Operacional da Semana (Recorte:{' '}
-                    {selectedShiftLabel})
+                <div className="flex flex-wrap items-center gap-2">
+                  {[
+                    { id: 'total', label: '🔥 Censo Total Simultâneo' },
+                    { id: 'porta', label: '🚪 1. Aguardando Porta' },
+                    { id: 'fastReav', label: '⚡ 2A. Fast Reav (Só Medicação)' },
+                    { id: 'exames', label: '🔬 2B. Giro Exames (Lab/Imagem)' },
+                    { id: 'boarding', label: '🛏️ 3. Boarding (UI/UTI)' },
+                  ].map((layer) => (
+                    <button
+                      key={layer.id}
+                      onClick={() => setCensusHeatLayer(layer.id as CensusLayerFilter)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold border transition ${
+                        censusHeatLayer === layer.id
+                          ? 'bg-rose-700 text-white border-rose-700'
+                          : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                      }`}
+                    >
+                      {layer.label}
+                    </button>
+                  ))}
+
+                  <select
+                    value={censusHeatMode}
+                    onChange={(e) => setCensusHeatMode(e.target.value as 'mean_sd' | 'median_range' | 'breakdown')}
+                    className="px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-bold bg-white text-slate-800"
+                  >
+                    <option value="mean_sd">Exibir: Média (±DP)</option>
+                    <option value="median_range">Exibir: Mediana [Mín–Máx]</option>
+                    <option value="breakdown">Exibir: Decomposição (P / Med / Ex / Int)</option>
+                  </select>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-center border-collapse text-[11px]">
+                  <thead>
+                    <tr className="bg-slate-900 text-white">
+                      <th className="p-2 text-left font-bold sticky left-0 bg-slate-900">Dia \ Hora</th>
+                      {HOURS_7_TO_6.map((h) => (
+                        <th key={h} className="p-1.5 font-bold min-w-[54px]">
+                          {String(h).padStart(2, '0')}h
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {WEEKDAY_NAMES.map((dName, dIdx) => (
+                      <tr key={dName} className="border-b border-slate-200">
+                        <td className="p-2 text-left font-extrabold text-slate-900 bg-slate-50 sticky left-0">
+                          {dName}
+                        </td>
+                        {HOURS_7_TO_6.map((h) => {
+                          const cell = vsm.censusHeatmap24x7.find((c) => c.dayIndex === dIdx && c.hour === h);
+                          if (!cell) return <td key={h}>—</td>;
+
+                          const val =
+                            censusHeatLayer === 'total'
+                              ? cell.totalMean
+                              : censusHeatLayer === 'porta'
+                              ? cell.portaMean
+                              : censusHeatLayer === 'fastReav'
+                              ? cell.fastReavMedMean
+                              : censusHeatLayer === 'exames'
+                              ? cell.giroExamesMean
+                              : cell.boardingMean;
+
+                          const highThresh = censusHeatLayer === 'total' ? 20 : 6;
+                          const medThresh = censusHeatLayer === 'total' ? 13 : 3.5;
+
+                          const bgClass =
+                            val >= highThresh
+                              ? 'bg-red-100 text-red-950 font-extrabold'
+                              : val >= medThresh
+                              ? 'bg-amber-100 text-amber-950 font-bold'
+                              : val >= 1.5
+                              ? 'bg-sky-50 text-sky-900'
+                              : 'bg-white text-slate-500';
+
+                          return (
+                            <td key={h} className={`p-1.5 border border-slate-100 ${bgClass}`}>
+                              {censusHeatMode === 'mean_sd' && (
+                                <div>
+                                  <div>{val.toFixed(1)}</div>
+                                  {censusHeatLayer === 'total' && (
+                                    <div className="text-[9px] opacity-75">±{cell.totalStdDev.toFixed(1)}</div>
+                                  )}
+                                </div>
+                              )}
+                              {censusHeatMode === 'median_range' && (
+                                <div>
+                                  <div>{cell.totalMedian.toFixed(1)}</div>
+                                  <div className="text-[9px] opacity-75">
+                                    [{cell.totalMin.toFixed(0)}–{cell.totalMax.toFixed(0)}]
+                                  </div>
+                                </div>
+                              )}
+                              {censusHeatMode === 'breakdown' && (
+                                <div className="text-[9px] leading-tight">
+                                  <div className="font-bold">{cell.totalMean.toFixed(1)}</div>
+                                  <div>
+                                    P:{cell.portaMean.toFixed(0)}|M:{cell.fastReavMedMean.toFixed(0)}|E:{cell.giroExamesMean.toFixed(0)}
+                                  </div>
+                                </div>
+                              )}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* HEATMAP 24x7 #2: CHEGADAS NA PORTA (FICHAS DE ENTRADA — MANTIDO E APRIMORADO) */}
+            <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-slate-100 mb-4">
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900">
+                    HEATMAP 24x7 DE PRESSÃO DE ENTRADA NA PORTA (NOVAS FICHAS ABERTAS — SEGUNDA A DOMINGO, 07h ÀS 06h)
                   </h3>
-                  <table className="w-full text-left border-collapse text-xs">
-                    <thead>
-                      <tr className="bg-slate-900 text-white">
-                        <th className="p-3 rounded-tl-xl">Dia da Semana</th>
-                        <th className="p-3 text-center">Média Diária (±DP)</th>
-                        <th className="p-3 text-center">Mediana Diária (Mín–Máx)</th>
-                        <th className="p-3 text-center">Acumulado Mês</th>
-                        <th className="p-3 text-center">Porta-Médico (Méd / Med / P90)</th>
-                        <th className="p-3 text-center">% Meta &le;20m</th>
-                        <th className="p-3 text-center">Atend. Médico (Méd / P90)</th>
-                        <th className="p-3 text-center">Desfecho (Méd / Med / P90)</th>
-                        <th className="p-3 text-center rounded-tr-xl">Internação</th>
+                  <p className="text-xs text-slate-500">
+                    Demanda pura de chegada na recepção/totem por faixa horária.
+                  </p>
+                </div>
+
+                <div className="flex items-center gap-1.5">
+                  {[
+                    { id: 'mean_sd', label: 'Média Diária (±DP)' },
+                    { id: 'median_range', label: 'Mediana [Mín–Máx]' },
+                    { id: 'total_sum', label: 'Acumulado Mensal (Σ)' },
+                  ].map((m) => (
+                    <button
+                      key={m.id}
+                      onClick={() => setArrivalHeatMode(m.id as HeatmapDisplayMode)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-bold ${
+                        arrivalHeatMode === m.id ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'
+                      }`}
+                    >
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-center border-collapse text-[11px]">
+                  <thead>
+                    <tr className="bg-slate-800 text-white">
+                      <th className="p-2 text-left font-bold sticky left-0 bg-slate-800">Dia \ Hora</th>
+                      {HOURS_7_TO_6.map((h) => (
+                        <th key={h} className="p-1.5 font-bold min-w-[54px]">
+                          {String(h).padStart(2, '0')}h
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {WEEKDAY_NAMES.map((dName, dIdx) => (
+                      <tr key={dName} className="border-b border-slate-200">
+                        <td className="p-2 text-left font-extrabold text-slate-900 bg-slate-50 sticky left-0">
+                          {dName}
+                        </td>
+                        {HOURS_7_TO_6.map((h) => {
+                          const cell = activeData.heatmap24x7.find((c) => c.dayIndex === dIdx && c.hour === h);
+                          if (!cell) return <td key={h}>—</td>;
+
+                          const bgClass =
+                            cell.mean >= 10
+                              ? 'bg-red-100 text-red-950 font-extrabold'
+                              : cell.mean >= 7
+                              ? 'bg-amber-100 text-amber-950 font-bold'
+                              : cell.mean >= 4
+                              ? 'bg-blue-50 text-blue-900'
+                              : 'bg-white text-slate-500';
+
+                          return (
+                            <td key={h} className={`p-1.5 border border-slate-100 ${bgClass}`}>
+                              {arrivalHeatMode === 'mean_sd' && (
+                                <div>
+                                  <div>{cell.mean.toFixed(1)}</div>
+                                  <div className="text-[9px] opacity-75">±{cell.stdDev.toFixed(1)}</div>
+                                </div>
+                              )}
+                              {arrivalHeatMode === 'median_range' && (
+                                <div>
+                                  <div>{cell.median.toFixed(1)}</div>
+                                  <div className="text-[9px] opacity-75">
+                                    [{cell.min}–{cell.max}]
+                                  </div>
+                                </div>
+                              )}
+                              {arrivalHeatMode === 'total_sum' && <div className="font-bold">{cell.totalCount}</div>}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ====================================================================
+            ABA 3: BOARDING REAL EM 2 ETAPAS & RANKING POR OPERADORA (CONVÊNIO)
+           ==================================================================== */}
+        {activeTab === 'boarding_convenios' && (
+          <div className="space-y-6">
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
+                <div className="text-xs font-bold text-slate-500 uppercase">Total Internações PS</div>
+                <div className="text-2xl font-extrabold text-slate-900 mt-1">
+                  {activeData.totalAdmissions} ({activeData.conversionRate}%)
+                </div>
+                <div className="text-xs text-slate-600 mt-1">
+                  Enfermaria (UI): <strong>{activeData.uiAdmissions}</strong> | UTI: <strong>{activeData.utiAdmissions}</strong>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
+                <div className="text-xs font-bold text-slate-500 uppercase">Etapa 1: Aprovação Plano / Virtual</div>
+                <div className="text-2xl font-extrabold text-amber-700 mt-1">
+                  {vsm.monthlyOverall.t1DecisionToVirtualBedStats.mean} min
+                </div>
+                <div className="text-xs text-slate-600 mt-1">
+                  Mediana: <strong>{vsm.monthlyOverall.t1DecisionToVirtualBedStats.median}m</strong> | P90:{' '}
+                  {vsm.monthlyOverall.t1DecisionToVirtualBedStats.p90}m
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
+                <div className="text-xs font-bold text-slate-500 uppercase">Etapa 2: Virtual → Leito Físico UI/UTI</div>
+                <div className="text-2xl font-extrabold text-rose-700 mt-1">
+                  {vsm.hasCate3493Data ? `+${vsm.monthlyOverall.t2VirtualToPhysicalBedStats.mean} min` : 'Pendente 3493'}
+                </div>
+                <div className="text-xs text-slate-600 mt-1">
+                  {vsm.hasCate3493Data
+                    ? `Mediana: ${vsm.monthlyOverall.t2VirtualToPhysicalBedStats.median}m | P90: ${vsm.monthlyOverall.t2VirtualToPhysicalBedStats.p90}m`
+                    : 'Anexe o CATE 3493 no topo para calcular'}
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
+                <div className="text-xs font-bold text-slate-500 uppercase">Horas-Maca Retidas em Boarding</div>
+                <div className="text-2xl font-extrabold text-red-700 mt-1">{vsm.wastedBedHoursInBoarding} horas</div>
+                <div className="text-xs text-slate-600 mt-1">
+                  Cirúrgicos (CC=S): <strong>{vsm.surgicalAdmissionsCount}</strong> ({vsm.surgicalAdmissionsPct}%) | Perm. Hosp:{' '}
+                  <strong>{vsm.hospitalStayDaysStats.mean}d</strong>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+              <h3 className="text-base font-extrabold text-slate-900 mb-1">
+                RANKING DE RETENÇÃO E BOARDING POR OPERADORA DE SAÚDE (CONVÊNIO — CATE 3333 + CATE 3493)
+              </h3>
+              <p className="text-xs text-slate-500 mb-4">
+                Separação clara entre o atraso de autorização da operadora (Etapa 1: Leito Virtual) e o tempo de liberação física do leito hospitalar nos andares/UTI (Etapa 2).
+              </p>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-900 text-white">
+                      <th className="p-2.5">Operadora / Convênio</th>
+                      <th className="p-2.5 text-center">Internações (N / %)</th>
+                      <th className="p-2.5 text-center">UI / UTI</th>
+                      <th className="p-2.5 text-center">Centro Cirúrgico (CC=S)</th>
+                      <th className="p-2.5 text-center">Etapa 1: Aprovação Plano / Virtual</th>
+                      <th className="p-2.5 text-center">Etapa 2: Virtual → Leito Físico</th>
+                      <th className="p-2.5 text-center">Boarding Total (Aguardo → Unidade)</th>
+                      <th className="p-2.5 text-center">Perm. Hospitalar (Dias)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {vsm.boardingByConvenio.map((c) => (
+                      <tr key={c.convenio} className="border-b border-slate-200 hover:bg-slate-50">
+                        <td className="p-2.5 font-extrabold text-slate-900">{c.convenio}</td>
+                        <td className="p-2.5 text-center font-bold">
+                          {c.admittedCount} ({c.pctOfAdmissions}%)
+                        </td>
+                        <td className="p-2.5 text-center">
+                          {c.uiCount} UI / {c.utiCount} UTI
+                        </td>
+                        <td className="p-2.5 text-center">{c.ccCount}</td>
+                        <td className="p-2.5 text-center">{fmtStatBadge(c.t1VirtualApprovalStats)}</td>
+                        <td className="p-2.5 text-center">{fmtStatBadge(c.t2PhysicalUploadStats)}</td>
+                        <td className="p-2.5 text-center font-bold text-rose-800">
+                          {fmtStatBadge(c.totalBoardingStats)} [P90: {c.totalBoardingStats.p90}m]
+                        </td>
+                        <td className="p-2.5 text-center">
+                          {c.hospitalStayDaysStats.count > 0
+                            ? `${c.hospitalStayDaysStats.mean}d (Med ${c.hospitalStayDaysStats.median}d)`
+                            : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ====================================================================
+            ABA 4: MATRIZ DUPLA DE CONDUTAS MÉDICAS (1º ATEND vs. ÚLTIMO ATEND)
+           ==================================================================== */}
+        {activeTab === 'doctors_conduct' && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setDoctorViewMode('conduct_matrix')}
+                  className={`px-3.5 py-2 rounded-lg text-xs font-bold ${
+                    doctorViewMode === 'conduct_matrix' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'
+                  }`}
+                >
+                  🎯 1. Matriz de Condutas: 1º Atendimento (Gatekeeper) vs. Último Atendimento (Closer)
+                </button>
+                <button
+                  onClick={() => setDoctorViewMode('shift_productivity')}
+                  className={`px-3.5 py-2 rounded-lg text-xs font-bold ${
+                    doctorViewMode === 'shift_productivity' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'
+                  }`}
+                >
+                  📊 2. Produtividade por Plantão (Média ±DP | Mediana [Mín–Máx])
+                </button>
+              </div>
+
+              <input
+                type="text"
+                placeholder="🔍 Filtrar médico por nome..."
+                value={doctorSearch}
+                onChange={(e) => setDoctorSearch(e.target.value)}
+                className="px-3.5 py-2 rounded-lg border border-slate-300 text-xs font-semibold w-64"
+              />
+            </div>
+
+            {doctorViewMode === 'conduct_matrix' ? (
+              <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+                <h3 className="text-base font-extrabold text-slate-900 mb-1">
+                  MATRIZ DE CONDUTAS MÉDICAS: MÉDICO ANAMNESE (PORTA) vs. MÉDICO DO ÚLTIMO ATENDIMENTO (REAVALIAÇÃO / FECHAMENTO)
+                </h3>
+                <p className="text-xs text-slate-500 mb-4">
+                  Identifica o perfil de cada profissional para alocação na escala: quem resolve rápido na porta (% Alta 1º Atendimento), quem direciona para Fast Reav (% Só Medicação), quem solicita mais exames (Lab/TC/RX) e quem absorve o passivo de reavaliação (Handoff).
+                </p>
+
+                <div className="overflow-x-auto max-h-[620px]">
+                  <table className="w-full text-center border-collapse text-xs">
+                    <thead className="sticky top-0 bg-slate-900 text-white z-10">
+                      <tr>
+                        <th className="p-2.5 text-left">Profissional Médico</th>
+                        <th className="p-2">1º Atend (D / N)</th>
+                        <th className="p-2 bg-emerald-900">% Alta Direta 1ºAt</th>
+                        <th className="p-2 bg-amber-800">% Fast Reav (Só Med)</th>
+                        <th className="p-2">% Med Total</th>
+                        <th className="p-2">% Lab</th>
+                        <th className="p-2">% RX</th>
+                        <th className="p-2">% TC</th>
+                        <th className="p-2">% Intern.</th>
+                        <th className="p-2">LOS Mediano</th>
+                        <th className="p-2 bg-sky-900">Últ. Atend (Fech.)</th>
+                        <th className="p-2 bg-purple-900">Fech. Herdado (Handoff)</th>
+                        <th className="p-2">Saldo Reaval.</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {metrics.byDayOfWeek.map((day) => {
-                        const d =
-                          selectedShift === 'ALL'
-                            ? day.full24h
-                            : selectedShift === 'DIURNO'
-                            ? day.diurno
-                            : day.noturno;
-                        return (
-                          <tr
-                            key={day.dayIndex}
-                            onClick={() => setSelectedDayIndex(day.dayIndex)}
-                            className={`border-b border-slate-100 hover:bg-blue-50/50 transition cursor-pointer ${
-                              selectedDayIndex === day.dayIndex ? 'bg-blue-50 font-semibold' : ''
+                      {filteredDoctorConduct.map((d) => (
+                        <tr key={d.name} className="border-b border-slate-200 hover:bg-slate-50">
+                          <td className="p-2 text-left font-extrabold text-slate-900">{d.name}</td>
+                          <td className="p-2 font-bold">
+                            {d.firstAttendCount}{' '}
+                            <span className="text-[10px] text-slate-500 font-normal">
+                              ({d.firstDayCount}D/{d.firstNightCount}N)
+                            </span>
+                          </td>
+                          <td className="p-2 font-bold text-emerald-700 bg-emerald-50/50">
+                            {d.directDischargePct}% ({d.directDischargeCount})
+                          </td>
+                          <td className="p-2 font-bold text-amber-800 bg-amber-50/50">
+                            {d.fastReavMedOnlyPct}% ({d.fastReavMedOnlyCount})
+                          </td>
+                          <td className="p-2">{d.medOrderedPct}%</td>
+                          <td className="p-2">{d.labOrderedPct}%</td>
+                          <td className="p-2">{d.rxOrderedPct}%</td>
+                          <td className="p-2 font-semibold">{d.tcOrderedPct}%</td>
+                          <td className="p-2 font-semibold text-rose-700">{d.convertedToAdmissionPct}%</td>
+                          <td className="p-2 font-bold">{d.firstAttendMedianLosMin}m</td>
+                          <td className="p-2 font-bold text-sky-900 bg-sky-50/50">{d.lastAttendCount}</td>
+                          <td className="p-2 font-bold text-purple-900 bg-purple-50/50">
+                            {d.closedHandoffPatientsCount} ({d.handoffAbsorptionPct}%)
+                          </td>
+                          <td
+                            className={`p-2 font-extrabold ${
+                              d.netReavalBalance >= 0 ? 'text-emerald-700' : 'text-amber-700'
                             }`}
                           >
-                            <td className="p-3 font-bold text-slate-900">{day.dayName}</td>
-                            <td className="p-3 text-center font-extrabold text-blue-700">
-                              {d.dailyVolume.avg.toFixed(1)}{' '}
-                              <span className="text-slate-500 font-semibold">
-                                (±{d.dailyVolume.stdDev.toFixed(1)})
-                              </span>
-                            </td>
-                            <td className="p-3 text-center font-semibold text-slate-700">
-                              {d.dailyVolume.median.toFixed(0)}{' '}
-                              <span className="text-slate-500">
-                                ({d.dailyVolume.min}–{d.dailyVolume.max})
-                              </span>
-                            </td>
-                            <td className="p-3 text-center text-slate-500">
-                              {d.totalVolume} ({d.distinctDays}d)
-                            </td>
-                            <td className="p-3 text-center">
-                              {d.doorToDoctor.avg.toFixed(1)} / {d.doorToDoctor.median.toFixed(0)} /{' '}
-                              <span
-                                className={
-                                  d.doorToDoctor.p90 <= 20
-                                    ? 'text-emerald-700 font-bold'
-                                    : 'text-rose-600 font-bold'
-                                }
-                              >
-                                {d.doorToDoctor.p90.toFixed(1)}m
-                              </span>
-                            </td>
-                            <td className="p-3 text-center">
-                              <span
-                                className={`px-2 py-0.5 rounded-full font-bold ${
-                                  d.doorToDoctor.slaRate20m >= 85
-                                    ? 'bg-emerald-100 text-emerald-800'
-                                    : d.doorToDoctor.slaRate20m >= 70
-                                    ? 'bg-amber-100 text-amber-800'
-                                    : 'bg-rose-100 text-rose-800'
-                                }`}
-                              >
-                                {d.doorToDoctor.slaRate20m.toFixed(1)}%
-                              </span>
-                            </td>
-                            <td className="p-3 text-center">
-                              {d.medicalAttendance.avg.toFixed(1)} /{' '}
-                              {d.medicalAttendance.p90.toFixed(1)}m
-                            </td>
-                            <td className="p-3 text-center">
-                              {d.lengthOfStay.avg.toFixed(0)} / {d.lengthOfStay.median.toFixed(0)} /{' '}
-                              {d.lengthOfStay.p90.toFixed(0)}m
-                            </td>
-                            <td className="p-3 text-center">
-                              {d.outcomes.admissionRate.toFixed(1)}%
-                            </td>
-                          </tr>
-                        );
-                      })}
+                            {d.netReavalBalance > 0 ? `+${d.netReavalBalance}` : d.netReavalBalance}
+                          </td>
+                        </tr>
+                      ))}
                     </tbody>
                   </table>
                 </div>
               </div>
-            )}
-
-            {/* ========================================================= */}
-            {/* SUB-ABA 2: PRODUTIVIDADE MÉDICA HORÁRIA */}
-            {/* ========================================================= */}
-            {activeSubTab === 'PRODUCTIVITY' && (
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-                  <div>
-                    <h3 className="text-base font-bold text-slate-900">
-                      Matriz de Produtividade Médica Horária (Coluna: Médico Anamnese)
-                    </h3>
-                    <p className="text-xs text-slate-500">
-                      Granularidade: [Data, Faixa Horária de 1h, Médico Anamnese]
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-3 text-xs bg-slate-100 px-3.5 py-2 rounded-xl">
-                    <span>
-                      <strong>Médicos Ativos/h (Média):</strong>{' '}
-                      {currentPeriod.hourlyProductivity.avgActiveDoctorsPerHour.toFixed(2)}
-                    </span>
-                    <span>•</span>
-                    <span>
-                      <strong>Atend/Médico/h:</strong> Média{' '}
-                      {currentPeriod.hourlyProductivity.patientsPerDoctorHour.avg.toFixed(2)} |
-                      Mediana{' '}
-                      {currentPeriod.hourlyProductivity.patientsPerDoctorHour.median.toFixed(1)} |
-                      DP ±
-                      {currentPeriod.hourlyProductivity.patientsPerDoctorHour.stdDev.toFixed(2)}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="overflow-x-auto max-h-[520px]">
-                  <table className="w-full text-left border-collapse text-xs">
+            ) : (
+              <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+                <h3 className="text-base font-extrabold text-slate-900 mb-4">
+                  PRODUTIVIDADE NOMINAL POR PLANTÃO (MÉDIA ±DP | MEDIANA [MÍN–MÁX] POR TURNO TRABALHADO)
+                </h3>
+                <div className="overflow-x-auto max-h-[620px]">
+                  <table className="w-full text-center border-collapse text-xs">
                     <thead className="sticky top-0 bg-slate-900 text-white">
                       <tr>
-                        <th className="p-3 rounded-tl-xl">#</th>
-                        <th className="p-3">Médico (Anamnese)</th>
-                        <th className="p-3 text-center">Total no Mês</th>
-                        <th className="p-3 text-center">Diurno (07h-18h59)</th>
-                        <th className="p-3 text-center">Noturno (19h-06h59)</th>
-                        <th className="p-3 text-center">Horas Ativas Reg.</th>
-                        <th className="p-3 text-center">Média Atend / Hora Ativa</th>
-                        <th className="p-3 text-center">Mediana / Hora</th>
-                        <th className="p-3 text-center rounded-tr-xl">Desvio-Padrão / Hora</th>
+                        <th className="p-2.5 text-left">Médico (Anamnese)</th>
+                        <th className="p-2">Total Atend.</th>
+                        <th className="p-2">Diurno / Noturno</th>
+                        <th className="p-2">Turnos</th>
+                        <th className="p-2">Média/Turno (±DP)</th>
+                        <th className="p-2">Mediana [Mín–Máx]</th>
+                        <th className="p-2">Consulta Média</th>
+                        <th className="p-2">LOS Médio / Med</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {metrics.doctorProductivity.map((doc, idx) => (
-                        <tr
-                          key={doc.doctorName}
-                          className="border-b border-slate-100 hover:bg-slate-50"
-                        >
-                          <td className="p-3 font-bold text-slate-400">{idx + 1}</td>
-                          <td className="p-3 font-bold text-slate-800">{doc.doctorName}</td>
-                          <td className="p-3 text-center font-extrabold text-blue-700">
-                            {doc.total}
+                      {filteredDoctorProd.map((doc) => (
+                        <tr key={doc.name} className="border-b border-slate-200 hover:bg-slate-50">
+                          <td className="p-2 text-left font-bold text-slate-900">{doc.name}</td>
+                          <td className="p-2 font-extrabold">{doc.totalAttendances}</td>
+                          <td className="p-2">
+                            {doc.dayAttendances}D / {doc.nightAttendances}N
                           </td>
-                          <td className="p-3 text-center">{doc.diurno}</td>
-                          <td className="p-3 text-center">{doc.noturno}</td>
-                          <td className="p-3 text-center">{doc.activeHoursCount}h</td>
-                          <td className="p-3 text-center font-bold">
-                            {doc.avgPerActiveHour.toFixed(2)} pac/h
+                          <td className="p-2">{doc.shiftsWorked}</td>
+                          <td className="p-2 font-bold">
+                            {doc.meanPerShift} (±{doc.stdDevPerShift})
                           </td>
-                          <td className="p-3 text-center">
-                            {doc.medianPerActiveHour.toFixed(1)}
+                          <td className="p-2">
+                            {doc.medianPerShift} [{doc.minPerShift}–{doc.maxPerShift}]
                           </td>
-                          <td className="p-3 text-center">
-                            ±{doc.stdDevPerActiveHour.toFixed(2)}
+                          <td className="p-2">{doc.meanConsultTime}m</td>
+                          <td className="p-2">
+                            {doc.meanLos}m / Med {doc.medianLos}m
                           </td>
                         </tr>
                       ))}
@@ -1454,203 +1494,540 @@ Elabore um Parecer Gerencial Executivo estruturado para a Coordenação Médica 
                 </div>
               </div>
             )}
+          </div>
+        )}
 
-            {/* ========================================================= */}
-            {/* SUB-ABA 3: TOP CIDs E CLUSTERS SINDRÔMICOS */}
-            {/* ========================================================= */}
-            {activeSubTab === 'CIDS' && (
-              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm lg:col-span-5">
-                  <h3 className="text-base font-bold text-slate-900 mb-1">
-                    Agrupamento por Afinidade Sindrómica
-                  </h3>
-                  <p className="text-xs text-slate-500 mb-4">
-                    Clusters clínicos para rastreio de sazonalidade epidemiológica
-                  </p>
-                  <div className="space-y-3">
-                    {metrics.syndromeClusters.map((s) => (
-                      <div key={s.syndrome} className="space-y-1">
-                        <div className="flex items-center justify-between text-xs">
-                          <span className="font-bold text-slate-800">{s.syndrome}</span>
-                          <span className="font-semibold text-slate-600">
-                            {s.count} casos ({s.pct.toFixed(1)}%)
-                          </span>
-                        </div>
-                        <div className="w-full h-2.5 bg-slate-100 rounded-full overflow-hidden">
-                          <div
-                            style={{ width: `${Math.min(100, s.pct * 2.2)}%` }}
-                            className="h-full bg-blue-600 rounded-full"
-                          ></div>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
+        {/* ====================================================================
+            ABA 5: GOVERNANÇA CLÍNICA (CHAA 3704), MATRIZ CID x THROUGHPUT E RETORNO <48H
+           ==================================================================== */}
+        {activeTab === 'clinical_governance' && (
+          <div className="space-y-6">
+            {/* Cards de Governança Diagnóstica e Retorno Precoce */}
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              <div className="bg-white rounded-xl p-4 border-l-4 border-teal-600 shadow-sm">
+                <div className="text-xs font-bold text-slate-500 uppercase">Concordância Exata CID (CHAA 3704)</div>
+                <div className="text-2xl font-extrabold text-teal-800 mt-1">
+                  {vsm.diagnosticGovernance.exactMatchPct}% ({vsm.diagnosticGovernance.exactMatchCount})
                 </div>
-
-                <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm lg:col-span-7">
-                  <h3 className="text-base font-bold text-slate-900 mb-1">
-                    Top Diagnósticos Principais (CID)
-                  </h3>
-                  <p className="text-xs text-slate-500 mb-4">
-                    Ranking dos diagnósticos mais prevalentes na porta de emergência
-                  </p>
-                  <div className="overflow-x-auto max-h-96">
-                    <table className="w-full text-left border-collapse text-xs">
-                      <thead className="sticky top-0 bg-slate-900 text-white">
-                        <tr>
-                          <th className="p-2.5 rounded-tl-lg">#</th>
-                          <th className="p-2.5">Diagnóstico (CID)</th>
-                          <th className="p-2.5">Cluster Sindrómico</th>
-                          <th className="p-2.5 text-center">Casos</th>
-                          <th className="p-2.5 text-center rounded-tr-lg">%</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {metrics.topCIDs.map((c, i) => (
-                          <tr key={c.name} className="border-b border-slate-100 hover:bg-slate-50">
-                            <td className="p-2.5 font-bold text-slate-400">{i + 1}</td>
-                            <td className="p-2.5 font-semibold text-slate-800">{c.name}</td>
-                            <td className="p-2.5 text-slate-500">{c.syndrome}</td>
-                            <td className="p-2.5 text-center font-bold text-blue-700">
-                              {c.count}
-                            </td>
-                            <td className="p-2.5 text-center">{c.pct.toFixed(1)}%</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
+                <div className="text-xs text-slate-600 mt-1">
+                  CID Porta = CID Internação | LOS Médio: {vsm.diagnosticGovernance.meanLosExactMatch}m
                 </div>
               </div>
-            )}
 
-            {/* ========================================================= */}
-            {/* SUB-ABA 4: AVALIAÇÃO COMPARATIVA MENSAL (MoM) */}
-            {/* ========================================================= */}
-            {activeSubTab === 'COMPARISON' && (
-              <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-5">
-                <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 border-b border-slate-200 pb-4">
-                  <div>
-                    <h3 className="text-base font-bold text-slate-900">
-                      Avaliação Determinística de Variações Mensais (Month-over-Month)
-                    </h3>
-                    <p className="text-xs text-slate-500">
-                      Compare o mês atual ({metrics.monthLabel}) com um mês anterior carregado ou salvo no histórico anónimo
-                    </p>
-                  </div>
+              <div className="bg-white rounded-xl p-4 border-l-4 border-amber-500 shadow-sm">
+                <div className="text-xs font-bold text-slate-500 uppercase">Reclassificação CID Pós-Exames</div>
+                <div className="text-2xl font-extrabold text-amber-700 mt-1">
+                  {vsm.diagnosticGovernance.reclassifiedPct}% ({vsm.diagnosticGovernance.reclassifiedCount})
+                </div>
+                <div className="text-xs text-slate-600 mt-1">
+                  Refinamento: {vsm.diagnosticGovernance.sameChapterRefinementPct}% | Mudança Cap.:{' '}
+                  {vsm.diagnosticGovernance.crossChapterDiscordancePct}%
+                </div>
+              </div>
 
-                  <div className="flex flex-wrap items-center gap-3">
-                    {Object.keys(savedSnapshots).length > 0 && (
-                      <select
-                        onChange={(e) => {
-                          const snap = savedSnapshots[e.target.value];
-                          if (snap) setPrevMetrics(snap);
-                        }}
-                        defaultValue=""
-                        className="bg-slate-100 border border-slate-300 text-xs font-bold px-3 py-2 rounded-xl"
-                      >
-                        <option value="" disabled>
-                          🕒 Escolher do Histórico Anónimo...
-                        </option>
-                        {Object.keys(savedSnapshots).map((k) => (
-                          <option key={k} value={k}>
-                            {k} ({savedSnapshots[k].overall.full24h.totalVolume} pac)
-                          </option>
-                        ))}
-                      </select>
-                    )}
+              <div className="bg-white rounded-xl p-4 border-l-4 border-rose-600 shadow-sm">
+                <div className="text-xs font-bold text-slate-500 uppercase">Retorno Precoce ≤ 48 Horas</div>
+                <div className="text-2xl font-extrabold text-rose-700 mt-1">
+                  {vsm.returnVisits.return48hCount} ({vsm.returnVisits.return48hPct}%)
+                </div>
+                <div className="text-xs text-slate-600 mt-1">
+                  Internam no retorno ≤48h: <strong>{vsm.returnVisits.return48hAdmittedCount}</strong> (
+                  <strong>{vsm.returnVisits.return48hAdmissionRate}%</strong> vs {activeData.conversionRate}% geral)
+                </div>
+              </div>
 
-                    <input
-                      type="text"
-                      value={prevMonthLabel}
-                      onChange={(e) => setPrevMonthLabel(e.target.value)}
-                      className="bg-slate-100 border border-slate-300 text-xs font-bold px-3 py-2 rounded-xl w-32"
-                      placeholder="Ex: Setembro/2026"
-                    />
-                    <input
-                      ref={prevFileInputRef}
-                      type="file"
-                      accept=".xlsx,.xls"
-                      className="hidden"
-                      onChange={(e) => {
-                        const f = e.target.files?.[0];
-                        if (f) processSpreadsheetFile(f, prevMonthLabel, true);
-                      }}
-                    />
+              <div className="bg-white rounded-xl p-4 border-l-4 border-indigo-600 shadow-sm">
+                <div className="text-xs font-bold text-slate-500 uppercase">Retorno Precoce ≤ 72 Horas</div>
+                <div className="text-2xl font-extrabold text-indigo-800 mt-1">
+                  {vsm.returnVisits.return72hCount} ({vsm.returnVisits.return72hPct}%)
+                </div>
+                <div className="text-xs text-slate-600 mt-1">
+                  Internam no retorno ≤72h: <strong>{vsm.returnVisits.return72hAdmittedCount}</strong> (
+                  {vsm.returnVisits.return72hAdmissionRate}%)
+                </div>
+              </div>
+            </div>
+
+            {/* MATRIZ CID x ROTA DE THROUGHPUT */}
+            <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+              <h3 className="text-base font-extrabold text-slate-900 mb-1">
+                MATRIZ CID × ROTA DE THROUGHPUT (AUDITORIA DE PERTINÊNCIA PROPEDÊUTICA POR DIAGNÓSTICO)
+              </h3>
+              <p className="text-xs text-slate-500 mb-4">
+                Responde exatamente onde cada diagnóstico consome recursos: qual % recebe Alta Direta no 1º Atendimento (Rota 1), qual % vai para Fast Reav / Só Medicação (Rota 2), qual % aciona Exames Lab/Imagem e tem alta (Rota 3) e qual % interna (Rota 4).
+              </p>
+
+              <div className="overflow-x-auto max-h-[520px]">
+                <table className="w-full text-center border-collapse text-xs">
+                  <thead className="sticky top-0 bg-slate-900 text-white">
+                    <tr>
+                      <th className="p-2.5 text-left">Diagnóstico (Top 25 CIDs)</th>
+                      <th className="p-2.5 text-left">Cluster Sindrômico</th>
+                      <th className="p-2">Volume (% PS)</th>
+                      <th className="p-2 bg-emerald-900">Rota 1: Alta Direta 1ºAt</th>
+                      <th className="p-2 bg-amber-800">Rota 2: Fast Reav (Só Med)</th>
+                      <th className="p-2 bg-orange-900">Rota 3: Giro Exames c/ Alta</th>
+                      <th className="p-2 bg-rose-900">Rota 4: Internação</th>
+                      <th className="p-2">LOS Médio / Mediano</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {vsm.cidThroughputMatrix.map((row) => (
+                      <tr key={row.cid} className="border-b border-slate-200 hover:bg-slate-50">
+                        <td className="p-2 text-left font-extrabold text-slate-900">{row.cid}</td>
+                        <td className="p-2 text-left text-slate-600">{row.clusterName}</td>
+                        <td className="p-2 font-bold">
+                          {row.totalCount} ({row.pctOfTotalPs}%)
+                        </td>
+                        <td className="p-2 font-bold text-emerald-800 bg-emerald-50/50">
+                          {row.directDischargePct}% ({row.directDischargeCount})
+                        </td>
+                        <td className="p-2 font-bold text-amber-900 bg-amber-50/50">
+                          {row.fastReavMedPct}% ({row.fastReavMedCount})
+                        </td>
+                        <td className="p-2 font-bold text-orange-900 bg-orange-50/50">
+                          {row.diagnosticGiroPct}% ({row.diagnosticGiroCount})
+                        </td>
+                        <td className="p-2 font-bold text-rose-800 bg-rose-50/50">
+                          {row.admittedPct}% ({row.admittedCount})
+                        </td>
+                        <td className="p-2 font-semibold">
+                          {row.meanLos}m / Med {row.medianLos}m
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* PARES DE RECLASSIFICAÇÃO DIAGNÓSTICA (CHAA 3704) */}
+            <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+              <h3 className="text-base font-extrabold text-slate-900 mb-1">
+                GOVERNANÇA CLÍNICA: PRINCIPAIS PARES DE MUDANÇA DE CID ENTRE A PORTA E A INTERNAÇÃO (CHAA 3704)
+              </h3>
+              <p className="text-xs text-slate-500 mb-4">
+                Auditoria de evolução diagnóstica pós-exames nos pacientes internados.
+              </p>
+
+              {vsm.diagnosticGovernance.topReclassifications.length === 0 ? (
+                <div className="p-6 rounded-xl bg-slate-50 border border-slate-200 text-center text-xs text-slate-600">
+                  Clique no botão <strong>&quot;+ Anexar CHAA 3704 (CIDs)&quot;</strong> na barra superior para cruzar os diagnósticos de entrada na porta com os diagnósticos de solicitação de internação.
+                </div>
+              ) : (
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-900 text-white">
+                        <th className="p-2.5">Hipótese Inicial na Porta (Diag Entrada)</th>
+                        <th className="p-2.5">Diagnóstico na Solicitação de Internação (Diag Saída)</th>
+                        <th className="p-2.5 text-center">Casos (N)</th>
+                        <th className="p-2.5 text-center">Classificação de Governança</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {vsm.diagnosticGovernance.topReclassifications.map((pair, idx) => (
+                        <tr key={idx} className="border-b border-slate-200 hover:bg-slate-50">
+                          <td className="p-2.5 font-semibold text-slate-800">{pair.cidIn}</td>
+                          <td className="p-2.5 font-extrabold text-slate-900">{pair.cidOut}</td>
+                          <td className="p-2.5 text-center font-bold">{pair.count}</td>
+                          <td className="p-2.5 text-center">
+                            <span
+                              className={`px-2.5 py-0.5 rounded-full text-[11px] font-bold ${
+                                pair.isSameChapter
+                                  ? 'bg-blue-50 text-blue-800 border border-blue-200'
+                                  : 'bg-amber-50 text-amber-800 border border-amber-300'
+                              }`}
+                            >
+                              {pair.classification}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ====================================================================
+            ABA 6: SÉRIE DIÁRIA, SEMANAS S1–S5 E COMPARATIVO MULTIMENSAL (MOM)
+           ==================================================================== */}
+        {activeTab === 'temporal_mom' && (
+          <div className="space-y-6">
+            {loadedMonths.length > 1 && (
+              <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+                <div className="flex items-center justify-between mb-4">
+                  <h3 className="text-base font-extrabold text-slate-900">
+                    COMPARATIVO MULTIMENSAL (MOM) — EVOLUÇÃO ENTRE COMPETÊNCIAS
+                  </h3>
+                  <div className="flex gap-2">
                     <button
-                      onClick={() => prevFileInputRef.current?.click()}
-                      className="bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold px-4 py-2 rounded-xl cursor-pointer"
+                      onClick={() => generateComparisonExcel(loadedMonths)}
+                      className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-bold"
                     >
-                      📂 Carregar Planilha do Mês Anterior
+                      📊 Exportar Comparativo Excel
+                    </button>
+                    <button
+                      onClick={() => generateComparisonPdf(loadedMonths)}
+                      className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-bold"
+                    >
+                      📄 Exportar Comparativo PDF
                     </button>
                   </div>
                 </div>
-
-                {!prevMetrics ? (
-                  <div className="p-8 text-center text-slate-500 text-sm bg-slate-50 rounded-xl border border-dashed border-slate-300">
-                    Carregue uma segunda planilha (ex: mês anterior) ou selecione um snapshot salvo no botão acima para visualizar o diagnóstico evolutivo automático.
-                  </div>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-left border-collapse text-xs">
-                      <thead>
-                        <tr className="bg-slate-900 text-white">
-                          <th className="p-3 rounded-tl-xl">Indicador Assistencial</th>
-                          <th className="p-3 text-center">
-                            Anterior ({prevMetrics.monthLabel})
+                <div className="overflow-x-auto">
+                  <table className="w-full text-center border-collapse text-xs">
+                    <thead>
+                      <tr className="bg-slate-900 text-white">
+                        <th className="p-2.5 text-left">Indicador Estratégico</th>
+                        {loadedMonths.map((m) => (
+                          <th key={m.monthKey} className="p-2.5">
+                            {m.periodLabel}
                           </th>
-                          <th className="p-3 text-center">Atual ({metrics.monthLabel})</th>
-                          <th className="p-3 text-center">Variação Abs.</th>
-                          <th className="p-3 text-center">Variação % (MoM)</th>
-                          <th className="p-3 rounded-tr-xl">
-                            Diagnóstico Gerencial Determinístico
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {compareMonthlyMetrics(prevMetrics, metrics).map((row) => {
-                          const sign = row.deltaAbs > 0 ? '+' : '';
-                          return (
-                            <tr
-                              key={row.indicator}
-                              className="border-b border-slate-100 hover:bg-slate-50"
-                            >
-                              <td className="p-3 font-bold text-slate-800">{row.indicator}</td>
-                              <td className="p-3 text-center text-slate-600">
-                                {row.prevValue.toFixed(1)} {row.unit}
-                              </td>
-                              <td className="p-3 text-center font-bold text-slate-900">
-                                {row.currValue.toFixed(1)} {row.unit}
-                              </td>
-                              <td className="p-3 text-center font-semibold">
-                                {sign}
-                                {row.deltaAbs.toFixed(1)} {row.unit}
-                              </td>
-                              <td className="p-3 text-center">
-                                <span
-                                  className={`px-2 py-0.5 rounded-full font-bold ${
-                                    row.improved
-                                      ? 'bg-emerald-100 text-emerald-800'
-                                      : 'bg-rose-100 text-rose-800'
-                                  }`}
-                                >
-                                  {sign}
-                                  {row.deltaPct.toFixed(1)}%
-                                </span>
-                              </td>
-                              <td className="p-3 text-slate-600">{row.diagnosticNote}</td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      <tr className="border-b border-slate-200">
+                        <td className="p-2.5 text-left font-bold">Volume Total (N)</td>
+                        {loadedMonths.map((m) => (
+                          <td key={m.monthKey} className="p-2.5 font-extrabold">
+                            {m.totalAttendances}
+                          </td>
+                        ))}
+                      </tr>
+                      <tr className="border-b border-slate-200">
+                        <td className="p-2.5 text-left font-bold">Porta-Médico (Média | Mediana)</td>
+                        {loadedMonths.map((m) => (
+                          <td key={m.monthKey} className="p-2.5">
+                            {m.doorToDoctor.overall.mean}m | Med {m.doorToDoctor.overall.median}m
+                          </td>
+                        ))}
+                      </tr>
+                      <tr className="border-b border-slate-200">
+                        <td className="p-2.5 text-left font-bold">% Ramo A (Alta Direta 1º Atend)</td>
+                        {loadedMonths.map((m) => (
+                          <td key={m.monthKey} className="p-2.5 font-bold text-emerald-700">
+                            {m.vsm.monthlyOverall.directDischargePct}%
+                          </td>
+                        ))}
+                      </tr>
+                      <tr className="border-b border-slate-200">
+                        <td className="p-2.5 text-left font-bold">Fila Invisível Pós-Laudo (Média)</td>
+                        {loadedMonths.map((m) => (
+                          <td key={m.monthKey} className="p-2.5 font-bold text-amber-700">
+                            {m.vsm.monthlyOverall.postReportReavalWaitStats.mean}m
+                          </td>
+                        ))}
+                      </tr>
+                      <tr className="border-b border-slate-200">
+                        <td className="p-2.5 text-left font-bold">Boarding Total Real (Média | Mediana)</td>
+                        {loadedMonths.map((m) => (
+                          <td key={m.monthKey} className="p-2.5 font-bold text-rose-700">
+                            {m.vsm.monthlyOverall.totalBoardingStats.mean}m | Med{' '}
+                            {m.vsm.monthlyOverall.totalBoardingStats.median}m
+                          </td>
+                        ))}
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
               </div>
             )}
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+                <h3 className="text-sm font-extrabold text-slate-900 mb-3">
+                  CONSOLIDAÇÃO POR SEMANA DO MÊS (SEMANAS 1 A 5)
+                </h3>
+                <table className="w-full text-center border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-900 text-white">
+                      <th className="p-2 text-left">Semana</th>
+                      <th className="p-2">Total</th>
+                      <th className="p-2">Média/d (±DP)</th>
+                      <th className="p-2">Mediana</th>
+                      <th className="p-2">Porta-Méd</th>
+                      <th className="p-2">LOS Médio</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activeData.weekOfMonthStats.map((w) => (
+                      <tr key={w.weekLabel} className="border-b border-slate-200">
+                        <td className="p-2 text-left font-bold">{w.weekLabel}</td>
+                        <td className="p-2 font-extrabold">{w.total}</td>
+                        <td className="p-2">
+                          {w.meanPerDay} (±{w.stdDevPerDay})
+                        </td>
+                        <td className="p-2">{w.medianPerDay}</td>
+                        <td className="p-2">{w.meanDoorToDoc}m</td>
+                        <td className="p-2">{w.meanLos}m</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+                <h3 className="text-sm font-extrabold text-slate-900 mb-3">
+                  CONSOLIDAÇÃO POR DIA DA SEMANA (SEGUNDA A DOMINGO)
+                </h3>
+                <table className="w-full text-center border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-900 text-white">
+                      <th className="p-2 text-left">Dia</th>
+                      <th className="p-2">Total</th>
+                      <th className="p-2">Média/d (±DP)</th>
+                      <th className="p-2">Mediana [Mín–Máx]</th>
+                      <th className="p-2">Diurno / Noturno</th>
+                      <th className="p-2">LOS Médio</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activeData.weekdayStats.map((wd) => (
+                      <tr key={wd.dayName} className="border-b border-slate-200">
+                        <td className="p-2 text-left font-bold">{wd.dayName}</td>
+                        <td className="p-2 font-extrabold">{wd.total}</td>
+                        <td className="p-2">
+                          {wd.meanPerDay} (±{wd.stdDevPerDay})
+                        </td>
+                        <td className="p-2">
+                          {wd.medianPerDay} [{wd.minPerDay}–{wd.maxPerDay}]
+                        </td>
+                        <td className="p-2">
+                          {wd.dayShiftMean}D / {wd.nightShiftMean}N
+                        </td>
+                        <td className="p-2">{wd.meanLos}m</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
-        </>
-      )}
+        )}
+
+        {/* ====================================================================
+            ABA 7: NOTA TÉCNICA, METODOLOGIA ANALÍTICA E AUDITORIA DE DADOS
+           ==================================================================== */}
+        {activeTab === 'methodology_audit' && (
+          <div className="space-y-6">
+            {/* Banner de Certificação Executiva */}
+            <div className="bg-slate-900 text-white rounded-2xl p-6 shadow-sm border border-slate-800">
+              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+                <div>
+                  <span className="px-2.5 py-0.5 rounded bg-blue-600 text-[11px] font-bold uppercase tracking-wider">
+                    Anexo I • Memorial Metodológico &amp; Governança de Dados
+                  </span>
+                  <h2 className="text-lg font-extrabold mt-1.5">
+                    Rastreabilidade Matemática, Arquitetura de Fusão Determinística e Conformidade LGPD
+                  </h2>
+                  <p className="text-xs text-slate-300 mt-1">
+                    Este memorial também é exportado automaticamente na <strong>Aba 8 do Excel (.xlsx)</strong> e na{' '}
+                    <strong>Página 7 do Dossiê PDF Vetorial (.pdf)</strong> para blindar apresentações à Diretoria Executiva e Conselho.
+                  </p>
+                </div>
+                <div className="bg-slate-800 border border-slate-700 rounded-xl p-3.5 text-xs space-y-1 min-w-[290px]">
+                  <div className="font-bold text-blue-300">Status de Auditoria da Sessão Ativa:</div>
+                  <div>• Competência: <strong>{activeData.periodLabel}</strong> ({activeData.totalAttendances} pac. / {activeData.totalDays} dias)</div>
+                  <div>
+                    • CATE 3493 (Boarding):{' '}
+                    <strong>{vsm.hasCate3493Data ? `Ativo (${vsm.matched3493Count} cruzados)` : 'Não anexado'}</strong>
+                  </div>
+                  <div>
+                    • CHAA 3704 (CIDs):{' '}
+                    <strong>{vsm.hasChaa3704Data ? `Ativo (${vsm.matched3704Count} cruzados)` : 'Não anexado'}</strong>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Seção 1: Arquitetura de Fusão Determinística e LGPD */}
+            <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+              <h3 className="text-sm font-extrabold text-slate-900 uppercase mb-3">
+                1. Arquitetura de Fusão Determinística (1:1 por Nº de Atendimento) e Conformidade LGPD Stateless
+              </h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-900 text-white">
+                      <th className="p-2.5 w-56">Fonte Primária / Diretriz</th>
+                      <th className="p-2.5 w-56">Chave de Cruzamento (Join)</th>
+                      <th className="p-2.5 w-64">Filtro Populacional / Escopo</th>
+                      <th className="p-2.5">Variáveis Auditadas e Garantia de Integridade</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr className="border-b border-slate-200">
+                      <td className="p-2.5 font-extrabold text-slate-900">1.1. Relatório CATE 3333 (Master)</td>
+                      <td className="p-2.5 font-semibold text-blue-800">Chave Primária: [Atendimento]</td>
+                      <td className="p-2.5">Setor contendo &quot;PS ADULTO&quot; &amp; Clínica contendo &quot;MEDICA&quot;</td>
+                      <td className="p-2.5 text-slate-700">
+                        Timestamps de Entrada, Recepção, Consulta, Medicação, Lab, RX, TC, USG, Data Desfecho, Leito Virtual, Médico Anamnese, Médico Último Atend, CID, Convênio e DT Últ Passagem PS.
+                      </td>
+                    </tr>
+                    <tr className="border-b border-slate-200 bg-slate-50/60">
+                      <td className="p-2.5 font-extrabold text-slate-900">1.2. Relatório CATE 3493 (Boarding)</td>
+                      <td className="p-2.5 font-semibold text-rose-800">Left Join 1:1: [Nr atendimento]</td>
+                      <td className="p-2.5">Pacientes internados via Pronto-Socorro</td>
+                      <td className="p-2.5 text-slate-700">
+                        Extrai [Dt ent aguard], [Dt ent unid] (subida física real UI/UTI diferenciada de &quot;Leito de Espera&quot;), [Dif aguardando/Ent. Unid], [Cc] (Centro Cirúrgico S/N) e [Tempo permanencia] (dias).
+                      </td>
+                    </tr>
+                    <tr className="border-b border-slate-200">
+                      <td className="p-2.5 font-extrabold text-slate-900">1.3. Relatório CHAA 3704 (CIDs)</td>
+                      <td className="p-2.5 font-semibold text-teal-800">Left Join 1:1: [Atendimento]</td>
+                      <td className="p-2.5">Internados com duplo registo diagnóstico</td>
+                      <td className="p-2.5 text-slate-700">
+                        Compara [Diag entrada] (hipótese diagnóstica inicial da porta) com [Diag saida] (diagnóstico consolidado no ato da solicitação de internação pós-propedêutica).
+                      </td>
+                    </tr>
+                    <tr className="border-b border-slate-200 bg-emerald-50/40">
+                      <td className="p-2.5 font-extrabold text-emerald-950">1.4. Proteção LGPD Stateless</td>
+                      <td className="p-2.5 font-semibold text-emerald-800">Processamento Local em RAM</td>
+                      <td className="p-2.5">Descarte imediato de PII na leitura</td>
+                      <td className="p-2.5 text-slate-700">
+                        As colunas [Paciente], [Nm paciente], [Nome], [Email], [Endereço], [Numero], [bairro] e [Dt. Nascimento] nunca são lidas nem armazenadas em memória ou banco de dados.
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Seção 2: Dicionário de Fórmulas Matemáticas */}
+            <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+              <h3 className="text-sm font-extrabold text-slate-900 uppercase mb-3">
+                2. Dicionário de Fórmulas Matemáticas e Regras de Negócio (Como Cada Indicador é Calculado)
+              </h3>
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-900 text-white">
+                      <th className="p-2.5 w-52">Indicador / Nó do VSM</th>
+                      <th className="p-2.5 w-80">Fórmula Matemática / Regra Lógica Exata</th>
+                      <th className="p-2.5 w-56">Colunas Fontes (HIS / Tasy)</th>
+                      <th className="p-2.5">Interpretação Gerencial e Operacional</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[
+                      [
+                        'Turnos (Diurno vs. Noturno)',
+                        'Diurno: 07h00 <= Hora(Entrada) <= 18h59 | Noturno: 19h00 <= Hora(Entrada) <= 06h59',
+                        'Coluna [Entrada] (CATE 3333)',
+                        'Respeita exatamente a janela de plantão de 12 horas da emergência (07h–19h e 19h–07h).',
+                      ],
+                      [
+                        'Ciclo Recepção e Porta-Médico',
+                        'Fila Guichê = [Espera Recepção] | Cadastro = [Atend. Recepção] | Porta-Médico = [Esp. Totem x Médico]',
+                        'Colunas de Recepção e Porta (3333)',
+                        'Separa o tempo administrativo de abertura de ficha da espera médica real. SLA institucional avalia % <= 20 min.',
+                      ],
+                      [
+                        'Ramo A: Alta Direta 1º Atend.',
+                        'Internado != "S" AND Sem Evasão AND Sem Medicação AND Sem Lab AND Sem RX AND Sem TC AND Sem USG',
+                        '[Internado], [Espera Medicamento], [Exame Laboratório], [Espera RX/TC/USG]',
+                        'Resolução Single-Touch no consultório: paciente avaliado, orientado/receitado e liberado sem giro interno.',
+                      ],
+                      [
+                        'Sub-Ramo B1: Fast Reav (Só Med)',
+                        'HasMed == Verdadeiro AND HasLab == Falso AND HasRX == Falso AND HasTC == Falso AND HasUSG == Falso',
+                        '[Espera Medicamento], [Tempo ADM Medicamento] s/ exames',
+                        'Isola pacientes medicados que não dependem de laudos externos (candidatos diretos a reavaliação rápida para liberar poltronas e subir NPS).',
+                      ],
+                      [
+                        'Sub-Ramo B2: Giro Diagnóstico',
+                        '(HasLab OR HasRX OR HasTC OR HasUSG) == Verdadeiro (com ou sem medicação associada)',
+                        '[Exame Laboratório], [Dt Laudo Lab], [Espera RX/TC/USG], [Dt Laudo TC/Usg]',
+                        'Isola pacientes cuja permanência depende da coleta/execução e liberação de laudo de apoio diagnóstico.',
+                      ],
+                      [
+                        'Fila Invisível Pós-Laudo',
+                        'Delta_T = [Data Desfecho] - Máximo([Dt Laudo Lab], [Dt Laudo TC], [Dt Laudo Usg]) (0 <= Delta_T <= 720m)',
+                        '[Data Desfecho], [Dt Laudo Lab], [Dt Laudo TC], [Dt Laudo Usg]',
+                        'Tempo ocioso em que todos os exames já estão laudados no sistema aguardando apenas a reavaliação médica.',
+                      ],
+                      [
+                        'Pedágio de Handoff (Troca Méd.)',
+                        'Compara Upper(Trim([Medico Anamnese])) vs. Upper(Trim([Médico Último Atend])) no mesmo atendimento',
+                        '[Medico Anamnese], [Médico Último Atend], [Qt Minutos Entrada- Desfecho]',
+                        'Quantifica o acréscimo na mediana e na média de permanência quando há troca de médico entre a porta e o desfecho.',
+                      ],
+                      [
+                        'Boarding Real em 2 Etapas',
+                        'Etapa 1 (Plano/Virtual) = [Espera Internação] | Etapa 2 (Físico) = [Dt ent unid] - [Data Internação] | Total = [Dif aguardando/Ent. Unid]',
+                        'CATE 3333 + CATE 3493 ([Ds setor unid] != Leito de Espera)',
+                        'Separa o atraso burocrático da operadora (até o leito virtual) da espera por vaga física nos andares (UI) ou UTI.',
+                      ],
+                      [
+                        'Censo Simultâneo (Sonda :30)',
+                        'Para cada dia d e hora h (07h–06h), sonda em t = d + h + 30min verifica interseção [t_Entrada, t_Fim1aCons, t_Desfecho, t_SaidaUnid]',
+                        'Timestamps de Entrada, Consulta, Desfecho e Saída Física',
+                        'Reconstrói exatamente quantos pacientes estão presentes ao mesmo tempo no PS em cada uma das 4 frentes operacionais.',
+                      ],
+                      [
+                        'Eficiência Lean (PCE %)',
+                        'VA = Cadastro + 1ªConsulta + InfusãoMed + 12m(Reaval) | NVA = Filas + Laudos + Pós-Laudo | PCE = VA / (VA + NVA) * 100',
+                        'Médias auditadas das micro-etapas do processo',
+                        'Métrica padrão Lean Healthcare que demonstra a fração da jornada em cuidado ativo versus espera sistêmica.',
+                      ],
+                      [
+                        'Governança CID & Retorno <48h',
+                        'Compara código CID Entrada vs. Saída (3704) | Retorno: 0.5h < ([Entrada] - [DT Últ Passagem PS]) <= 48h e 72h',
+                        '[Diag entrada], [Diag saida] (3704) e [DT Últ Passagem PS] (3333)',
+                        'Audita o refinamento diagnóstico pós-exames na internação e a segurança da alta através da taxa de retorno precoce.',
+                      ],
+                    ].map(([ind, form, cols, interp], idx) => (
+                      <tr key={idx} className={`border-b border-slate-200 ${idx % 2 === 1 ? 'bg-slate-50/60' : ''}`}>
+                        <td className="p-2.5 font-extrabold text-slate-900">{ind}</td>
+                        <td className="p-2.5 font-mono text-[11px] text-blue-950">{form}</td>
+                        <td className="p-2.5 text-slate-600">{cols}</td>
+                        <td className="p-2.5 text-slate-700">{interp}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* Seção 3: Saneamento Estatístico e Tratamento de Outliers */}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
+                <div className="text-xs font-extrabold text-slate-900 uppercase">
+                  3.1. Expurgo de Tempos Negativos
+                </div>
+                <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
+                  Qualquer micro-etapa com duração calculada inferior a <strong>0 minutos</strong> (decorrente de lançamentos retroativos manuais no prontuário) é tratada como nula (<code>null</code>) exclusivamente naquela micro-etapa, mantendo o atendimento na contagem volumétrica global sem puxar a média da equipe artificialmente para baixo.
+                </p>
+              </div>
+
+              <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
+                <div className="text-xs font-extrabold text-slate-900 uppercase">
+                  3.2. Tetos Operacionais de Outliers (Capping)
+                </div>
+                <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
+                  Para evitar que fichas esquecidas abertas no sistema por vários dias distorçam o desvio-padrão e o censo simultâneo, aplicam-se tetos técnicos estritos: Recepção/Consulta ≤ <strong>240m</strong>, Porta-Médico/Coleta/RX ≤ <strong>600m</strong>, Laudos/TC/USG ≤ <strong>1.440m</strong>, LOS Geral ≤ <strong>2.880m</strong> e Boarding ≤ <strong>4.320m</strong> (48h no censo horário).
+                </p>
+              </div>
+
+              <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
+                <div className="text-xs font-extrabold text-slate-900 uppercase">
+                  3.3. Exposição Estatística Multivariada
+                </div>
+                <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
+                  Como tempos hospitalares apresentam distribuição assimétrica positiva (cauda longa), todos os indicadores são reportados simultaneamente com <strong>N válido</strong>, <strong>Média Aritmética</strong>, <strong>Desvio-Padrão Populacional (±DP)</strong>, <strong>Mediana (P50)</strong>, <strong>Percentil 90 (P90)</strong> e <strong>Amplitude [Mín–Máx]</strong>.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
     </div>
   );
 }
+
+export default EmergencyAnalyticsView;
