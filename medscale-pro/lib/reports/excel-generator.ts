@@ -13,7 +13,12 @@ function fmtStatFull(st: MetricStats, unit = 'min'): string {
   return `${st.mean.toFixed(1)}${unit} (±${st.stdDev.toFixed(1)}) | Med: ${st.median.toFixed(1)}${unit} [${st.min.toFixed(0)}–${st.max.toFixed(0)} | P90: ${st.p90.toFixed(1)}]`;
 }
 
-function autoFitColumns(rows: unknown[][], minW = 12, maxW = 54): XLSX.ColInfo[] {
+function fmtCensusStat(st: MetricStats): string {
+  if (!st || st.count === 0) return '0.0 (±0.0) | Med: 0.0 [0–0]';
+  return `${st.mean.toFixed(1)} (±${st.stdDev.toFixed(1)}) | Med: ${st.median.toFixed(1)} [${st.min.toFixed(0)}–${st.max.toFixed(0)} | P90: ${st.p90.toFixed(1)}]`;
+}
+
+function autoFitColumns(rows: unknown[][], minW = 12, maxW = 56): XLSX.ColInfo[] {
   if (!rows || rows.length === 0) return [];
   const colCount = Math.max(...rows.map((r) => (Array.isArray(r) ? r.length : 0)), 1);
   const widths: XLSX.ColInfo[] = [];
@@ -39,188 +44,167 @@ function appendSheetFromAoA(wb: XLSX.WorkBook, name: string, aoa: unknown[][]) {
 }
 
 // ============================================================================
-// GERADOR DA ABA DE NOTA TÉCNICA, METODOLOGIA ANALÍTICA E AUDITORIA DE DADOS
+// GERADOR DA ABA 9: NOTA TÉCNICA, METODOLOGIA ANALÍTICA E AUDITORIA DA BASE
 // ============================================================================
 
 function buildMethodologySheetAoA(data?: EmergencyAnalyticsData): unknown[][] {
+  const dq = data?.vsm.dataQualityAudit;
   const periodInfo = data
-    ? `Competência Auditada: ${data.periodLabel} | N = ${data.totalAttendances} atendimentos | CATE 3493: ${
+    ? `Competência Auditada: ${data.periodLabel} | Escopo Ativo: ${data.activeScopeLabel} (N = ${data.totalAttendances} de ${data.totalGlobalAttendances} globais) | CATE 3493: ${
         data.vsm.hasCate3493Data ? `Integrado (${data.vsm.matched3493Count} pac.)` : 'Não anexado'
       } | CHAA 3704: ${data.vsm.hasChaa3704Data ? `Integrado (${data.vsm.matched3704Count} pac.)` : 'Não anexado'}`
     : 'Auditoria Multimensal Consolidada (MoM)';
 
-  return [
-    ['ANEXO TÉCNICO — MEMORIAL METODOLÓGICO, RASTREABILIDADE DE FÓRMULAS E GOVERNANÇA DE DADOS (AUDITORIA EXECUTIVA)'],
+  const rows: unknown[][] = [
+    ['ANEXO TÉCNICO — MEMORIAL METODOLÓGICO, RASTREABILIDADE DE FÓRMULAS E AUDITORIA DE QUALIDADE DA BASE (HIS / TASY)'],
     [periodInfo],
     [],
-    ['1. ARQUITETURA DE FUSÃO DETERMINÍSTICA E FONTES PRIMÁRIAS DO SISTEMA HOSPITALAR (HIS / TASY)'],
-    ['Componente / Relatório', 'Chave Primária de Cruzamento', 'Escopo e Filtro Populacional', 'Variáveis Extraídas e Papel Analítico'],
+  ];
+
+  if (dq && data) {
+    rows.push(
+      ['1. AUDITORIA DE COMPLETUDE E SANEAMENTO DA BASE BRUTA NESTA COMPETÊNCIA (TRANSPARÊNCIA TOTAL DE DADOS)'],
+      ['Métrica de Qualidade e Integridade do Prontuário (Tasy)', 'Resultado Auditado na Base', 'Explicação Técnica e Regra de Tratamento Aplicada'],
+      ['Total de Atendimentos Avaliados no Escopo Ativo', `${dq.totalRecordsEvaluated} fichas`, `População total filtrada a partir de ${data.totalGlobalAttendances} atendimentos brutos carregados.`],
+      ['Completude do Tempo Porta-Médico ([Esp. Totem x Médico])', `${dq.doorToDocCompletenessPct}% preenchido`, 'Quando ausente, utiliza fallback determinístico para [Tempo Esp. Atend. Ficha x Médico] ou [Esp. Recepção x Médico].'],
+      ['Completude do Tempo de 1ª Consulta ([Atend. Médico])', `${dq.consultTimeCompletenessPct}% preenchido`, 'Mede o tempo efetivo de anamnese e exame físico inicial no consultório.'],
+      ['Preenchimento Nativo de [Espera Laudo Laboratório] vs. Reconstrução via Timestamp', `${dq.labReportNativeColPct}% nativo | ${dq.labReportReconstructedFromTsCount} reconstruídos`, 'Para eliminar o falso zero quando a coluna [Espera Laudo Laboratório] vem vazia no CATE 3333, o motor subtrai [Dt Laudo Lab] - [Fim Estimado da Coleta].'],
+      ['Completude do Ciclo de Tomografia ([Espera TC] / [Dt Laudo TC])', `${dq.tcReportCompletenessPct}% preenchido`, 'Calcula o ciclo completo Prescrição -> Execução ([Esp TC Presc x Exec]) e Execução -> Laudo ([Espera TC] - [Esp TC Presc x Exec]).'],
+      ['Completude do Tempo de Permanência Geral ([Qt Minutos Entrada- Desfecho])', `${dq.losCompletenessPct}% preenchido`, 'Intervalo total entre a abertura da ficha e a alta ou decisão de internação no PS.'],
+      ['Registros com Micro-Tempos Negativos Expurgados', `${dq.negativeTimesPurgedCount} ocorrências`, 'Lançamentos retroativos manuais (< 0 min) têm apenas a micro-etapa inválida anulada (null), sem excluir o paciente da contagem de volume.'],
+      ['Registros com Outliers Extremos Limitados por Teto de Segurança (Capping)', `${dq.cappedOutliersCount} ocorrências`, 'Impede que fichas esquecidas abertas no sistema por dias distorçam a média e o desvio-padrão da equipe.'],
+      ['Taxa de Cruzamento Determinístico CATE 3493 (Boarding Físico)', `${dq.cate3493MatchRateOnAdmissionsPct}% dos internados`, 'Cruzamento exato 1:1 via [Atendimento] === [Nr atendimento].'],
+      ['Taxa de Cruzamento Determinístico CHAA 3704 (Governança CID)', `${dq.chaa3704MatchRateOnAdmissionsPct}% dos internados`, 'Cruzamento exato 1:1 via [Atendimento] === [Atendimento].'],
+      []
+    );
+  }
+
+  rows.push(
+    ['2. ARQUITETURA DE FUSÃO DETERMINÍSTICA MULTI-SETOR / MULTI-CLÍNICA E CONFORMIDADE LGPD STATELESS'],
+    ['Componente / Relatório', 'Chave Primária de Cruzamento', 'Escopo de Setores e Clínicas', 'Variáveis Extraídas e Papel Analítico'],
     [
-      '1.1. Relatório CATE 3333 (Base Mestra Obrigatória)',
-      'Coluna [Atendimento] (ID numérico único da passagem)',
-      'Filtro estrito: [Setor] contendo "PS ADULTO" e [Clínica] contendo "MEDICA" (normalizado sem acentos)',
+      '2.1. Relatório CATE 3333 (Global ou Segmentado)',
+      'Coluna [Atendimento] (Deduplicação automática 1:1 ao somar arquivos segmentados)',
+      'Suporta todos os Setores (PS Adulto, PSGO, PS Infantil) e Clínicas (Médica, Ortopédica, Cirúrgica, Obstetrícia, Pediátrica, Cardiologia, etc.)',
       'Timestamps de Entrada, Recepção, Consulta, Medicação, Coleta/Laudo Lab, RX, TC, USG, Data Desfecho, Data Internação (Leito Virtual), Médico Anamnese, Médico Último Atend, CID, Convênio e DT Últ Passagem PS.',
     ],
     [
-      '1.2. Relatório CATE 3493 (Boarding Físico & Desfecho Hospitalar)',
+      '2.2. Relatório CATE 3493 (Boarding Físico & Perfil Cirúrgico)',
       'Left Join determinístico 1:1: [CATE 3333.Atendimento] === [CATE 3493.Nr atendimento]',
-      'Pacientes oriundos da emergência com solicitação e alocação de leito hospitalar',
-      'Extrai [Dt ent aguard] (início do aguardo), [Dt ent unid] (subida física ao leito), [Ds setor unid] (UI vs UTI real, diferenciando de "Leito de Espera"), [Dif aguardando/Ent. Unid], [Cc] (Centro Cirúrgico S/N) e [Tempo permanencia] (dias).',
+      'Pacientes oriundos das emergências com solicitação e alocação de leito hospitalar',
+      'Extrai [Dt ent aguard], [Dt ent unid] (subida física real UI/UTI, diferenciando de "Leito de Espera"), [Dif aguardando/Ent. Unid], [Cc] (Centro Cirúrgico S/N) e [Tempo permanencia] (dias).',
     ],
     [
-      '1.3. Relatório CHAA 3704 (Governança Clínica & Assertividade CID)',
+      '2.3. Relatório CHAA 3704 (Governança Clínica & Assertividade CID)',
       'Left Join determinístico 1:1: [CATE 3333.Atendimento] === [CHAA 3704.Atendimento]',
       'Pacientes internados via Pronto-Socorro com registro duplo de CID',
       'Extrai [Diag entrada] (hipótese diagnóstica na porta do PS) e [Diag saida] (diagnóstico consolidado no ato da solicitação de internação pós-propedêutica).',
     ],
-    [],
-    ['2. CONFORMIDADE COM A LGPD (LEI Nº 13.709/2018) E PROCESSAMENTO STATELESS (ZERO PERSISTÊNCIA DE PII)'],
-    ['Diretriz de Segurança', 'Regra Técnica Implementada no Código', 'Garantia de Auditoria Institucional'],
     [
-      '2.1. Descarte Imediato em RAM (Drop PII)',
-      'As colunas [Paciente], [Nm paciente], [Nome], [Email], [Endereço], [Numero], [bairro], [Dt. Nascimento] e [Dt nasc] nunca são lidas nem armazenadas nos objetos TypeScript.',
-      'Impossibilidade técnica de vazamento de dados sensíveis de pacientes nos relatórios Excel, PDF ou PNG exportados.',
-    ],
-    [
-      '2.2. Execução 100% Client-Side (Navegador Local)',
-      'A leitura do ArrayBuffer (.xls/.xlsx) e os cálculos matriciais ocorrem exclusivamente na memória RAM local da estação de trabalho do gestor.',
-      'Nenhum arquivo bruto do hospital trafega pela rede ou fica salvo em banco de dados externo.',
+      '2.4. Conformidade LGPD Stateless (Lei nº 13.709/2018)',
+      'Execução 100% Client-Side em Memória RAM',
+      'Descarte Imediato de PII na Leitura',
+      'As colunas [Paciente], [Nm paciente], [Nome], [Email], [Endereço], [Numero], [bairro], [Dt. Nascimento] e [Dt nasc] jamais são lidas ou armazenadas.',
     ],
     [],
-    ['3. DICIONÁRIO DE FÓRMULAS MATEMÁTICAS E REGRAS DE NEGÓCIO (COMO CADA INDICADOR É CALCULADO)'],
+    ['3. DICIONÁRIO DE FÓRMULAS MATEMÁTICAS E MÁQUINA DE ESTADOS (COMO CADA INDICADOR É CALCULADO)'],
     ['Indicador / Nó do VSM', 'Fórmula Matemática / Regra Lógica Exata', 'Colunas Fontes Utilizadas', 'Interpretação Gerencial e Operacional'],
     [
-      '3.1. Classificação de Turno (Diurno vs. Noturno)',
-      'Diurno: 07h00min00s <= Hora(Entrada) <= 18h59min59s | Noturno: 19h00min00s <= Hora(Entrada) <= 06h59min59s',
+      '3.1. Ciclo Operacional de Plantão (07h00 D -> 06h59 D+1)',
+      'Se Hora(Entrada) < 07h00, a Data Operacional pertence ao plantão iniciado às 07h00 do dia anterior (D-1). Diurno: 07h00–18h59 | Noturno: 19h00–06h59.',
       'Coluna [Entrada] do CATE 3333',
-      'Respeita exatamente a grade de plantão de 12 horas da emergência (07h–19h e 19h–07h).',
+      'Garante que a madrugada (00h–06h) de segunda-feira para terça-feira seja contabilizada corretamente no fechamento do plantão noturno de segunda-feira.',
     ],
     [
-      '3.2. Ciclo Pré-Médico e Tempo Porta-Médico (SLA <= 20m)',
-      'Fila Guichê = [Espera Recepção] | Cadastro = [Atend. Recepção] | Fila Pós-Recepção = [Esp. Recepção x Médico] | Porta-Médico Total = [Esp. Totem x Médico] (fallback para [Tempo Esp. Atend. Ficha x Médico])',
-      'Colunas de recepção e porta do CATE 3333',
-      'Separa atrasos administrativos de guichê do tempo real de espera pela chamada médica. SLA institucional avalia % de pacientes com Porta-Médico <= 20 min.',
-    ],
-    [
-      '3.3. Ramo A: Alta Direta no 1º Atendimento (Single-Touch)',
-      'Internado != "S" AND Evasão == Falso AND Sem Medicação AND Sem Lab AND Sem RX AND Sem TC AND Sem USG',
-      '[Internado], [MOTIVO_ALTA], [Espera Medicamento], [Tempo ADM Medicamento], [Exame Laboratório], [Espera RX], [Espera TC], [Espera USG]',
-      'Mede a resolutividade imediata de consultório (pacientes resolvidos em toque único sem consumir poltrona de medicação ou exames complementares).',
-    ],
-    [
-      '3.4. Ramo B: Giro Propedêutico e Terapêutico Total',
-      'Pacientes com acionamento de pelo menos 1 recurso interno: (HasMed OR HasLab OR HasRX OR HasTC OR HasUSG) == Verdadeiro',
-      'Mesmas colunas de recursos diagnósticos e terapêuticos do CATE 3333',
-      'Representa o volume real que permanece circulando internamente no PS após os minutos iniciais da anamnese.',
-    ],
-    [
-      '3.5. Sub-Ramo B1: Fast Reav (Giro Terapêutico — Só Medicação)',
-      'HasMed == Verdadeiro AND HasLab == Falso AND HasRX == Falso AND HasTC == Falso AND HasUSG == Falso',
-      '[Espera Medicamento], [Tempo ADM Medicamento] vs. colunas de Lab/Imagem',
-      'Isola os pacientes que receberam apenas medicação/analgesia sem depender de laudos externos. São os candidatos diretos à frente de Reavaliação Rápida (Fast Reav) para giro de poltronas e ganho de NPS.',
-    ],
-    [
-      '3.6. Sub-Ramo B2: Giro Diagnóstico (Com Exames Lab/Imagem)',
-      '(HasLab OR HasRX OR HasTC OR HasUSG) == Verdadeiro (independentemente de terem recebido medicação concomitante)',
-      '[Exame Laboratório], [Dt Laudo Lab], [Espera RX], [Espera TC], [Dt Laudo TC], [Espera USG], [Dt Laudo Usg]',
-      'Isola os pacientes cujo tempo de permanência depende do ciclo de coleta/execução e liberação de laudo de apoio diagnóstico.',
-    ],
-    [
-      '3.7. Fila Invisível Pós-Laudo p/ Reavaliação Médica',
-      'Delta_T = [Data Desfecho] - Máximo([Dt Laudo Lab], [Dt Laudo TC], [Dt Laudo Usg]), contabilizado quando 0 <= Delta_T <= 720 min',
-      '[Data Desfecho], [Dt Laudo Lab], [Dt Laudo TC], [Dt Laudo Usg]',
-      'Mede o tempo exato em que o paciente já está com todos os exames laudados no sistema, aguardando apenas a reavaliação médica para definição de alta ou internação.',
-    ],
-    [
-      '3.8. Pedágio de Handoff (Troca de Médico Anamnese vs. Fechamento)',
-      'Mesmo Médico: Upper(Trim([Medico Anamnese])) === Upper(Trim([Médico Último Atend])) | Handoff (Troca): Quando os profissionais diferem.',
-      '[Medico Anamnese], [Médico Último Atend], [Qt Minutos Entrada- Desfecho]',
-      'Quantifica o impacto na mediana e na média de permanência quando o paciente não é finalizado pelo mesmo plantonista que o atendeu na porta.',
-    ],
-    [
-      '3.9. Decomposição do Boarding Hospitalar em 2 Etapas',
-      'Etapa 1 (Aprovação Plano / Leito Virtual): [Espera Internação] ou ([Data Internação] - [Dt ent aguard]) | Etapa 2 (Subida Física UI/UTI): ([Dt ent unid] - [Data Internação]) quando [Ds setor unid] != "Leito de Espera" | Boarding Total Real: [Dif aguardando/Ent. Unid] do CATE 3493.',
-      '[Data Internação], [Espera Internação] (3333) + [Dt ent aguard], [Dt ent unid], [Ds setor unid], [Dif aguardando/Ent. Unid] (3493)',
-      'Separa a retenção burocrática/operadora (até a criação do leito virtual) da retenção física hospitalar (até a saída física da maca do PS para o andar ou UTI).',
-    ],
-    [
-      '3.10. Algoritmo de Censo Simultâneo Horário e Heatmap 24x7 (Sonda Temporal)',
-      'Para cada dia d do mês e cada hora h (07h às 06h), posiciona-se uma sonda exata em t_probe = d + h + 30min. Cada paciente presente no PS nesse minuto é classificado em: (1) Porta se t_Entrada <= t_probe < t_Fim1aConsulta; (2A) Fast Reav se t_Fim1aConsulta <= t_probe < t_Desfecho e Só Medicação; (2B) Giro Exames se t_Fim1aConsulta <= t_probe < t_Desfecho e Com Exames; (3) Boarding se Internado e t_Desfecho <= t_probe < t_SaidaUnidadeFisica.',
+      '3.2. Máquina de Estados do Censo Simultâneo (Sonda :30)',
+      'Sonda em t_probe = DiaOperacional + Hora + 30min. Estado 1 (Porta): t_Entrada <= t_probe < t_FimPorta (onde t_FimPorta = t_Desfecho p/ Alta Direta, ou t_Entrada + PortaMédico + 1aConsulta p/ quem faz propedêutica). Estado 2A (Fast Reav): t_FimPorta <= t_probe < t_Desfecho & Só Medicação. Estado 2B (Giro Exames): t_FimPorta <= t_probe < t_Desfecho & Com Exames. Estado 3 (Boarding): Internado & t_Desfecho <= t_probe < t_SaidaUnidadeFisica.',
       '[Entrada], [Esp. Totem x Médico], [Atend. Médico], [Data Desfecho], [Data Internação], [Dt ent unid]',
-      'Reconstrói a lotação real simultânea dentro do PS a cada hora, provando matematicamente o efeito acumulativo ("bola de neve") sobre a equipe médica e de enfermagem.',
+      'Elimina qualquer vazamento de pacientes de Alta Direta para o Giro de Exames e calcula Média, ±DP, Mediana, P90 e Amplitude [Mín–Máx] para cada uma das 4 frentes.',
     ],
     [
-      '3.11. Eficiência do Ciclo de Processo Lean (PCE — Process Cycle Efficiency)',
-      'VA (Valor Agregado) = Média(Cadastro Recepção) + Média(1ª Consulta) + Média(Infusão Med) + 12m (Reavaliação/Decisão) | NVA (Não Valor Agregado) = Fila Totem + Fila Porta-Médico + Fila Coleta Lab + Espera Laudo Lab + Fila Pós-Laudo | PCE (%) = [VA / (VA + NVA)] * 100',
-      'Médias auditadas das micro-etapas do CATE 3333',
-      'Métrica padrão Lean Healthcare que demonstra qual fração da jornada do paciente corresponde a cuidado assistencial ativo versus espera sistêmica.',
+      '3.3. Reconstrução Real do Tempo de Espera de Laudo (Sem Falso Zero)',
+      'Se [Espera Laudo Laboratório] > 0, usa valor nativo; se nulo/zero e [Dt Laudo Lab] presente, calcula [Dt Laudo Lab] - ([Entrada] + [Porta-Médico] + [1ª Consulta] + [Espera Coleta]). Para TC: [Espera TC] - [Esp TC Presc x Exec].',
+      '[Espera Laudo Laboratório], [Dt Laudo Lab], [Espera TC], [Esp TC Presc x Exec], [Dt Laudo TC]',
+      'Garante que a etapa "7. Espera Laudo" na Linha do Tempo Lean VSM reflita fielmente o tempo de processamento diagnóstico.',
     ],
     [
-      '3.12. Governança Diagnóstica (CHAA 3704) e Retorno Precoce (<48h e <72h)',
-      'Concordância Exata: Código CID Entrada === Código CID Saída | Refinamento Fisiopatológico: Mesmo Capítulo CID (letra inicial igual ou evolução de código R/Z para etiológico) | Mudança de Capítulo: Letras iniciais distintas. Retorno Precoce: 0.5h < ([Entrada] - [DT Últ Passagem PS]) <= 48h (ou 72h).',
-      '[Diag entrada], [Diag saida] (CHAA 3704) e [Entrada], [DT Últ Passagem PS], [Internado] (CATE 3333)',
-      'Audita a evolução diagnóstica entre a porta e a internação e monitora a segurança da alta através da taxa de retorno precoce e conversão no retorno.',
-    ],
-    [],
-    ['4. SANEAMENTO ESTATÍSTICO, TRATAMENTO DE OUTLIERS E RIGOR MATEMÁTICO'],
-    ['Regra de Qualidade de Dados', 'Parâmetro / Limite Técnico Aplicado', 'Justificativa Estatística'],
-    [
-      '4.1. Expurgo de Tempos Negativos',
-      'Qualquer micro-etapa com valor < 0 min é convertida em nulo (NaN) apenas naquela micro-etapa, mantendo o atendimento na contagem volumétrica global.',
-      'Evita que lançamentos retroativos manuais no prontuário distorçam artificialmente a média para baixo.',
+      '3.4. Boarding Diferenciado: UI vs. UTI e Cirúrgico vs. Clínico',
+      'Etapa 1 (Plano/Virtual) = [Dt ent aguard -> Data Internação] ou [Espera Internação] | Etapa 2 (Subida Física) = [Data Internação -> Dt ent unid] (quando Ds setor unid != Leito de Espera) | Total = [Dif aguardando/Ent. Unid]. Perfil Cirúrgico = (Cc == "S") OR (Clínica in [Cirúrgica, Ortopédica]). Macas Bloqueadas 24h = Soma(Horas Boarding) / (Dias * 24).',
+      'CATE 3333 + CATE 3493 ([Tipo Leito Internação], [Ds setor unid], [Cc], [Clínica])',
+      'Quantifica separadamente o gargalo de Enfermaria (UI) vs. UTI e revela a retenção superior dos pacientes cirúrgicos frente aos clínicos.',
     ],
     [
-      '4.2. Tetos de Segurança Operacional (Capping)',
-      'Recepção/Consulta <= 240 min | Porta-Médico/Coleta/RX <= 600 min | Laudos/TC/USG <= 1.440 min | Permanência Geral <= 2.880 min | Boarding <= 4.320 min (e teto de 48h no censo simultâneo).',
-      'Impede que fichas esquecidas abertas no sistema por vários dias contaminem o desvio-padrão e a ocupação horária.',
-    ],
-    [
-      '4.3. Exposição Multivariada Completa',
-      'Todos os tempos são reportados simultaneamente com: N válido, Média Aritmética, Desvio-Padrão Populacional (±DP), Mediana (P50), Percentil 90 (P90) e Amplitude [Mín–Máx].',
-      'Como tempos hospitalares possuem distribuição assimétrica à direita (cauda longa), a exibição conjunta de Média (±DP) e Mediana (P90) garante transparência absoluta contra questionamentos.',
-    ],
-  ];
+      '3.5. Eficiência Lean (PCE) Global e Estratificada por Rota',
+      'PCE Global = VA / (VA + NVA) | PCE Ramo A = (Cadastro + 1ªConsulta) / LOS_RamoA | PCE Ramo B1 (Fast Reav) = (Cadastro + 1ªConsulta + InfusãoMed + Reaval) / LOS_RamoB1 | PCE Ramo B2 (Exames) = VA_Total / LOS_RamoB2.',
+      'Médias auditadas das micro-etapas por rota de throughput',
+      'Permite auditar a eficiência de fluxo separadamente para fichas de baixa, média e alta complexidade propedêutica.',
+    ]
+  );
+
+  return rows;
 }
 
 // ============================================================================
-// GERADOR PRINCIPAL DO DOSSIÊ EXECUTIVO EM EXCEL (.XLSX — 8 ABAS COMPLETAS)
+// GERADOR PRINCIPAL DO DOSSIÊ EXECUTIVO EM EXCEL (.XLSX — 9 ABAS COMPLETAS)
 // ============================================================================
 
 export function generateEmergencyExcel(data: EmergencyAnalyticsData): void {
   const wb = XLSX.utils.book_new();
   const vsm = data.vsm;
   const m = vsm.monthlyOverall;
+  const bbt = vsm.boardingByBedType;
 
   // --------------------------------------------------------------------------
-  // ABA 1: RESUMO EXECUTIVO & KPIS GERAIS (POR TURNO E DISPERSÃO COMPLETA)
+  // ABA 1: RESUMO EXECUTIVO, KPIS, FAIXAS DE PERMANÊNCIA (AGING) & SLAS POR TURNO
   // --------------------------------------------------------------------------
   const sheet1: unknown[][] = [
     ['MEDSCALE PRO — DOSSIÊ EXECUTIVO DE INTELIGÊNCIA OPERACIONAL, JORNADA DO PACIENTE & VSM (LEAN HEALTHCARE)'],
     [
       `Competência: ${data.periodLabel}`,
-      `Arquivo Base: ${data.fileName}`,
+      `Escopo Ativo: ${data.activeScopeLabel}`,
+      `População Ativa: N = ${data.totalAttendances} (de ${data.totalGlobalAttendances} globais)`,
       `Dias Analisados: ${data.totalDays}`,
-      `CATE 3493 (Boarding Físico): ${vsm.hasCate3493Data ? `Integrado (${vsm.matched3493Count} pac.)` : 'Não anexado (Apenas Leito Virtual 3333)'}`,
-      `CHAA 3704 (CID Entrada x Saída): ${vsm.hasChaa3704Data ? `Integrado (${vsm.matched3704Count} pac.)` : 'Não anexado'}`,
+      `CATE 3493: ${vsm.hasCate3493Data ? `Integrado (${vsm.matched3493Count} pac.)` : 'Não anexado'}`,
+      `CHAA 3704: ${vsm.hasChaa3704Data ? `Integrado (${vsm.matched3704Count} pac.)` : 'Não anexado'}`,
     ],
     [],
-    ['1. INDICADORES VOLUMÉTRICOS E DESFECHOS MACRO'],
-    ['Indicador Executivo', 'Valor Absoluto (N)', 'Participação (%)', 'Referência / Observação Operacional'],
-    ['Volume Total de Atendimentos (PS Adulto - Clínica Médica)', data.totalAttendances, '100,0%', `${data.dailyVolume.overall.mean}/dia (±${data.dailyVolume.overall.stdDev}) | Mediana: ${data.dailyVolume.overall.median}/dia`],
+    ['1. INDICADORES VOLUMÉTRICOS E DESFECHOS MACRO DO ESCOPO ATIVO'],
+    ['Indicador Executivo', 'Valor Absoluto (N)', 'Participação (%)', 'Referência / Dispersão Operacional'],
+    ['Volume Total no Escopo Selecionado', data.totalAttendances, `${((data.totalAttendances / Math.max(data.totalGlobalAttendances, 1)) * 100).toFixed(1)}% do Global`, `${data.dailyVolume.overall.mean}/dia (±${data.dailyVolume.overall.stdDev}) | Mediana: ${data.dailyVolume.overall.median}/dia [${data.dailyVolume.overall.min}–${data.dailyVolume.overall.max}]`],
     ['Atendimentos no Plantão Diurno (07h00 às 18h59)', data.dailySeries.reduce((a, b) => a + b.dayShift, 0), `${((data.dailySeries.reduce((a, b) => a + b.dayShift, 0) / Math.max(data.totalAttendances, 1)) * 100).toFixed(1)}%`, `Média Diurna: ${data.dailyVolume.dayShift.mean}/dia (±${data.dailyVolume.dayShift.stdDev}) | Mediana: ${data.dailyVolume.dayShift.median}`],
     ['Atendimentos no Plantão Noturno (19h00 às 06h59)', data.dailySeries.reduce((a, b) => a + b.nightShift, 0), `${((data.dailySeries.reduce((a, b) => a + b.nightShift, 0) / Math.max(data.totalAttendances, 1)) * 100).toFixed(1)}%`, `Média Noturna: ${data.dailyVolume.nightShift.mean}/dia (±${data.dailyVolume.nightShift.stdDev}) | Mediana: ${data.dailyVolume.nightShift.median}`],
-    ['Ramo A — Alta Direta no 1º Atendimento (Sem Exames/Medicação)', m.directDischargeCount, `${m.directDischargePct}%`, `Resolução Single-Touch | Permanência Média: ${m.directDischargeLosStats.mean}m (Med: ${m.directDischargeLosStats.median}m)`],
-    ['Ramo B — Giro Propedêutico / Terapêutico Interno (Exames e/ou Medicação)', m.propaedeuticLoopCount, `${m.propaedeuticLoopPct}%`, `Permanência Média: ${m.propaedeuticLoopLosStats.mean}m (Med: ${m.propaedeuticLoopLosStats.median}m)`],
-    ['   • Sub-ramo B1: Fast Reav / Giro Terapêutico (Apenas Medicação, sem Exames)', m.fastReavMedOnlyCount, `${m.fastReavMedOnlyPct}%`, `Candidatos a Fast Reav | Permanência Média: ${m.fastReavMedOnlyLosStats.mean}m (Med: ${m.fastReavMedOnlyLosStats.median}m)`],
-    ['   • Sub-ramo B2: Giro Diagnóstico (Laboratório e/ou Imagem RX/TC/USG)', m.diagnosticExamsLoopCount, `${m.diagnosticExamsLoopPct}%`, `Dependentes de Laudo Externo | Permanência Média: ${m.diagnosticExamsLoopLosStats.mean}m (Med: ${m.diagnosticExamsLoopLosStats.median}m)`],
-    ['Alta Pós-Propedêutica / Reavaliação Médica', m.postPropDischargeCount, `${m.postPropDischargePct}%`, `Permanência Média: ${m.postPropDischargeLosStats.mean}m (Med: ${m.postPropDischargeLosStats.median}m)`],
-    ['Internações Hospitalares Totais (Conversão da Porta)', data.totalAdmissions, `${data.conversionRate}%`, `UI (Enfermaria): ${data.uiAdmissions} (${m.admittedUiPct}%) | UTI: ${data.utiAdmissions} (${m.admittedUtiPct}%)`],
-    ['Evasões / Desistências Totais', data.evasionCount, `${data.evasionRate}%`, `Pré-Médico (Porta): ${m.preMedEvasionCount} (${m.preMedEvasionPct}%) | Pós-Consulta: ${m.postConsultEvasionCount} (${m.postConsultEvasionPct}%)`],
-    ['Atendimentos Dentro da Meta Porta-Médico (<= 20 min)', data.withinSlaDoorToDocCount, `${data.withinSlaDoorToDocRate}%`, 'Meta Institucional de Acolhimento Médico <= 20 min'],
-    ['Horas-Leito de Emergência Consumidas em Boarding de Internação', `${vsm.wastedBedHoursInBoarding} h`, `${(vsm.wastedBedHoursInBoarding / 24).toFixed(1)} leitos-dia`, 'Sobrecarga assistencial retida na emergência aguardando convênio/vaga física'],
-    ['Eficiência de Ciclo do Processo Lean (PCE = Valor Agregado / Tempo Total)', `${m.pceEfficiencyPct}%`, `${(100 - m.pceEfficiencyPct).toFixed(1)}% Espera (NVA)`, `Tempo Valor Agregado (VA): ${m.vaMinutesMean}m vs. Esperas/Desperdício (NVA): ${m.nvaMinutesMean}m`],
+    ['Ramo A — Alta Direta no 1º Atendimento (Sem Exames/Medicação)', m.directDischargeCount, `${m.directDischargePct}%`, `LOS: ${fmtStatFull(m.directDischargeLosStats)} | PCE Ramo A: ${m.pceRamoADirectPct}%`],
+    ['Ramo B — Giro Propedêutico / Terapêutico Interno Total', m.propaedeuticLoopCount, `${m.propaedeuticLoopPct}%`, `LOS: ${fmtStatFull(m.propaedeuticLoopLosStats)}`],
+    ['   • Sub-ramo B1: Fast Reav / Giro Terapêutico (Apenas Medicação)', m.fastReavMedOnlyCount, `${m.fastReavMedOnlyPct}%`, `LOS: ${fmtStatFull(m.fastReavMedOnlyLosStats)} | PCE Fast Reav: ${m.pceRamoB1FastReavPct}%`],
+    ['   • Sub-ramo B2: Giro Diagnóstico (Com Exames Lab/RX/TC/USG)', m.diagnosticExamsLoopCount, `${m.diagnosticExamsLoopPct}%`, `LOS: ${fmtStatFull(m.diagnosticExamsLoopLosStats)} | PCE Giro Exames: ${m.pceRamoB2DiagExamsPct}%`],
+    ['Alta Pós-Propedêutica / Reavaliação Médica', m.postPropDischargeCount, `${m.postPropDischargePct}%`, `LOS: ${fmtStatFull(m.postPropDischargeLosStats)}`],
+    ['Internações Hospitalares Totais (Conversão da Porta)', data.totalAdmissions, `${data.conversionRate}%`, `Enfermaria (UI): ${data.uiAdmissions} (${m.admittedUiPct}%) | UTI: ${data.utiAdmissions} (${m.admittedUtiPct}%)`],
+    ['   • Internações por Perfil: Cirúrgico vs. Clínico Não Cirúrgico', `Cirúrgico: ${data.surgicalAdmissions}`, `Clínico: ${data.clinicalAdmissions}`, `Boarding Cirúrgico Méd: ${m.surgicalBoardingStats.mean}m (Med ${m.surgicalBoardingStats.median}m) vs. Clínico Méd: ${m.clinicalBoardingStats.mean}m (Med ${m.clinicalBoardingStats.median}m)`],
+    ['Horas-Maca Consumidas em Boarding e Macas Físicas Bloqueadas 24h/dia', `${vsm.wastedBedHoursInBoarding} horas`, `${vsm.equivalentBlockedBeds24h} macas 24h/d`, `UI bloqueia ${bbt.ui.equivalentBlockedBeds24h} macas/d (${bbt.ui.wastedBedHours}h) | UTI bloqueia ${bbt.uti.equivalentBlockedBeds24h} macas/d (${bbt.uti.wastedBedHours}h)`],
+    ['Retenção de Passagem de Plantão (Laudos prontos antes das 07h ou 19h c/ Handoff)', vsm.shiftChangeBottleneck.totalShiftChangeRetainedCount, `${vsm.shiftChangeBottleneck.pctOfAllPostLaudoPatients}% dos pós-laudo`, `Manhã (04h30–06h59 -> pós 07h): ${vsm.shiftChangeBottleneck.morningWindowReadyBefore7hCount} pac. | Noite (16h30–18h59 -> pós 19h): ${vsm.shiftChangeBottleneck.eveningWindowReadyBefore19hCount} pac.`],
+    ['Eficiência Lean Global (PCE) e por Rota', `${m.pceEfficiencyPct}% Global`, `VA: ${m.vaMinutesMean}m / NVA: ${m.nvaMinutesMean}m`, `Ramo A: ${m.pceRamoADirectPct}% | Ramo B1 (Fast Reav): ${m.pceRamoB1FastReavPct}% | Ramo B2 (Exames): ${m.pceRamoB2DiagExamsPct}%`],
     [],
-    ['2. TEMPOS OPERACIONAIS E SLAS POR TURNO (MÉDIA, DESVIO-PADRÃO, MEDIANA, P90 E AMPLITUDE MÍN–MÁX)'],
+    ['2. FAIXAS DE ENVELHECIMENTO DE PERMANÊNCIA NO PS (LOS AGING BUCKETS — ONDE NASCEM AS LONGAS PERMANÊNCIAS)'],
+    ['Faixa de Permanência (LOS)', 'Perfil Operacional Predominante', 'Pacientes (N)', '% do Total PS', 'Alta Direta 1ºAt (N)', 'Fast Reav Só Med (N)', 'Giro Exames c/ Alta (N)', 'Internações (N)', 'LOS Médio na Faixa (min)'],
+  ];
+
+  for (const b of vsm.losAgingBuckets) {
+    sheet1.push([
+      b.bucketLabel,
+      b.rangeDescription,
+      b.count,
+      `${b.percentage}%`,
+      b.directDischargeCount,
+      b.fastReavCount,
+      b.diagnosticExamsCount,
+      b.admittedCount,
+      b.meanLos,
+    ]);
+  }
+
+  sheet1.push(
+    [],
+    ['3. DECOMPOSIÇÃO COMPLETA DE TEMPOS OPERACIONAIS E SLAS POR TURNO (MÉDIA, DP, MEDIANA, P90 E AMPLITUDE MÍN–MÁX)'],
     [
       'Etapa / Indicador de Tempo (minutos)',
       'N (24h)',
@@ -233,8 +217,8 @@ export function generateEmergencyExcel(data: EmergencyAnalyticsData): void {
       'Diurno: Mediana (P90)',
       'Noturno: Média (±DP)',
       'Noturno: Mediana (P90)',
-    ],
-  ];
+    ]
+  );
 
   const timeMetricsRows: [string, MetricStats, MetricStats, MetricStats][] = [
     ['1. Fila Totem -> Guichê Recepção', m.waitTotemToRecepStats, vsm.byShift.day.waitTotemToRecepStats, vsm.byShift.night.waitTotemToRecepStats],
@@ -245,21 +229,29 @@ export function generateEmergencyExcel(data: EmergencyAnalyticsData): void {
     ['6. Espera para Início da Medicação (Prescrição -> Checagem)', data.medicationWait.overall, data.medicationWait.dayShift, data.medicationWait.nightShift],
     ['7. Tempo de Administração / Infusão de Medicação', data.medicationAdmTime.overall, data.medicationAdmTime.dayShift, data.medicationAdmTime.nightShift],
     ['8. Espera Laboratório (Prescrição -> Coleta/Execução)', data.labWait.overall, data.labWait.dayShift, data.labWait.nightShift],
-    ['9. Tempo de Laudo Laboratorial (Coleta -> Liberação Laudo)', data.labReportWait.overall, data.labReportWait.dayShift, data.labReportWait.nightShift],
-    ['10. Espera Raio-X (Prescrição -> Execução RX)', data.rxWait.overall, data.rxWait.dayShift, data.rxWait.nightShift],
-    ['11. Ciclo Total de Tomografia - TC (Prescrição -> Laudo)', data.tcWait.overall, data.tcWait.dayShift, data.tcWait.nightShift],
-    ['12. Ciclo de Ultrassonografia - USG', m.waitUsgTotalStats, vsm.byShift.day.waitUsgTotalStats, vsm.byShift.night.waitUsgTotalStats],
-    ['13. Fila Invisível Pós-Laudo p/ Reavaliação (Desfecho - Último Laudo)', m.postReportReavalWaitStats, vsm.byShift.day.postReportReavalWaitStats, vsm.byShift.night.postReportReavalWaitStats],
-    ['14. Permanência Total — Alta Direta no 1º Atendimento (Ramo A)', m.directDischargeLosStats, vsm.byShift.day.directDischargeLosStats, vsm.byShift.night.directDischargeLosStats],
-    ['15. Permanência Total — Fast Reav (Apenas Medicação, sem Exames)', m.fastReavMedOnlyLosStats, vsm.byShift.day.fastReavMedOnlyLosStats, vsm.byShift.night.fastReavMedOnlyLosStats],
-    ['16. Permanência Total — Giro Diagnóstico (Com Exames Lab/Imagem)', m.diagnosticExamsLoopLosStats, vsm.byShift.day.diagnosticExamsLoopLosStats, vsm.byShift.night.diagnosticExamsLoopLosStats],
-    ['17. Permanência Geral no PS (Todos os Pacientes: Porta -> Desfecho)', data.losOverall.overall, data.losOverall.dayShift, data.losOverall.nightShift],
-    ['18. Permanência Geral — Mesmo Médico (Sem Handoff)', m.sameDoctorLosStats, vsm.byShift.day.sameDoctorLosStats, vsm.byShift.night.sameDoctorLosStats],
-    ['19. Permanência Geral — Com Troca de Médico (Pedágio de Handoff)', m.handoffDoctorLosStats, vsm.byShift.day.handoffDoctorLosStats, vsm.byShift.night.handoffDoctorLosStats],
-    ['20. Boarding Etapa 1 (Desfecho Médico -> Leito Virtual / Aprovação Plano)', m.t1DecisionToVirtualBedStats, vsm.byShift.day.t1DecisionToVirtualBedStats, vsm.byShift.night.t1DecisionToVirtualBedStats],
-    ['21. Boarding Etapa 1B (Abertura Aguardo 3493 -> Leito Virtual)', m.t1AguardoToVirtualBedStats, vsm.byShift.day.t1AguardoToVirtualBedStats, vsm.byShift.night.t1AguardoToVirtualBedStats],
-    ['22. Boarding Etapa 2 (Leito Virtual -> Subida Física Leito Definitivo UI/UTI)', m.t2VirtualToPhysicalBedStats, vsm.byShift.day.t2VirtualToPhysicalBedStats, vsm.byShift.night.t2VirtualToPhysicalBedStats],
-    ['23. Boarding Total Real na Emergência (Solicitação/Aguardo -> Leito Físico Unid)', m.totalBoardingStats, vsm.byShift.day.totalBoardingStats, vsm.byShift.night.totalBoardingStats],
+    ['9. Tempo de Laudo Laboratorial (Coleta -> Liberação Laudo)', m.waitLabReportStats, vsm.byShift.day.waitLabReportStats, vsm.byShift.night.waitLabReportStats],
+    ['10. Espera Consolidada de Laudo Diagnóstico (Lab / TC / USG)', m.combinedExamReportWaitStats, vsm.byShift.day.combinedExamReportWaitStats, vsm.byShift.night.combinedExamReportWaitStats],
+    ['11. Espera Raio-X (Prescrição -> Execução RX)', data.rxWait.overall, data.rxWait.dayShift, data.rxWait.nightShift],
+    ['12. Ciclo Total de Tomografia - TC (Prescrição -> Laudo)', data.tcWait.overall, data.tcWait.dayShift, data.tcWait.nightShift],
+    ['13. Ciclo de Ultrassonografia - USG', m.waitUsgTotalStats, vsm.byShift.day.waitUsgTotalStats, vsm.byShift.night.waitUsgTotalStats],
+    ['14. Fila Invisível Pós-Laudo p/ Reavaliação (Desfecho - Último Laudo)', m.postReportReavalWaitStats, vsm.byShift.day.postReportReavalWaitStats, vsm.byShift.night.postReportReavalWaitStats],
+    ['15. Permanência Total — Ramo A: Alta Direta no 1º Atendimento', m.directDischargeLosStats, vsm.byShift.day.directDischargeLosStats, vsm.byShift.night.directDischargeLosStats],
+    ['16. Permanência Total — Ramo B1: Fast Reav (Apenas Medicação)', m.fastReavMedOnlyLosStats, vsm.byShift.day.fastReavMedOnlyLosStats, vsm.byShift.night.fastReavMedOnlyLosStats],
+    ['17. Permanência Total — Ramo B2: Giro Diagnóstico (Com Exames)', m.diagnosticExamsLoopLosStats, vsm.byShift.day.diagnosticExamsLoopLosStats, vsm.byShift.night.diagnosticExamsLoopLosStats],
+    ['18. Permanência Geral no PS (Todos os Pacientes: Porta -> Desfecho)', data.losOverall.overall, data.losOverall.dayShift, data.losOverall.nightShift],
+    ['19. Permanência Geral — Mesmo Médico (Sem Handoff)', m.sameDoctorLosStats, vsm.byShift.day.sameDoctorLosStats, vsm.byShift.night.sameDoctorLosStats],
+    ['20. Permanência Geral — Com Troca de Médico (Pedágio de Handoff)', m.handoffDoctorLosStats, vsm.byShift.day.handoffDoctorLosStats, vsm.byShift.night.handoffDoctorLosStats],
+    ['21. Boarding GERAL — Etapa 1 (Aprovação Plano / Leito Virtual)', m.t1AguardoToVirtualBedStats, vsm.byShift.day.t1AguardoToVirtualBedStats, vsm.byShift.night.t1AguardoToVirtualBedStats],
+    ['22. Boarding GERAL — Etapa 2 (Leito Virtual -> Subida Física UI/UTI)', m.t2VirtualToPhysicalBedStats, vsm.byShift.day.t2VirtualToPhysicalBedStats, vsm.byShift.night.t2VirtualToPhysicalBedStats],
+    ['23. Boarding GERAL — Total Real (Aguardo -> Entrada Física Unidade)', m.totalBoardingStats, vsm.byShift.day.totalBoardingStats, vsm.byShift.night.totalBoardingStats],
+    ['24. Boarding ENFERMARIA (UI) — Etapa 1 (Aprovação Plano / Virtual)', m.uiT1AguardoToVirtualStats, vsm.byShift.day.uiT1AguardoToVirtualStats, vsm.byShift.night.uiT1AguardoToVirtualStats],
+    ['25. Boarding ENFERMARIA (UI) — Etapa 2 (Virtual -> Subida Física Andar)', m.uiT2VirtualToPhysicalStats, vsm.byShift.day.uiT2VirtualToPhysicalStats, vsm.byShift.night.uiT2VirtualToPhysicalStats],
+    ['26. Boarding ENFERMARIA (UI) — Total Real (Aguardo -> Leito UI)', m.uiBoardingStats, vsm.byShift.day.uiBoardingStats, vsm.byShift.night.uiBoardingStats],
+    ['27. Boarding UTI — Etapa 1 (Aprovação Plano / Virtual)', m.utiT1AguardoToVirtualStats, vsm.byShift.day.utiT1AguardoToVirtualStats, vsm.byShift.night.utiT1AguardoToVirtualStats],
+    ['28. Boarding UTI — Etapa 2 (Virtual -> Subida Física UTI)', m.utiT2VirtualToPhysicalStats, vsm.byShift.day.utiT2VirtualToPhysicalStats, vsm.byShift.night.utiT2VirtualToPhysicalStats],
+    ['29. Boarding UTI — Total Real (Aguardo -> Leito UTI)', m.utiBoardingStats, vsm.byShift.day.utiBoardingStats, vsm.byShift.night.utiBoardingStats],
+    ['30. Boarding PERFIL CIRÚRGICO (CC=S / Cirurgia / Ortopedia) — Total Real', m.surgicalBoardingStats, vsm.byShift.day.surgicalBoardingStats, vsm.byShift.night.surgicalBoardingStats],
+    ['31. Boarding PERFIL CLÍNICO NÃO CIRÚRGICO — Total Real', m.clinicalBoardingStats, vsm.byShift.day.clinicalBoardingStats, vsm.byShift.night.clinicalBoardingStats],
   ];
 
   for (const [label, stAll, stDay, stNight] of timeMetricsRows) {
@@ -270,18 +262,67 @@ export function generateEmergencyExcel(data: EmergencyAnalyticsData): void {
       stAll.stdDev,
       stAll.median,
       stAll.p90,
-      `${stAll.min} – ${stAll.max}`,
-      `${stDay.mean} (±${stDay.stdDev})`,
-      `${stDay.median} (P90: ${stDay.p90})`,
-      `${stNight.mean} (±${stNight.stdDev})`,
-      `${stNight.median} (P90: ${stNight.p90})`,
+      stAll.count > 0 ? `${stAll.min} – ${stAll.max}` : '—',
+      stDay.count > 0 ? `${stDay.mean} (±${stDay.stdDev})` : '—',
+      stDay.count > 0 ? `${stDay.median} (P90: ${stDay.p90})` : '—',
+      stNight.count > 0 ? `${stNight.mean} (±${stNight.stdDev})` : '—',
+      stNight.count > 0 ? `${stNight.median} (P90: ${stNight.p90})` : '—',
     ]);
   }
 
-  appendSheetFromAoA(wb, '1_Resumo_Geral_KPIs', sheet1);
+  appendSheetFromAoA(wb, '1_Resumo_KPIs_e_Aging', sheet1);
 
   // --------------------------------------------------------------------------
-  // ABA 2: MAPA DA JORNADA DO PACIENTE & VSM MULTIDIMENSIONAL (MÊS, TURNO, SEMANA, DIA)
+  // ABA 2: MATRIZ COMPARATIVA MULTI-SETOR E MULTI-CLÍNICA (VISÃO HOSPITALAR GLOBAL)
+  // --------------------------------------------------------------------------
+  const sheet2: unknown[][] = [
+    ['MATRIZ COMPARATIVA MULTI-SETOR E MULTI-CLÍNICA (TODOS OS ATENDIMENTOS CARREGADOS NA BASE GLOBAL)'],
+    [
+      `Total Global Carregado em Memória: ${data.totalGlobalAttendances} atendimentos`,
+      `Escopo Filtrado Ativo no Relatório: ${data.activeScopeLabel} (${data.totalAttendances} atendimentos)`,
+    ],
+    [],
+    [
+      'Setor de Emergência',
+      'Clínica / Especialidade',
+      'Volume Total (N)',
+      '% do Global',
+      'Diurno (N)',
+      'Noturno (N)',
+      '% Alta Direta 1ºAt',
+      '% Fast Reav (Só Med)',
+      '% Giro Exames',
+      'Internações Totais (N / %)',
+      'UI / UTI / Cirúrgicas',
+      'Porta-Médico (Média ±DP | Mediana)',
+      'Permanência LOS (Média ±DP | Mediana)',
+      'Boarding Total (Média ±DP | Mediana)',
+    ],
+  ];
+
+  for (const sc of data.sectorClinicBreakdown) {
+    sheet2.push([
+      sc.setor,
+      sc.clinica,
+      sc.totalCount,
+      `${sc.pctOfGlobal}%`,
+      sc.dayCount,
+      sc.nightCount,
+      `${sc.directDischargePct}%`,
+      `${sc.fastReavMedPct}%`,
+      `${sc.diagnosticExamsPct}%`,
+      `${sc.admissionsCount} (${sc.conversionRate}%)`,
+      `${sc.uiCount} UI / ${sc.utiCount} UTI (${sc.surgicalAdmissionsCount} Cir.)`,
+      fmtStatFull(sc.doorToDocStats),
+      fmtStatFull(sc.losStats),
+      fmtStatFull(sc.boardingTotalStats),
+    ]);
+  }
+
+  appendSheetFromAoA(wb, '2_Setores_e_Clinicas', sheet2);
+
+  // --------------------------------------------------------------------------
+  // ABA 3: MAPA DA JORNADA DO PACIENTE & VSM MULTIDIMENSIONAL
   // --------------------------------------------------------------------------
   const slices: VsmSliceMetrics[] = [
     vsm.monthlyOverall,
@@ -291,9 +332,9 @@ export function generateEmergencyExcel(data: EmergencyAnalyticsData): void {
     ...WEEKDAY_NAMES.map((d) => vsm.byDayOfWeek[d]).filter(Boolean),
   ];
 
-  const sheet2: unknown[][] = [
+  const sheet3: unknown[][] = [
     ['MAPA COMPLETO DA JORNADA DO PACIENTE & VALUE STREAM MAPPING (VSM) — COMPARATIVO MULTIDIMENSIONAL'],
-    ['Métrica / Nó da Jornada Lean (Input -> Throughput -> Output -> Boarding)', ...slices.map((s) => s.label)],
+    ['Métrica / Nó da Jornada Lean (Input -> Throughput -> Output -> Boarding UI/UTI/Cirúrgico)', ...slices.map((s) => s.label)],
     ['1. INPUT & ACOLHIMENTO NA PORTA'],
     ['Total de Pacientes na Porta (N Absoluto)', ...slices.map((s) => s.totalInput)],
     ['Evasão Pré-Médica (N e %)', ...slices.map((s) => `${s.preMedEvasionCount} (${s.preMedEvasionPct}%)`)],
@@ -304,7 +345,7 @@ export function generateEmergencyExcel(data: EmergencyAnalyticsData): void {
     ['Tempo Porta-Médico Total (Média ±DP | Mediana | P90)', ...slices.map((s) => fmtStatFull(s.doorToDocTotalStats))],
     ['Tempo da 1ª Consulta Médica (Média ±DP | Mediana)', ...slices.map((s) => fmtStatFull(s.firstConsultDurationStats))],
     [],
-    ['2. BIFURCAÇÃO DE THROUGHPUT (RAMO A vs. RAMO B E SUB-ROTAS)'],
+    ['2. BIFURCAÇÃO DE THROUGHPUT (RAMO A vs. RAMO B1 FAST REAV vs. RAMO B2 GIRO EXAMES)'],
     ['Ramo A: Alta Direta no 1º Atendimento — Sem Exames/Medicação (N e %)', ...slices.map((s) => `${s.directDischargeCount} (${s.directDischargePct}%)`)],
     ['   • Tempo Total de Permanência no Ramo A (Alta Direta)', ...slices.map((s) => fmtStatFull(s.directDischargeLosStats))],
     ['Ramo B: Giro Propedêutico e Terapêutico Total (N e %)', ...slices.map((s) => `${s.propaedeuticLoopCount} (${s.propaedeuticLoopPct}%)`)],
@@ -320,7 +361,7 @@ export function generateEmergencyExcel(data: EmergencyAnalyticsData): void {
     ['   • Tempo de Administração/Infusão da Medicação (min)', ...slices.map((s) => fmtStatFull(s.medInfusionDurationStats))],
     ['Pacientes com Exame Laboratorial (N e %)', ...slices.map((s) => `${s.labCount} (${s.labPct}%)`)],
     ['   • Espera Prescrição -> Coleta/Execução Lab (min)', ...slices.map((s) => fmtStatFull(s.waitLabCollectStats))],
-    ['   • Tempo até Liberação do Laudo Lab (min)', ...slices.map((s) => fmtStatFull(s.waitLabReportStats))],
+    ['   • Tempo até Liberação do Laudo Lab (Reconstruído s/ Falso Zero)', ...slices.map((s) => fmtStatFull(s.waitLabReportStats))],
     ['Pacientes com Raio-X - RX (N e %)', ...slices.map((s) => `${s.rxCount} (${s.rxPct}%)`)],
     ['   • Tempo Prescrição -> Execução RX (min)', ...slices.map((s) => fmtStatFull(s.waitRxExecStats))],
     ['Pacientes com Tomografia - TC (N e %)', ...slices.map((s) => `${s.tcCount} (${s.tcPct}%)`)],
@@ -328,73 +369,75 @@ export function generateEmergencyExcel(data: EmergencyAnalyticsData): void {
     ['Pacientes com Ultrassonografia - USG (N e %)', ...slices.map((s) => `${s.usgCount} (${s.usgPct}%)`)],
     ['   • Ciclo Total USG (min)', ...slices.map((s) => fmtStatFull(s.waitUsgTotalStats))],
     [],
-    ['4. GARGALOS OCULTOS: FILA INVISÍVEL PÓS-LAUDO & PEDÁGIO DE HANDOFF (TROCA DE MÉDICO)'],
+    ['4. GARGALOS OCULTOS: FILA INVISÍVEL PÓS-LAUDO & PEDÁGIO DE HANDOFF'],
     ['Fila Invisível Pós-Laudo p/ Reavaliação (Desfecho - Último Laudo Lab/TC)', ...slices.map((s) => fmtStatFull(s.postReportReavalWaitStats))],
     ['Atendimentos Conduzidos pelo Mesmo Médico do Início ao Fim (N e %)', ...slices.map((s) => `${s.sameDoctorCount} (${s.sameDoctorPct}%)`)],
     ['   • Permanência com Mesmo Médico (Sem Handoff)', ...slices.map((s) => fmtStatFull(s.sameDoctorLosStats))],
     ['Atendimentos com Troca de Médico entre Anamnese e Desfecho (Handoff N e %)', ...slices.map((s) => `${s.handoffDoctorCount} (${s.handoffDoctorPct}%)`)],
     ['   • Permanência com Troca de Médico (Com Handoff)', ...slices.map((s) => fmtStatFull(s.handoffDoctorLosStats))],
     [],
-    ['5. OUTPUTS FINAIS, INTERNAÇÃO E DECOMPOSIÇÃO DO BOARDING REAL'],
+    ['5. OUTPUTS FINAIS E DECOMPOSIÇÃO DO BOARDING (ENFERMARIA UI vs. UTI & CIRÚRGICO vs. CLÍNICO)'],
     ['Alta Pós-Propedêutica / Reavaliação (N e %)', ...slices.map((s) => `${s.postPropDischargeCount} (${s.postPropDischargePct}%)`)],
     ['   • Permanência Total nas Altas Pós-Propedêutica', ...slices.map((s) => fmtStatFull(s.postPropDischargeLosStats))],
-    ['Evasão / Desistência Pós-Consulta (N e %)', ...slices.map((s) => `${s.postConsultEvasionCount} (${s.postConsultEvasionPct}%)`)],
     ['Internações Hospitalares Totais (N e % sobre a Porta)', ...slices.map((s) => `${s.admittedTotalCount} (${s.admittedTotalPct}%)`)],
-    ['   • Internações em Enfermaria / UI (N e % dos Internados)', ...slices.map((s) => `${s.admittedUiCount} (${s.admittedUiPct}%)`)],
-    ['   • Internações em UTI (N e % dos Internados)', ...slices.map((s) => `${s.admittedUtiCount} (${s.admittedUtiPct}%)`)],
-    ['   • Internações Diretas (Sem Exames/Med na Porta) vs. Pós-Propedêutica', ...slices.map((s) => `Direta: ${s.admittedDirectNoPropCount} | Pós-Exames: ${s.admittedWithPropCount}`)],
-    ['   • Etapa 1 (Desfecho Médico -> Leito Virtual / Aprovação do Plano)', ...slices.map((s) => fmtStatFull(s.t1DecisionToVirtualBedStats))],
-    ['   • Etapa 1B (Abertura Aguardo 3493 -> Leito Virtual / Aprovação do Plano)', ...slices.map((s) => fmtStatFull(s.t1AguardoToVirtualBedStats))],
-    ['   • Etapa 2 (Leito Virtual -> Subida Física ao Leito Definitivo UI/UTI)', ...slices.map((s) => fmtStatFull(s.t2VirtualToPhysicalBedStats))],
-    ['   • Boarding Total na Emergência (Aguardo -> Entrada Física Unidade)', ...slices.map((s) => fmtStatFull(s.totalBoardingStats))],
-    ['   • Boarding Total — Pacientes de Enfermaria (UI)', ...slices.map((s) => fmtStatFull(s.uiBoardingStats))],
-    ['   • Boarding Total — Pacientes de UTI', ...slices.map((s) => fmtStatFull(s.utiBoardingStats))],
+    ['   • Destino Leito: Enfermaria (UI) vs. UTI', ...slices.map((s) => `UI: ${s.admittedUiCount} (${s.admittedUiPct}%) | UTI: ${s.admittedUtiCount} (${s.admittedUtiPct}%)`)],
+    ['   • Perfil Especialidade: Cirúrgico vs. Clínico Não Cirúrgico', ...slices.map((s) => `Cirúrgico: ${s.admittedSurgicalCount} (${s.admittedSurgicalPct}%) | Clínico: ${s.admittedClinicalCount} (${s.admittedClinicalPct}%)`)],
+    ['BOARDING GERAL — Etapa 1 (Solicitação -> Leito Virtual/Plano)', ...slices.map((s) => fmtStatFull(s.t1AguardoToVirtualBedStats))],
+    ['BOARDING GERAL — Etapa 2 (Leito Virtual -> Subida Física UI/UTI)', ...slices.map((s) => fmtStatFull(s.t2VirtualToPhysicalBedStats))],
+    ['BOARDING GERAL — Total Real (Aguardo -> Entrada Física Unidade)', ...slices.map((s) => fmtStatFull(s.totalBoardingStats))],
+    ['BOARDING ENFERMARIA (UI) — Etapa 1 (Aprovação Plano / Virtual)', ...slices.map((s) => fmtStatFull(s.uiT1AguardoToVirtualStats))],
+    ['BOARDING ENFERMARIA (UI) — Etapa 2 (Virtual -> Subida Física Andar)', ...slices.map((s) => fmtStatFull(s.uiT2VirtualToPhysicalStats))],
+    ['BOARDING ENFERMARIA (UI) — Total Real (Aguardo -> Leito UI)', ...slices.map((s) => fmtStatFull(s.uiBoardingStats))],
+    ['BOARDING UTI — Etapa 1 (Aprovação Plano / Virtual)', ...slices.map((s) => fmtStatFull(s.utiT1AguardoToVirtualStats))],
+    ['BOARDING UTI — Etapa 2 (Virtual -> Subida Física UTI)', ...slices.map((s) => fmtStatFull(s.utiT2VirtualToPhysicalStats))],
+    ['BOARDING UTI — Total Real (Aguardo -> Leito UTI)', ...slices.map((s) => fmtStatFull(s.utiBoardingStats))],
+    ['BOARDING PERFIL CIRÚRGICO (CC=S / Cirurgia / Ortopedia) — Total Real', ...slices.map((s) => fmtStatFull(s.surgicalBoardingStats))],
+    ['BOARDING PERFIL CLÍNICO NÃO CIRÚRGICO — Total Real', ...slices.map((s) => fmtStatFull(s.clinicalBoardingStats))],
     [],
-    ['6. LINHA DO TEMPO LEAN (VALOR AGREGADO vs. DESPERDÍCIO / ESPERA)'],
+    ['6. EFICIÊNCIA LEAN (PCE GLOBAL E ESTRATIFICADA POR ROTA DE THROUGHPUT)'],
     ['Tempo Médio de Valor Agregado - VA (Atendimento Ativo)', ...slices.map((s) => `${s.vaMinutesMean} min`)],
     ['Tempo Médio de Não Valor Agregado - NVA (Filas e Esperas)', ...slices.map((s) => `${s.nvaMinutesMean} min`)],
-    ['Eficiência de Ciclo do Processo Lean (PCE = VA / Ciclo Total)', ...slices.map((s) => `${s.pceEfficiencyPct}%`)],
+    ['Eficiência Lean Global (PCE Global)', ...slices.map((s) => `${s.pceEfficiencyPct}%`)],
+    ['Eficiência Lean — Ramo A (Alta Direta 1º Atendimento)', ...slices.map((s) => `${s.pceRamoADirectPct}%`)],
+    ['Eficiência Lean — Sub-ramo B1 (Fast Reav Só Medicação)', ...slices.map((s) => `${s.pceRamoB1FastReavPct}%`)],
+    ['Eficiência Lean — Sub-ramo B2 (Giro Diagnóstico Exames)', ...slices.map((s) => `${s.pceRamoB2DiagExamsPct}%`)],
   ];
 
-  appendSheetFromAoA(wb, '2_Jornada_VSM_Lean', sheet2);
+  appendSheetFromAoA(wb, '3_Jornada_VSM_Lean', sheet3);
 
   // --------------------------------------------------------------------------
-  // ABA 3: CENSO OCUPACIONAL SIMULTÂNEO & HEATMAPS 24x7 (PORTA, FAST REAV, EXAMES, BOARDING)
+  // ABA 4: CENSO OCUPACIONAL SIMULTÂNEO (COM MÉDIA, DP, MEDIANA E AMPLITUDE NAS 4 FRENTES)
   // --------------------------------------------------------------------------
-  const sheet3: unknown[][] = [
-    ['CENSO OCUPACIONAL SIMULTÂNEO POR HORA (07h ÀS 06h) — DIMENSIONAMENTO DE ESCALA POR FRENTE DE TRABALHO'],
+  const sheet4: unknown[][] = [
+    ['CENSO OCUPACIONAL SIMULTÂNEO POR HORA (07h ÀS 06h) — COM MÉDIA, DESVIO-PADRÃO (±DP), MEDIANA, P90 E AMPLITUDE [MÍN–MÁX] POR FRENTE'],
     [
       'Faixa Horária',
-      'Chegadas Novas na Porta (Média/h)',
-      'Chegadas Novas (Mediana/h)',
-      '1. Porta / 1º Atendimento (Média Simultânea)',
-      '2A. Fast Reav: Só Medicação (Média Simultânea)',
-      '2B. Giro Diagnóstico: Lab/Imagem/Reaval (Média Simultânea)',
-      '3. Boarding de Internação UI/UTI (Média Simultânea)',
-      'CENSO SIMULTÂNEO TOTAL NO PS (Média)',
-      'CENSO SIMULTÂNEO (Mediana)',
-      'PICO MÁXIMO SIMULTÂNEO NO MÊS',
+      'Novas Chegadas na Porta (Média ±DP | Med [Mín–Máx])',
+      'Frente 1: Porta / 1º Atendimento (Média ±DP | Med [Mín–Máx])',
+      'Frente 2A: Fast Reav Só Medicação (Média ±DP | Med [Mín–Máx])',
+      'Frente 2B: Giro Exames Lab/TC/RX (Média ±DP | Med [Mín–Máx])',
+      'Frente 3: Boarding Internação UI/UTI (Média ±DP | Med [Mín–Máx])',
+      'CENSO SIMULTÂNEO TOTAL NO PS (Média ±DP | Med [Mín–Máx])',
+      'Dimensionamento Sugerido (Médicos Porta + Giro/Reaval)',
     ],
   ];
 
   for (const pt of vsm.hourlySimultaneousOverall) {
-    sheet3.push([
+    sheet4.push([
       pt.label,
-      pt.newArrivalsMean,
-      pt.newArrivalsMedian,
-      pt.portaMean,
-      pt.fastReavMedMean,
-      pt.giroExamesMean,
-      pt.boardingMean,
-      pt.totalSimultaneousMean,
-      pt.totalSimultaneousMedian,
-      pt.totalSimultaneousMax,
+      fmtCensusStat(pt.newArrivalsStats),
+      fmtCensusStat(pt.portaStats),
+      fmtCensusStat(pt.fastReavMedStats),
+      fmtCensusStat(pt.giroExamesStats),
+      fmtCensusStat(pt.boardingStats),
+      fmtCensusStat(pt.totalStats),
+      `${pt.recommendedDocsTotal} méd. (${pt.recommendedDocsPorta} Porta + ${pt.recommendedDocsGiroReav} Giro/Reav)`,
     ]);
   }
 
-  sheet3.push([]);
-  sheet3.push(['HEATMAP 24x7 DE CENSO SIMULTÂNEO TOTAL (LOTAÇÃO REAL DENTRO DO PS — MÉDIA ±DP | MEDIANA [MÍN–MÁX])']);
-  sheet3.push(['Dia da Semana \\ Faixa Horária', ...HOURS_7_TO_6.map((h) => `${String(h).padStart(2, '0')}h`)]);
+  sheet4.push([]);
+  sheet4.push(['HEATMAP 24x7 DE CENSO SIMULTÂNEO TOTAL ACUMULADO (CICLO OPERACIONAL DE PLANTÃO 07h -> 06h59 D+1 — MÉDIA ±DP | MEDIANA [MÍN–MÁX])']);
+  sheet4.push(['Dia do Plantão \\ Faixa Horária', ...HOURS_7_TO_6.map((h) => `${String(h).padStart(2, '0')}h`)]);
 
   for (let d = 0; d < 7; d++) {
     const rowCells = HOURS_7_TO_6.map((h) => {
@@ -402,25 +445,25 @@ export function generateEmergencyExcel(data: EmergencyAnalyticsData): void {
       if (!c) return '—';
       return `${c.totalMean.toFixed(1)} (±${c.totalStdDev.toFixed(1)}) | Med:${c.totalMedian.toFixed(1)} [${c.totalMin.toFixed(0)}–${c.totalMax.toFixed(0)}]`;
     });
-    sheet3.push([WEEKDAY_NAMES[d], ...rowCells]);
+    sheet4.push([WEEKDAY_NAMES[d], ...rowCells]);
   }
 
-  sheet3.push([]);
-  sheet3.push(['HEATMAP 24x7 ESTRATIFICADO POR FRENTE OPERACIONAL (PORTA | FAST REAV SÓ MED | GIRO EXAMES | BOARDING)']);
-  sheet3.push(['Dia da Semana \\ Faixa Horária', ...HOURS_7_TO_6.map((h) => `${String(h).padStart(2, '0')}h`)]);
+  sheet4.push([]);
+  sheet4.push(['HEATMAP 24x7 ESTRATIFICADO POR FRENTE OPERACIONAL (MÉDIA E [MÍN–MÁX] DE PORTA | FAST REAV | EXAMES | BOARDING)']);
+  sheet4.push(['Dia do Plantão \\ Faixa Horária', ...HOURS_7_TO_6.map((h) => `${String(h).padStart(2, '0')}h`)]);
 
   for (let d = 0; d < 7; d++) {
     const rowCells = HOURS_7_TO_6.map((h) => {
       const c = vsm.censusHeatmap24x7.find((x) => x.dayIndex === d && x.hour === h);
       if (!c) return '—';
-      return `Tot:${c.totalMean.toFixed(1)} (P:${c.portaMean.toFixed(1)} | Med:${c.fastReavMedMean.toFixed(1)} | Ex:${c.giroExamesMean.toFixed(1)} | Int:${c.boardingMean.toFixed(1)})`;
+      return `Tot:${c.totalMean.toFixed(1)} | P:${c.portaMean.toFixed(1)}[${c.portaStats.min.toFixed(0)}-${c.portaStats.max.toFixed(0)}] | Med:${c.fastReavMedMean.toFixed(1)}[${c.fastReavMedStats.min.toFixed(0)}-${c.fastReavMedStats.max.toFixed(0)}] | Ex:${c.giroExamesMean.toFixed(1)}[${c.giroExamesStats.min.toFixed(0)}-${c.giroExamesStats.max.toFixed(0)}] | Int:${c.boardingMean.toFixed(1)}[${c.boardingStats.min.toFixed(0)}-${c.boardingStats.max.toFixed(0)}]`;
     });
-    sheet3.push([WEEKDAY_NAMES[d], ...rowCells]);
+    sheet4.push([WEEKDAY_NAMES[d], ...rowCells]);
   }
 
-  sheet3.push([]);
-  sheet3.push(['HEATMAP 24x7 DE CHEGADAS NA PORTA (FICHAS ABERTAS — MÉDIA ±DP | MEDIANA [MÍN–MÁX] | TOTAL MENSAL)']);
-  sheet3.push(['Dia da Semana \\ Faixa Horária', ...HOURS_7_TO_6.map((h) => `${String(h).padStart(2, '0')}h`)]);
+  sheet4.push([]);
+  sheet4.push(['HEATMAP 24x7 DE PRESSÃO DE ENTRADA NA PORTA (NOVAS FICHAS ABERTAS — CICLO OPERACIONAL 07h -> 06h59 D+1)']);
+  sheet4.push(['Dia do Plantão \\ Faixa Horária', ...HOURS_7_TO_6.map((h) => `${String(h).padStart(2, '0')}h`)]);
 
   for (let d = 0; d < 7; d++) {
     const rowCells = HOURS_7_TO_6.map((h) => {
@@ -428,70 +471,105 @@ export function generateEmergencyExcel(data: EmergencyAnalyticsData): void {
       if (!c) return '—';
       return `${c.mean.toFixed(1)} (±${c.stdDev.toFixed(1)}) | Med:${c.median.toFixed(1)} [${c.min}–${c.max}] | Σ=${c.totalCount}`;
     });
-    sheet3.push([WEEKDAY_NAMES[d], ...rowCells]);
+    sheet4.push([WEEKDAY_NAMES[d], ...rowCells]);
   }
 
-  appendSheetFromAoA(wb, '3_Censo_Simultaneo_24x7', sheet3);
+  appendSheetFromAoA(wb, '4_Censo_Simultaneo_24x7', sheet4);
 
   // --------------------------------------------------------------------------
-  // ABA 4: DECOMPOSIÇÃO DO BOARDING REAL & RANKING POR OPERADORA (CONVÊNIO)
+  // ABA 5: BOARDING DIFERENCIADO (UI vs. UTI & CIRÚRGICO vs. CLÍNICO) + CONVÊNIOS
   // --------------------------------------------------------------------------
-  const sheet4: unknown[][] = [
-    ['RAIO-X DO BOARDING HOSPITALAR E RETENÇÃO DE LEITOS POR OPERADORA DE SAÚDE (CATE 3333 + CATE 3493)'],
+  const sheet5: unknown[][] = [
+    ['RAIO-X ESTRATIFICADO DO BOARDING HOSPITALAR: ENFERMARIA (UI) vs. UTI E PERFIL CIRÚRGICO vs. CLÍNICO (CATE 3333 + CATE 3493)'],
     [
-      `Total de Internações: ${data.totalAdmissions}`,
-      `Enfermaria (UI): ${data.uiAdmissions}`,
-      `UTI: ${data.utiAdmissions}`,
-      `Pacientes Cirúrgicos (Cc=S): ${vsm.surgicalAdmissionsCount} (${vsm.surgicalAdmissionsPct}%)`,
-      `Permanência Hospitalar Média: ${vsm.hospitalStayDaysStats.mean} dias (Mediana: ${vsm.hospitalStayDaysStats.median}d)`,
-      `Total Horas-Maca Perdidas em Boarding: ${vsm.wastedBedHoursInBoarding} horas`,
+      `Total Internações: ${data.totalAdmissions}`,
+      `Enfermaria (UI): ${data.uiAdmissions} (${m.admittedUiPct}%)`,
+      `UTI: ${data.utiAdmissions} (${m.admittedUtiPct}%)`,
+      `Perfil Cirúrgico: ${data.surgicalAdmissions} (${vsm.surgicalAdmissionsPct}%)`,
+      `Perfil Clínico: ${data.clinicalAdmissions} (${vsm.clinicalAdmissionsPct}%)`,
+      `Horas-Maca Retidas: ${vsm.wastedBedHoursInBoarding}h (${vsm.equivalentBlockedBeds24h} macas bloqueadas 24h/dia)`,
     ],
     [],
+    ['1. COMPARATIVO DIRETO DE GARGALOS DE BOARDING POR TIPO DE LEITO (UI vs. UTI) E PERFIL (CIRÚRGICO vs. CLÍNICO)'],
     [
-      'Operadora / Convênio',
-      'Internações (N)',
-      '% das Internações',
-      'UI (N)',
-      'UTI (N)',
-      'Centro Cirúrgico (Cc=S)',
-      'Etapa 1: Solicitação -> Leito Virtual/Plano (Média ±DP)',
-      'Etapa 1: Mediana (P90)',
-      'Etapa 2: Leito Virtual -> Leito Físico UI/UTI (Média ±DP)',
-      'Etapa 2: Mediana (P90)',
-      'Boarding Total: Aguardo -> Leito Unidade (Média ±DP)',
-      'Boarding Total: Mediana (P90 | Mín–Máx)',
-      'Permanência Hospitalar (Dias: Média | Mediana)',
+      'Recorte / Perfil de Internação',
+      'Pacientes (N / %)',
+      'Divisão UI / UTI',
+      'Cirúrgicos (N / %)',
+      'Etapa 1: Solicitação -> Leito Virtual / Aprovação Plano (Média ±DP | Med | P90)',
+      'Etapa 2: Leito Virtual -> Subida Física Unidade (Média ±DP | Med | P90)',
+      'BOARDING TOTAL REAL: Aguardo -> Leito Físico (Média ±DP | Med [Mín–Máx] | P90)',
+      'Horas-Maca Consumidas no PS',
+      'Macas Físicas Bloqueadas 24h/dia',
+      'Permanência Hospitalar Pós-Subida (Dias)',
     ],
   ];
 
-  for (const c of vsm.boardingByConvenio) {
-    sheet4.push([
-      c.convenio,
-      c.admittedCount,
-      `${c.pctOfAdmissions}%`,
-      c.uiCount,
-      c.utiCount,
-      c.ccCount,
-      c.t1VirtualApprovalStats.count > 0 ? `${c.t1VirtualApprovalStats.mean}m (±${c.t1VirtualApprovalStats.stdDev})` : '—',
-      c.t1VirtualApprovalStats.count > 0 ? `${c.t1VirtualApprovalStats.median}m (P90: ${c.t1VirtualApprovalStats.p90}m)` : '—',
-      c.t2PhysicalUploadStats.count > 0 ? `${c.t2PhysicalUploadStats.mean}m (±${c.t2PhysicalUploadStats.stdDev})` : '—',
-      c.t2PhysicalUploadStats.count > 0 ? `${c.t2PhysicalUploadStats.median}m (P90: ${c.t2PhysicalUploadStats.p90}m)` : '—',
-      c.totalBoardingStats.count > 0 ? `${c.totalBoardingStats.mean}m (±${c.totalBoardingStats.stdDev})` : '—',
-      c.totalBoardingStats.count > 0
-        ? `${c.totalBoardingStats.median}m (P90: ${c.totalBoardingStats.p90}m | ${c.totalBoardingStats.min}–${c.totalBoardingStats.max}m)`
+  for (const prof of [bbt.global, bbt.ui, bbt.uti, bbt.surgical, bbt.clinical]) {
+    sheet5.push([
+      prof.label,
+      `${prof.admittedCount} (${prof.pctOfAdmissions}%)`,
+      `${prof.uiCount} UI / ${prof.utiCount} UTI`,
+      `${prof.surgicalCount} (${prof.surgicalPct}%)`,
+      fmtStatFull(prof.t1AguardoToVirtualStats),
+      fmtStatFull(prof.t2VirtualToPhysicalStats),
+      fmtStatFull(prof.totalBoardingStats),
+      `${prof.wastedBedHours} h`,
+      `${prof.equivalentBlockedBeds24h} macas/dia`,
+      prof.hospitalStayDaysStats.count > 0
+        ? `${prof.hospitalStayDaysStats.mean}d (±${prof.hospitalStayDaysStats.stdDev}) | Med: ${prof.hospitalStayDaysStats.median}d`
         : '—',
+    ]);
+  }
+
+  sheet5.push(
+    [],
+    ['2. RANKING DE BOARDING POR OPERADORA DE SAÚDE (COM ABERTURA INTERNA UI vs. UTI E CIRÚRGICO vs. CLÍNICO)'],
+    [
+      'Operadora / Convênio',
+      'Internações (N / %)',
+      'UI / UTI',
+      'Cirúrgico / Clínico',
+      'Etapa 1 Geral: Aprovação Plano / Virtual',
+      'Etapa 2 Geral: Virtual -> Leito Físico',
+      'Boarding Total Geral (Média ±DP | Med | P90)',
+      'Boarding ENFERMARIA (UI): Etapa 1 | Etapa 2 | Total',
+      'Boarding UTI: Etapa 1 | Etapa 2 | Total',
+      'Boarding CIRÚRGICO vs. CLÍNICO (Total)',
+      'Permanência Hospitalar (Dias)',
+    ]
+  );
+
+  for (const c of vsm.boardingByConvenio) {
+    sheet5.push([
+      c.convenio,
+      `${c.admittedCount} (${c.pctOfAdmissions}%)`,
+      `${c.uiCount} UI / ${c.utiCount} UTI`,
+      `${c.ccCount} Cir. / ${c.clinicalCount} Clín.`,
+      fmtStatFull(c.t1VirtualApprovalStats),
+      fmtStatFull(c.t2PhysicalUploadStats),
+      fmtStatFull(c.totalBoardingStats),
+      c.uiCount > 0
+        ? `T1: ${c.uiT1VirtualStats.mean}m | T2: ${c.uiT2PhysicalStats.mean}m | Tot: ${c.uiTotalBoardingStats.mean}m (Med ${c.uiTotalBoardingStats.median}m)`
+        : '—',
+      c.utiCount > 0
+        ? `T1: ${c.utiT1VirtualStats.mean}m | T2: ${c.utiT2PhysicalStats.mean}m | Tot: ${c.utiTotalBoardingStats.mean}m (Med ${c.utiTotalBoardingStats.median}m)`
+        : '—',
+      `Cir: ${c.surgicalTotalBoardingStats.count > 0 ? `${c.surgicalTotalBoardingStats.mean}m (Med ${c.surgicalTotalBoardingStats.median}m)` : '—'} | Clín: ${
+        c.clinicalTotalBoardingStats.count > 0 ? `${c.clinicalTotalBoardingStats.mean}m (Med ${c.clinicalTotalBoardingStats.median}m)` : '—'
+      }`,
       c.hospitalStayDaysStats.count > 0
         ? `${c.hospitalStayDaysStats.mean}d (Med: ${c.hospitalStayDaysStats.median}d)`
         : '—',
     ]);
   }
 
-  appendSheetFromAoA(wb, '4_Boarding_e_Convenios', sheet4);
+  appendSheetFromAoA(wb, '5_Boarding_UI_UTI_Cirurg', sheet5);
 
   // --------------------------------------------------------------------------
-  // ABA 5: MATRIZ DUPLA DE CONDUTAS MÉDICAS (1º ATENDIMENTO vs. FECHAMENTO)
+  // ABA 6: MATRIZ DUPLA DE CONDUTAS MÉDICAS (1º ATENDIMENTO vs. FECHAMENTO)
   // --------------------------------------------------------------------------
-  const sheet5: unknown[][] = [
+  const sheet6: unknown[][] = [
     ['MATRIZ DE CONDUTAS E DESFECHOS POR MÉDICO: 1º ATENDIMENTO (GATEKEEPER) vs. ÚLTIMO ATENDIMENTO (CLOSER / REAVALIADOR)'],
     [
       'Profissional Médico',
@@ -520,7 +598,7 @@ export function generateEmergencyExcel(data: EmergencyAnalyticsData): void {
   ];
 
   for (const d of vsm.doctorConductMatrix) {
-    sheet5.push([
+    sheet6.push([
       d.name,
       d.firstAttendCount,
       d.firstDayCount,
@@ -546,15 +624,15 @@ export function generateEmergencyExcel(data: EmergencyAnalyticsData): void {
     ]);
   }
 
-  appendSheetFromAoA(wb, '5_Condutas_Medicas_1eUlt', sheet5);
+  appendSheetFromAoA(wb, '6_Condutas_Medicas_1eUlt', sheet6);
 
   // --------------------------------------------------------------------------
-  // ABA 6: MATRIZ CID x THROUGHPUT, CLUSTERS, ASSERTIVIDADE (CHAA 3704) & RETORNO <48H
+  // ABA 7: MATRIZ CID x THROUGHPUT, CLUSTERS, ASSERTIVIDADE (CHAA 3704) & RETORNO <48H
   // --------------------------------------------------------------------------
   const dg = vsm.diagnosticGovernance;
   const rv = vsm.returnVisits;
 
-  const sheet6: unknown[][] = [
+  const sheet7: unknown[][] = [
     ['MATRIZ CID x ROTA DE THROUGHPUT (AUDITORIA DE PERTINÊNCIA PROPEDÊUTICA POR DIAGNÓSTICO)'],
     [
       'Diagnóstico (CID)',
@@ -571,7 +649,7 @@ export function generateEmergencyExcel(data: EmergencyAnalyticsData): void {
   ];
 
   for (const row of vsm.cidThroughputMatrix) {
-    sheet6.push([
+    sheet7.push([
       row.cid,
       row.clusterName,
       row.totalCount,
@@ -585,9 +663,9 @@ export function generateEmergencyExcel(data: EmergencyAnalyticsData): void {
     ]);
   }
 
-  sheet6.push([]);
-  sheet6.push(['AGRUPAMENTO POR CLUSTERS SINDRÔMICOS DA EMERGÊNCIA']);
-  sheet6.push([
+  sheet7.push([]);
+  sheet7.push(['AGRUPAMENTO POR CLUSTERS SINDRÔMICOS DA EMERGÊNCIA']);
+  sheet7.push([
     'Cluster Clínico',
     'Atendimentos (N)',
     '% do Total',
@@ -600,7 +678,7 @@ export function generateEmergencyExcel(data: EmergencyAnalyticsData): void {
   ]);
 
   for (const cl of data.cidClusters) {
-    sheet6.push([
+    sheet7.push([
       cl.clusterName,
       cl.count,
       `${cl.percentage}%`,
@@ -613,9 +691,9 @@ export function generateEmergencyExcel(data: EmergencyAnalyticsData): void {
     ]);
   }
 
-  sheet6.push([]);
-  sheet6.push(['GOVERNANÇA CLÍNICA & ASSERTIVIDADE DIAGNÓSTICA NA INTERNAÇÃO (CHAA 3704: CID ENTRADA vs. CID SAÍDA)']);
-  sheet6.push([
+  sheet7.push([]);
+  sheet7.push(['GOVERNANÇA CLÍNICA & ASSERTIVIDADE DIAGNÓSTICA NA INTERNAÇÃO (CHAA 3704: CID ENTRADA vs. CID SAÍDA)']);
+  sheet7.push([
     'Pacientes Internados Avaliados (CHAA 3704)',
     'Concordância Exata de CID (Entrada = Saída)',
     'Reclassificação Diagnóstica Total (Mudança de CID pós-exames)',
@@ -623,7 +701,7 @@ export function generateEmergencyExcel(data: EmergencyAnalyticsData): void {
     '   • Mudança de Sistema / Capítulo Clínico (Discordância)',
     'LOS Médio nos Casos Concordantes vs. Reclassificados',
   ]);
-  sheet6.push([
+  sheet7.push([
     dg.evaluatedAdmissionsCount,
     `${dg.exactMatchCount} (${dg.exactMatchPct}%)`,
     `${dg.reclassifiedCount} (${dg.reclassifiedPct}%)`,
@@ -633,46 +711,46 @@ export function generateEmergencyExcel(data: EmergencyAnalyticsData): void {
   ]);
 
   if (dg.topReclassifications.length > 0) {
-    sheet6.push([]);
-    sheet6.push(['PRINCIPAIS PARES DE RECLASSIFICAÇÃO DIAGNÓSTICA ENTRE A PORTA E A SOLICITAÇÃO DE INTERNAÇÃO']);
-    sheet6.push(['Hipótese Inicial na Porta (Diag entrada)', 'Diagnóstico na Solicitação de Internação (Diag saida)', 'Casos (N)', 'Classificação de Governança']);
+    sheet7.push([]);
+    sheet7.push(['PRINCIPAIS PARES DE RECLASSIFICAÇÃO DIAGNÓSTICA ENTRE A PORTA E A SOLICITAÇÃO DE INTERNAÇÃO']);
+    sheet7.push(['Hipótese Inicial na Porta (Diag entrada)', 'Diagnóstico na Solicitação de Internação (Diag saida)', 'Casos (N)', 'Classificação de Governança']);
     for (const pair of dg.topReclassifications) {
-      sheet6.push([pair.cidIn, pair.cidOut, pair.count, pair.classification]);
+      sheet7.push([pair.cidIn, pair.cidOut, pair.count, pair.classification]);
     }
   }
 
-  sheet6.push([]);
-  sheet6.push(['AUDITORIA DE RETORNO PRECOCE À EMERGÊNCIA (< 48 HORAS E < 72 HORAS)']);
-  sheet6.push([
+  sheet7.push([]);
+  sheet7.push(['AUDITORIA DE RETORNO PRECOCE À EMERGÊNCIA (< 48 HORAS E < 72 HORAS)']);
+  sheet7.push([
     'Retornos em <= 48h (N e % do PS)',
     'Internações no Retorno <= 48h (N e % Conversão)',
     'Retornos em <= 72h (N e % do PS)',
     'Internações no Retorno <= 72h (N e % Conversão)',
   ]);
-  sheet6.push([
+  sheet7.push([
     `${rv.return48hCount} (${rv.return48hPct}%)`,
     `${rv.return48hAdmittedCount} (${rv.return48hAdmissionRate}% de internação no retorno)`,
     `${rv.return72hCount} (${rv.return72hPct}%)`,
     `${rv.return72hAdmittedCount} (${rv.return72hAdmissionRate}% de internação no retorno)`,
   ]);
 
-  appendSheetFromAoA(wb, '6_CIDs_Rotas_e_Governanca', sheet6);
+  appendSheetFromAoA(wb, '7_CIDs_Rotas_e_Governanca', sheet7);
 
   // --------------------------------------------------------------------------
-  // ABA 7: SÉRIE DIÁRIA COMPLETA, SEMANAS DO MÊS (S1–S5) E DIAS DA SEMANA
+  // ABA 8: SÉRIE DIÁRIA COMPLETA, SEMANAS DO MÊS (S1–S5) E DIAS DA SEMANA
   // --------------------------------------------------------------------------
-  const sheet7: unknown[][] = [
+  const sheet8: unknown[][] = [
     ['CONSOLIDAÇÃO POR SEMANA DO MÊS (SEMANAS 1 A 5)'],
     ['Semana do Mês', 'Dias', 'Total Atendimentos', 'Média Diária', 'DP (±)', 'Mediana Diária', 'Porta-Médico Médio (min)', 'Permanência Média (min)', 'Internações (N)'],
   ];
 
   for (const w of data.weekOfMonthStats) {
-    sheet7.push([w.weekLabel, w.daysCount, w.total, w.meanPerDay, w.stdDevPerDay, w.medianPerDay, w.meanDoorToDoc, w.meanLos, w.admissions]);
+    sheet8.push([w.weekLabel, w.daysCount, w.total, w.meanPerDay, w.stdDevPerDay, w.medianPerDay, w.meanDoorToDoc, w.meanLos, w.admissions]);
   }
 
-  sheet7.push([]);
-  sheet7.push(['CONSOLIDAÇÃO POR DIA DA SEMANA (SEGUNDA A DOMINGO)']);
-  sheet7.push([
+  sheet8.push([]);
+  sheet8.push(['CONSOLIDAÇÃO POR DIA DA SEMANA (SEGUNDA A DOMINGO)']);
+  sheet8.push([
     'Dia da Semana',
     'Ocorrências no Mês',
     'Volume Acumulado',
@@ -687,7 +765,7 @@ export function generateEmergencyExcel(data: EmergencyAnalyticsData): void {
   ]);
 
   for (const wd of data.weekdayStats) {
-    sheet7.push([
+    sheet8.push([
       wd.dayName,
       wd.daysOccurred,
       wd.total,
@@ -702,21 +780,21 @@ export function generateEmergencyExcel(data: EmergencyAnalyticsData): void {
     ]);
   }
 
-  sheet7.push([]);
-  sheet7.push(['SÉRIE HISTÓRICA DIÁRIA COMPLETA']);
-  sheet7.push(['Data', 'Dia da Semana', 'Volume Total (24h)', 'Plantão Diurno (07h–18h59)', 'Plantão Noturno (19h–06h59)', 'Internações (N)', 'Porta-Médico Médio (min)', 'Permanência Média (min)']);
+  sheet8.push([]);
+  sheet8.push(['SÉRIE HISTÓRICA DIÁRIA COMPLETA']);
+  sheet8.push(['Data', 'Dia da Semana', 'Volume Total (24h)', 'Plantão Diurno (07h–18h59)', 'Plantão Noturno (19h–06h59)', 'Internações (N)', 'Porta-Médico Médio (min)', 'Permanência Média (min)']);
 
   for (const d of data.dailySeries) {
-    sheet7.push([d.label, d.dayOfWeek, d.total, d.dayShift, d.nightShift, d.admissions, d.meanDoorToDoc, d.meanLos]);
+    sheet8.push([d.label, d.dayOfWeek, d.total, d.dayShift, d.nightShift, d.admissions, d.meanDoorToDoc, d.meanLos]);
   }
 
-  appendSheetFromAoA(wb, '7_Serie_Diaria_e_Semanas', sheet7);
+  appendSheetFromAoA(wb, '8_Serie_Diaria_e_Semanas', sheet8);
 
   // --------------------------------------------------------------------------
-  // ABA 8: NOTA TÉCNICA, METODOLOGIA ANALÍTICA E GOVERNANÇA DE DADOS
+  // ABA 9: NOTA TÉCNICA, METODOLOGIA ANALÍTICA E AUDITORIA DA BASE
   // --------------------------------------------------------------------------
-  const sheet8 = buildMethodologySheetAoA(data);
-  appendSheetFromAoA(wb, '8_Metodologia_e_Auditoria', sheet8);
+  const sheet9 = buildMethodologySheetAoA(data);
+  appendSheetFromAoA(wb, '9_Metodologia_e_Auditoria', sheet9);
 
   const safePeriod = data.periodLabel.replace(/[^a-zA-Z0-9_-]/g, '_');
   XLSX.writeFile(wb, `Dossie_VSM_Jornada_PS_${safePeriod}.xlsx`);
@@ -732,9 +810,9 @@ export function generateComparisonExcel(months: EmergencyAnalyticsData[]): void 
   const sorted = [...months].sort((a, b) => a.monthKey.localeCompare(b.monthKey));
 
   const aoa: unknown[][] = [
-    ['COMPARATIVO HISTÓRICO MULTIMENSAL (MOM) — INDICADORES DE PORTA, THROUGHPUT, VSM E BOARDING'],
-    ['Indicador Estratégico', ...sorted.map((m) => m.periodLabel)],
-    ['Volume Total Mensal (N)', ...sorted.map((m) => m.totalAttendances)],
+    ['COMPARATIVO HISTÓRICO MULTIMENSAL (MOM) — INDICADORES DE PORTA, THROUGHPUT, VSM E BOARDING DIFERENCIADO'],
+    ['Indicador Estratégico', ...sorted.map((m) => `${m.periodLabel} (${m.activeScopeLabel})`)],
+    ['Volume Total no Escopo (N)', ...sorted.map((m) => m.totalAttendances)],
     ['Média Diária (±DP)', ...sorted.map((m) => `${m.dailyVolume.overall.mean} (±${m.dailyVolume.overall.stdDev})`)],
     ['Mediana Diária [Mín–Máx]', ...sorted.map((m) => `${m.dailyVolume.overall.median} [${m.dailyVolume.overall.min}–${m.dailyVolume.overall.max}]`)],
     ['Tempo Porta-Médico: Média (±DP) | Mediana (P90)', ...sorted.map((m) => fmtStatFull(m.doorToDoctor.overall))],
@@ -742,19 +820,24 @@ export function generateComparisonExcel(months: EmergencyAnalyticsData[]): void 
     ['% Ramo A: Alta Direta no 1º Atendimento', ...sorted.map((m) => `${m.vsm.monthlyOverall.directDischargePct}% (${m.vsm.monthlyOverall.directDischargeCount})`)],
     ['% Sub-ramo B1: Fast Reav (Apenas Medicação)', ...sorted.map((m) => `${m.vsm.monthlyOverall.fastReavMedOnlyPct}% (${m.vsm.monthlyOverall.fastReavMedOnlyCount})`)],
     ['% Sub-ramo B2: Giro Diagnóstico (Lab/Imagem)', ...sorted.map((m) => `${m.vsm.monthlyOverall.diagnosticExamsLoopPct}% (${m.vsm.monthlyOverall.diagnosticExamsLoopCount})`)],
-    ['Fila Invisível Pós-Laudo p/ Reavaliação (Média | Mediana)', ...sorted.map((m) => fmtStatFull(m.vsm.monthlyOverall.postReportReavalWaitStats))],
+    ['Espera Consolidada de Laudo (Lab/TC)', ...sorted.map((m) => fmtStatFull(m.vsm.monthlyOverall.waitLabReportStats))],
+    ['Fila Invisível Pós-Laudo p/ Reavaliação', ...sorted.map((m) => fmtStatFull(m.vsm.monthlyOverall.postReportReavalWaitStats))],
     ['Taxa de Handoff Interno (Troca de Médico)', ...sorted.map((m) => `${m.vsm.monthlyOverall.handoffDoctorPct}%`)],
     ['Taxa de Conversão em Internação (%)', ...sorted.map((m) => `${m.conversionRate}% (${m.totalAdmissions})`)],
-    ['Boarding Total Real (Média ±DP | Mediana)', ...sorted.map((m) => fmtStatFull(m.vsm.monthlyOverall.totalBoardingStats))],
-    ['Eficiência Lean do Processo (PCE %)', ...sorted.map((m) => `${m.vsm.monthlyOverall.pceEfficiencyPct}%`)],
+    ['Boarding Total GERAL (Média ±DP | Mediana)', ...sorted.map((m) => fmtStatFull(m.vsm.monthlyOverall.totalBoardingStats))],
+    ['Boarding Total ENFERMARIA (UI)', ...sorted.map((m) => fmtStatFull(m.vsm.monthlyOverall.uiBoardingStats))],
+    ['Boarding Total UTI', ...sorted.map((m) => fmtStatFull(m.vsm.monthlyOverall.utiBoardingStats))],
+    ['Boarding Total PERFIL CIRÚRGICO', ...sorted.map((m) => fmtStatFull(m.vsm.monthlyOverall.surgicalBoardingStats))],
+    ['Boarding Total PERFIL CLÍNICO', ...sorted.map((m) => fmtStatFull(m.vsm.monthlyOverall.clinicalBoardingStats))],
+    ['Macas Físicas Bloqueadas 24h/dia em Boarding', ...sorted.map((m) => `${m.vsm.equivalentBlockedBeds24h} macas/d (${m.vsm.wastedBedHoursInBoarding}h)`)],
+    ['Eficiência Lean Global (PCE %)', ...sorted.map((m) => `${m.vsm.monthlyOverall.pceEfficiencyPct}%`)],
   ];
 
   appendSheetFromAoA(wb, '1_Comparativo_Mensal_VSM', aoa);
-  appendSheetFromAoA(wb, '2_Metodologia_e_Auditoria', buildMethodologySheetAoA());
+  appendSheetFromAoA(wb, '2_Metodologia_e_Auditoria', buildMethodologySheetAoA(sorted[sorted.length - 1]));
   XLSX.writeFile(wb, `Comparativo_Multimensal_VSM_PS.xlsx`);
 }
 
-// Aliases de exportação para compatibilidade total
 export const exportEmergencyExcel = generateEmergencyExcel;
 export const downloadEmergencyExcel = generateEmergencyExcel;
 export const exportComparisonExcel = generateComparisonExcel;

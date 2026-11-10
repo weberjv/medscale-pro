@@ -4,10 +4,13 @@ import React, { useState, useMemo } from 'react';
 import {
   parseEmergencyExcel,
   mergeVsmSupplementaryFiles,
+  mergeSegmentedCate3333IntoMonth,
+  filterAnalyticsBySectorAndClinic,
   EmergencyAnalyticsData,
   VsmSliceMetrics,
   MetricStats,
   HourlySimultaneousPoint,
+  NormalizedAttendanceRecord,
 } from '../lib/analytics/emergency-parser';
 import {
   generateEmergencyExcel,
@@ -15,8 +18,14 @@ import {
 } from '../lib/reports/excel-generator';
 import {
   generateEmergencyPdf,
-  generateVsmPngImage,
+  generateSelectableEmergencyPdf,
+  generateSinglePngBoard,
+  generateSelectableVsmPngBoards,
   generateComparisonPdf,
+  PDF_MODULE_CATALOG,
+  PNG_BOARD_CATALOG,
+  PdfModuleKey,
+  PngBoardKey,
 } from '../lib/reports/pdf-generator';
 
 const WEEKDAY_NAMES = ['Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado', 'Domingo'];
@@ -45,6 +54,23 @@ function fmtStatBadge(st: MetricStats, unit = 'm'): string {
   return `${st.mean.toFixed(1)}${unit} (±${st.stdDev.toFixed(1)}) | Med: ${st.median.toFixed(1)}${unit}`;
 }
 
+function fmtStatFullCell(st: MetricStats, unit = ''): string {
+  if (!st || st.count === 0) return '0.0 (±0.0) | Med: 0.0 [0–0]';
+  return `${st.mean.toFixed(1)}${unit} (±${st.stdDev.toFixed(1)}) | Med: ${st.median.toFixed(1)}${unit} [${st.min.toFixed(0)}–${st.max.toFixed(0)} | P90:${st.p90.toFixed(1)}]`;
+}
+
+function fmtTsBr(ts: number | null): string {
+  if (!ts) return '—';
+  const d = new Date(ts);
+  if (isNaN(d.getTime())) return '—';
+  const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yy = d.getFullYear();
+  const hh = String(d.getHours()).padStart(2, '0');
+  const mi = String(d.getMinutes()).padStart(2, '0');
+  return `${dd}/${mm}/${yy} ${hh}:${mi}`;
+}
+
 export function EmergencyAnalyticsView({
   onPublishToGovernance,
 }: EmergencyAnalyticsViewProps = {}) {
@@ -57,6 +83,14 @@ export function EmergencyAnalyticsView({
 
   // Navegação principal entre as 7 sub-abas executivas
   const [activeTab, setActiveTab] = useState<MainTab>('vsm_journey');
+
+  // Controle da Barra de Escopo Multi-Setor / Multi-Clínica e Modal de Exportação Selecionável
+  const [showScopeSelector, setShowScopeSelector] = useState<boolean>(false);
+  const [showExportModal, setShowExportModal] = useState<boolean>(false);
+  const [selectedPdfModules, setSelectedPdfModules] = useState<PdfModuleKey[]>(
+    PDF_MODULE_CATALOG.map((m) => m.key)
+  );
+  const [selectedPngBoards, setSelectedPngBoards] = useState<PngBoardKey[]>(['png_vsm_flow']);
 
   // Filtros globais do VSM (Mês, Turno, Semana S1-S5, Dia da Semana)
   const [vsmFilterType, setVsmFilterType] = useState<VsmFilterCategory>('monthly');
@@ -74,6 +108,9 @@ export function EmergencyAnalyticsView({
   // Filtros da Aba de Equipe Médica
   const [doctorSearch, setDoctorSearch] = useState<string>('');
   const [doctorViewMode, setDoctorViewMode] = useState<'conduct_matrix' | 'shift_productivity'>('conduct_matrix');
+
+  // Inspetor de Auditoria Individual por Nº de Atendimento (Aba 7)
+  const [auditSearchId, setAuditSearchId] = useState<string>('');
 
   // Competência ativa selecionada
   const activeData: EmergencyAnalyticsData | null = useMemo(() => {
@@ -98,7 +135,7 @@ export function EmergencyAnalyticsView({
     return vsm.monthlyOverall;
   }, [activeData, vsmFilterType, selectedShift, selectedWeekLabel, selectedWeekdayName]);
 
-  // Curva horária ativa do Censo Simultâneo (Geral ou Dia da Semana específico + filtro de Turno)
+  // Curva horária ativa do Censo Simultâneo
   const activeSimultaneousCurve: HourlySimultaneousPoint[] = useMemo(() => {
     if (!activeData) return [];
     const baseCurve =
@@ -116,8 +153,24 @@ export function EmergencyAnalyticsView({
     return baseCurve;
   }, [activeData, selectedCensusDayIdx, selectedCensusTurnFilter]);
 
+  // Registro auditado individualmente na Aba 7
+  const inspectedRecord: NormalizedAttendanceRecord | null = useMemo(() => {
+    if (!activeData) return null;
+    const pool = activeData.sanitizedRecords;
+    if (!auditSearchId.trim()) {
+      return pool.find((r) => r.isAdmitted && r.physicalBedTs !== null) || pool[0] || null;
+    }
+    const targetId = Number(auditSearchId.replace(/\D/g, ''));
+    if (isNaN(targetId)) return null;
+    return (
+      activeData.allSanitizedRecords.find((r) => r.atendimentoId === targetId) ||
+      pool.find((r) => String(r.atendimentoId).includes(String(targetId))) ||
+      null
+    );
+  }, [activeData, auditSearchId]);
+
   // ==========================================================================
-  // HANDLERS DE UPLOAD, FUSÃO EM MEMÓRIA E PUBLICAÇÃO NA GOVERNANÇA
+  // HANDLERS DE UPLOAD (GLOBAL E SEGMENTADO CUMULATIVO) E ESCOPO SETOR/CLÍNICA
   // ==========================================================================
 
   const handlePublishToGovernance = () => {
@@ -131,12 +184,15 @@ export function EmergencyAnalyticsView({
       losMedian: activeData.losOverall.overall.median,
       boardingMean: activeData.vsm.monthlyOverall.totalBoardingStats.mean,
       boardingMedian: activeData.vsm.monthlyOverall.totalBoardingStats.median,
+      uiBoardingMean: activeData.vsm.monthlyOverall.uiBoardingStats.mean,
+      utiBoardingMean: activeData.vsm.monthlyOverall.utiBoardingStats.mean,
+      surgicalBoardingMean: activeData.vsm.monthlyOverall.surgicalBoardingStats.mean,
       directDischargePct: activeData.vsm.monthlyOverall.directDischargePct,
       fastReavMedOnlyPct: activeData.vsm.monthlyOverall.fastReavMedOnlyPct,
       postReportReavalWaitMean: activeData.vsm.monthlyOverall.postReportReavalWaitStats.mean,
       pceEfficiencyPct: activeData.vsm.monthlyOverall.pceEfficiencyPct,
     });
-    setPublishSuccessMsg(`KPIs de ${activeData.periodLabel} sincronizados com a Governança!`);
+    setPublishSuccessMsg(`KPIs de ${activeData.periodLabel} (${activeData.activeScopeLabel}) sincronizados com a Governança!`);
     setTimeout(() => setPublishSuccessMsg(null), 4000);
   };
 
@@ -152,9 +208,9 @@ export function EmergencyAnalyticsView({
         const file = files[i];
         const buffer = await file.arrayBuffer();
         const parsed = parseEmergencyExcel(buffer, file.name);
-        if (parsed.totalAttendances === 0) {
+        if (parsed.totalGlobalAttendances === 0) {
           throw new Error(
-            `O ficheiro "${file.name}" não contém atendimentos válidos de PS Adulto / Clínica Médica. Verifique se enviou o relatório CATE 3333 correto.`
+            `O ficheiro "${file.name}" não contém atendimentos válidos com coluna [Atendimento] e [Entrada]. Verifique se enviou o relatório CATE 3333 correto.`
           );
         }
         parsedList.push(parsed);
@@ -163,7 +219,15 @@ export function EmergencyAnalyticsView({
       setLoadedMonths((prev) => {
         const map = new Map<string, EmergencyAnalyticsData>();
         prev.forEach((m) => map.set(m.monthKey, m));
-        parsedList.forEach((m) => map.set(m.monthKey, m));
+        for (const incoming of parsedList) {
+          const existing = map.get(incoming.monthKey);
+          if (existing) {
+            // Merge cumulativo deduplicado se for do mesmo mês (suporte a relatórios segmentados por setor/clínica)
+            map.set(incoming.monthKey, mergeSegmentedCate3333IntoMonth(existing, incoming));
+          } else {
+            map.set(incoming.monthKey, incoming);
+          }
+        }
         return Array.from(map.values()).sort((a, b) => a.monthKey.localeCompare(b.monthKey));
       });
 
@@ -183,22 +247,23 @@ export function EmergencyAnalyticsView({
   };
 
   const handleUploadCate3493 = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !activeData) return;
+    const files = e.target.files;
+    if (!files || files.length === 0 || !activeData) return;
     setIsLoading(true);
     setErrorMessage(null);
 
     try {
-      const buf3493 = await file.arrayBuffer();
-      const updated = mergeVsmSupplementaryFiles(activeData, buf3493, null);
-      if (!updated.vsm.hasCate3493Data || updated.vsm.matched3493Count === 0) {
+      let updated = activeData;
+      for (let i = 0; i < files.length; i++) {
+        const buf3493 = await files[i].arrayBuffer();
+        updated = mergeVsmSupplementaryFiles(updated, buf3493, null);
+      }
+      if (!updated.vsm.hasCate3493Data) {
         throw new Error(
-          `Nenhum número de atendimento do CATE 3493 ("${file.name}") coincidiu com a competência ativa (${activeData.periodLabel}). Verifique se ambos os ficheiros são do mesmo mês.`
+          `Nenhum número de atendimento do CATE 3493 coincidiu com a competência ativa (${activeData.periodLabel}). Verifique se ambos são do mesmo mês.`
         );
       }
-      setLoadedMonths((prev) =>
-        prev.map((m) => (m.monthKey === updated.monthKey ? updated : m))
-      );
+      setLoadedMonths((prev) => prev.map((m) => (m.monthKey === updated.monthKey ? updated : m)));
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Erro ao cruzar o relatório CATE 3493.';
       setErrorMessage(msg);
@@ -209,22 +274,23 @@ export function EmergencyAnalyticsView({
   };
 
   const handleUploadChaa3704 = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !activeData) return;
+    const files = e.target.files;
+    if (!files || files.length === 0 || !activeData) return;
     setIsLoading(true);
     setErrorMessage(null);
 
     try {
-      const buf3704 = await file.arrayBuffer();
-      const updated = mergeVsmSupplementaryFiles(activeData, null, buf3704);
-      if (!updated.vsm.hasChaa3704Data || updated.vsm.matched3704Count === 0) {
+      let updated = activeData;
+      for (let i = 0; i < files.length; i++) {
+        const buf3704 = await files[i].arrayBuffer();
+        updated = mergeVsmSupplementaryFiles(updated, null, buf3704);
+      }
+      if (!updated.vsm.hasChaa3704Data) {
         throw new Error(
-          `Nenhum atendimento do CHAA 3704 ("${file.name}") coincidiu com a competência ativa (${activeData.periodLabel}). Verifique se o relatório pertence ao mesmo mês.`
+          `Nenhum atendimento do CHAA 3704 coincidiu com a competência ativa (${activeData.periodLabel}). Verifique se o relatório pertence ao mesmo mês.`
         );
       }
-      setLoadedMonths((prev) =>
-        prev.map((m) => (m.monthKey === updated.monthKey ? updated : m))
-      );
+      setLoadedMonths((prev) => prev.map((m) => (m.monthKey === updated.monthKey ? updated : m)));
     } catch (err: unknown) {
       const msg = err instanceof Error ? err.message : 'Erro ao cruzar o relatório CHAA 3704.';
       setErrorMessage(msg);
@@ -232,6 +298,46 @@ export function EmergencyAnalyticsView({
       setIsLoading(false);
       e.target.value = '';
     }
+  };
+
+  const handleApplySectorClinicFilter = (newSectors: string[], newClinics: string[]) => {
+    if (!activeData) return;
+    const refiltered = filterAnalyticsBySectorAndClinic(activeData, newSectors, newClinics);
+    setLoadedMonths((prev) => prev.map((m) => (m.monthKey === refiltered.monthKey ? refiltered : m)));
+  };
+
+  const toggleSectorSelection = (sectorName: string) => {
+    if (!activeData) return;
+    const cur = activeData.selectedSectors;
+    const next = cur.includes(sectorName)
+      ? cur.length > 1
+        ? cur.filter((s) => s !== sectorName)
+        : cur
+      : [...cur, sectorName];
+    handleApplySectorClinicFilter(next, activeData.selectedClinics);
+  };
+
+  const toggleClinicSelection = (clinicName: string) => {
+    if (!activeData) return;
+    const cur = activeData.selectedClinics;
+    const next = cur.includes(clinicName)
+      ? cur.length > 1
+        ? cur.filter((c) => c !== clinicName)
+        : cur
+      : [...cur, clinicName];
+    handleApplySectorClinicFilter(activeData.selectedSectors, next);
+  };
+
+  const togglePdfModule = (modKey: PdfModuleKey) => {
+    setSelectedPdfModules((prev) =>
+      prev.includes(modKey) ? prev.filter((k) => k !== modKey) : [...prev, modKey]
+    );
+  };
+
+  const togglePngBoard = (boardKey: PngBoardKey) => {
+    setSelectedPngBoards((prev) =>
+      prev.includes(boardKey) ? prev.filter((k) => k !== boardKey) : [...prev, boardKey]
+    );
   };
 
   // ==========================================================================
@@ -245,14 +351,13 @@ export function EmergencyAnalyticsView({
           <div className="flex items-center justify-between border-b border-slate-100 pb-6 mb-6">
             <div>
               <span className="inline-flex items-center px-3 py-1 rounded-full text-xs font-bold bg-blue-50 text-blue-700 border border-blue-200 mb-2">
-                ENGENHARIA DE OPERAÇÕES &amp; LEAN HEALTHCARE • LGPD STATELESS (RAM)
+                ENGENHARIA DE OPERAÇÕES &amp; LEAN HEALTHCARE • MULTI-SETOR &amp; MULTI-CLÍNICA • LGPD STATELESS
               </span>
               <h1 className="text-2xl font-extrabold text-slate-900">
                 Central de Inteligência VSM, Jornada do Paciente &amp; Censo Ocupacional
               </h1>
               <p className="text-sm text-slate-600 mt-1">
-                Cruzamento determinístico em memória pelo nº de atendimento: <strong>CATE 3333</strong> (Porta &amp; Throughput) +{' '}
-                <strong>CATE 3493</strong> (Boarding Físico UI/UTI) + <strong>CHAA 3704</strong> (Governança &amp; Mudança de CID).
+                Suporta <strong>Upload Global</strong> (hospital inteiro num único ficheiro) ou <strong>Upload Segmentado Cumulativo</strong> (vários ficheiros separados por Setor/Clínica mesclados automaticamente pelo nº de atendimento).
               </p>
             </div>
           </div>
@@ -265,24 +370,24 @@ export function EmergencyAnalyticsView({
 
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-8">
             <div className="p-4 rounded-xl bg-slate-50 border border-slate-200">
-              <div className="text-xs font-bold text-blue-700 uppercase">Passo 1 (Obrigatório)</div>
-              <div className="text-base font-bold text-slate-900 mt-1">1. Relatório CATE 3333</div>
+              <div className="text-xs font-bold text-blue-700 uppercase">Passo 1 (Global ou Segmentado)</div>
+              <div className="text-base font-bold text-slate-900 mt-1">1. Relatório(s) CATE 3333</div>
               <p className="text-xs text-slate-600 mt-1">
-                Base mestra da porta ao desfecho: tempos de recepção, porta-médico, alta direta no 1º atendimento, medicação, lab, RX, TC, USG, fila pós-laudo, handoff e retorno &lt;48h.
+                Base mestra da porta ao desfecho (PS Adulto, PSGO, PS Infantil / Clínica Médica, Ortopédica, Cirúrgica, GO, Pediatria, Cardiologia).
               </p>
             </div>
             <div className="p-4 rounded-xl bg-slate-50 border border-slate-200">
               <div className="text-xs font-bold text-rose-700 uppercase">Passo 2 (Complementar)</div>
-              <div className="text-base font-bold text-slate-900 mt-1">2. Relatório CATE 3493</div>
+              <div className="text-base font-bold text-slate-900 mt-1">2. Relatório(s) CATE 3493</div>
               <p className="text-xs text-slate-600 mt-1">
-                Desmembra o Boarding real em 2 etapas: tempo de aprovação do plano/leito virtual vs. subida física ao andar (UI/UTI), centro cirúrgico e ranking por operadora.
+                Desmembra o Boarding real em 2 etapas (Plano/Virtual vs. Subida Física), diferenciando Enfermaria (UI) vs. UTI e Cirúrgico vs. Clínico.
               </p>
             </div>
             <div className="p-4 rounded-xl bg-slate-50 border border-slate-200">
               <div className="text-xs font-bold text-teal-700 uppercase">Passo 3 (Complementar)</div>
-              <div className="text-base font-bold text-slate-900 mt-1">3. Relatório CHAA 3704</div>
+              <div className="text-base font-bold text-slate-900 mt-1">3. Relatório(s) CHAA 3704</div>
               <p className="text-xs text-slate-600 mt-1">
-                Auditoria de Governança Clínica e Assertividade Diagnóstica: compara o CID de entrada na porta com o CID definitivo na solicitação de internação.
+                Auditoria de Governança Clínica e Assertividade Diagnóstica: compara o CID da porta com o CID definitivo na solicitação de internação.
               </p>
             </div>
           </div>
@@ -293,10 +398,10 @@ export function EmergencyAnalyticsView({
                 ↑
               </div>
               <p className="mb-1 text-base font-bold text-slate-800">
-                {isLoading ? 'A processar planilha em memória RAM...' : 'Clique para selecionar ou arraste o ficheiro CATE 3333 (.xls ou .xlsx)'}
+                {isLoading ? 'A processar planilha(s) em memória RAM...' : 'Clique para selecionar ou arraste um ou vários ficheiros CATE 3333 (.xls ou .xlsx)'}
               </p>
               <p className="text-xs text-slate-500">
-                Pode selecionar 1 ou vários meses em simultâneo • Nomes, endereços e datas de nascimento são descartados instantaneamente.
+                Pode selecionar múltiplos relatórios segmentados ou globais de uma só vez • Processamento 100% local e anónimo (LGPD).
               </p>
             </div>
             <input
@@ -315,8 +420,8 @@ export function EmergencyAnalyticsView({
 
   const vsm = activeData.vsm;
   const s = activeVsmSlice;
+  const bbt = vsm.boardingByBedType;
 
-  // Filtro de médicos na matriz de condutas
   const filteredDoctorConduct = vsm.doctorConductMatrix.filter((d) =>
     d.name.toLowerCase().includes(doctorSearch.toLowerCase())
   );
@@ -330,42 +435,38 @@ export function EmergencyAnalyticsView({
 
   return (
     <div className="min-h-screen bg-slate-100 pb-16">
-      {/* BARRA SUPERIOR EXECUTIVA: SELETOR DE MÊS, FUSÃO MULTI-RELATÓRIOS E EXPORTAÇÕES */}
+      {/* BARRA SUPERIOR EXECUTIVA: SELETOR DE MÊS, ESCOPO MULTI-CLÍNICA, FUSÃO E EXPORTAÇÕES */}
       <div className="bg-slate-900 text-white border-b border-slate-800 px-6 py-4 shadow-md">
         <div className="max-w-[1600px] mx-auto flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4">
           <div>
-            <div className="flex items-center gap-2.5 flex-wrap">
+            <div className="flex items-center gap-2 flex-wrap">
               <span className="px-2.5 py-0.5 rounded bg-blue-600 text-[11px] font-bold uppercase tracking-wider">
                 VSM Lean Healthcare
               </span>
-              <span className="text-xs text-slate-400">
-                PS Adulto • Clínica Médica • Processamento Stateless (LGPD)
+              <span className="px-2.5 py-0.5 rounded bg-slate-800 border border-slate-700 text-sky-300 text-xs font-bold">
+                🎯 Escopo: {activeData.activeScopeLabel} ({activeData.totalAttendances} de {activeData.totalGlobalAttendances} pac.)
               </span>
               {vsm.hasCate3493Data ? (
                 <span className="px-2.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-400/40 text-emerald-300 text-xs font-semibold">
-                  ✓ CATE 3493 Integrado ({vsm.matched3493Count} internados c/ Boarding Físico)
+                  ✓ CATE 3493 ({vsm.matched3493Count} int. c/ Boarding Físico)
                 </span>
               ) : (
                 <span className="px-2.5 py-0.5 rounded-full bg-amber-500/20 border border-amber-400/40 text-amber-300 text-xs">
-                  ⚠️ CATE 3493 não anexado (Boarding restrito ao Leito Virtual)
+                  ⚠️ CATE 3493 pendente
                 </span>
               )}
               {vsm.hasChaa3704Data ? (
                 <span className="px-2.5 py-0.5 rounded-full bg-teal-500/20 border border-teal-400/40 text-teal-300 text-xs font-semibold">
-                  ✓ CHAA 3704 Integrado ({vsm.matched3704Count} CIDs auditados)
+                  ✓ CHAA 3704 ({vsm.matched3704Count} CIDs)
                 </span>
-              ) : (
-                <span className="px-2.5 py-0.5 rounded-full bg-slate-800 border border-slate-700 text-slate-400 text-xs">
-                  CHAA 3704 opcional pendente
-                </span>
-              )}
+              ) : null}
             </div>
             <h1 className="text-xl font-extrabold tracking-tight mt-1">
-              Jornada do Paciente, Censo Simultâneo &amp; Governança Clínica — {activeData.periodLabel} (N = {activeData.totalAttendances})
+              Jornada do Paciente, Censo Simultâneo &amp; Boarding Diferenciado — {activeData.periodLabel}
             </h1>
           </div>
 
-          {/* Botões de Upload Complementar e Exportação de Documentos */}
+          {/* Botões de Upload Cumulativo, Filtro de Setor/Clínica e Exportação Selecionável */}
           <div className="flex flex-wrap items-center gap-2">
             {loadedMonths.length > 1 && (
               <select
@@ -375,25 +476,36 @@ export function EmergencyAnalyticsView({
               >
                 {loadedMonths.map((m) => (
                   <option key={m.monthKey} value={m.monthKey}>
-                    Competência: {m.periodLabel} ({m.totalAttendances} pac.)
+                    {m.periodLabel} ({m.totalAttendances}/{m.totalGlobalAttendances} pac.)
                   </option>
                 ))}
               </select>
             )}
 
+            <button
+              onClick={() => setShowScopeSelector((prev) => !prev)}
+              className={`px-3 py-2 rounded-lg border text-xs font-bold transition ${
+                showScopeSelector
+                  ? 'bg-sky-600 text-white border-sky-400'
+                  : 'bg-slate-800 hover:bg-slate-700 text-sky-200 border-slate-600'
+              }`}
+            >
+              🏥 Filtrar Setor / Clínica ({activeData.selectedClinics.length}/{activeData.availableClinics.length})
+            </button>
+
             <label className="cursor-pointer px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600 text-xs font-semibold text-slate-200 transition">
-              + CATE 3333 (Mês)
+              + Somar CATE 3333
               <input type="file" accept=".xls,.xlsx" multiple onChange={handleUploadCate3333} className="hidden" />
             </label>
 
             <label className="cursor-pointer px-3 py-2 rounded-lg bg-rose-900/60 hover:bg-rose-800 border border-rose-500/50 text-xs font-bold text-rose-100 transition">
-              {vsm.hasCate3493Data ? '↻ Atualizar CATE 3493' : '+ Anexar CATE 3493 (Boarding)'}
-              <input type="file" accept=".xls,.xlsx" onChange={handleUploadCate3493} className="hidden" />
+              {vsm.hasCate3493Data ? '+ Somar CATE 3493' : '+ Anexar CATE 3493 (Boarding)'}
+              <input type="file" accept=".xls,.xlsx" multiple onChange={handleUploadCate3493} className="hidden" />
             </label>
 
             <label className="cursor-pointer px-3 py-2 rounded-lg bg-teal-900/60 hover:bg-teal-800 border border-teal-500/50 text-xs font-bold text-teal-100 transition">
-              {vsm.hasChaa3704Data ? '↻ Atualizar CHAA 3704' : '+ Anexar CHAA 3704 (CIDs)'}
-              <input type="file" accept=".xls,.xlsx" onChange={handleUploadChaa3704} className="hidden" />
+              {vsm.hasChaa3704Data ? '+ Somar CHAA 3704' : '+ Anexar CHAA 3704 (CIDs)'}
+              <input type="file" accept=".xls,.xlsx" multiple onChange={handleUploadChaa3704} className="hidden" />
             </label>
 
             <div className="h-5 w-[1px] bg-slate-700 mx-1 hidden sm:block" />
@@ -401,9 +513,9 @@ export function EmergencyAnalyticsView({
             {onPublishToGovernance && (
               <button
                 onClick={handlePublishToGovernance}
-                className="px-3.5 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold shadow transition"
+                className="px-3 py-2 rounded-lg bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold shadow transition"
               >
-                📤 Publicar na Governança
+                📤 Publicar Governança
               </button>
             )}
 
@@ -411,35 +523,301 @@ export function EmergencyAnalyticsView({
               onClick={() => generateEmergencyExcel(activeData)}
               className="px-3.5 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold shadow transition"
             >
-              📊 Excel Executivo (8 Abas)
+              📊 Excel Completo (9 Abas)
             </button>
 
             <button
               onClick={() => generateEmergencyPdf(activeData, s)}
               className="px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold shadow transition"
             >
-              📄 Dossiê PDF Vetorial (7 Págs)
+              📄 PDF Completo (9 Págs)
             </button>
 
             <button
-              onClick={() => generateVsmPngImage(activeData, s)}
+              onClick={() => setShowExportModal((prev) => !prev)}
               className="px-3.5 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shadow transition"
             >
-              🖼️ Mapa VSM p/ Slide (.png)
+              ⚙️ Download Selecionável (PDF / PNG)
             </button>
           </div>
         </div>
 
+        {/* PAINEL EXPANSÍVEL: SELETOR MULTI-SETOR E MULTI-CLÍNICA (INDIVIDUAL OU CONSOLIDADO) */}
+        {showScopeSelector && (
+          <div className="max-w-[1600px] mx-auto mt-4 p-4 rounded-xl bg-slate-800/95 border border-slate-700 space-y-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-700 pb-2.5">
+              <div>
+                <span className="text-xs font-extrabold text-white uppercase">
+                  Filtro Dinâmico de Escopo Assistencial (Setores e Clínicas em Memória)
+                </span>
+                <p className="text-[11px] text-slate-300">
+                  Alterne em tempo real entre o seu foco principal (PS Adulto - Clínica Médica), qualquer especialidade isolada/combinada ou o Consolidado Geral da Emergência.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() => {
+                    const adultSec = activeData.availableSectors
+                      .filter((x) => x.name.toUpperCase().includes('ADULTO'))
+                      .map((x) => x.name);
+                    handleApplySectorClinicFilter(
+                      adultSec.length > 0 ? adultSec : activeData.availableSectors.map((x) => x.name),
+                      ['Médica']
+                    );
+                  }}
+                  className="px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold"
+                >
+                  🎯 Meu Foco: PS Adulto — Clínica Médica
+                </button>
+                <button
+                  onClick={() =>
+                    handleApplySectorClinicFilter(
+                      activeData.availableSectors.map((x) => x.name),
+                      activeData.availableClinics.map((x) => x.name)
+                    )
+                  }
+                  className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold"
+                >
+                  🏥 Consolidado Geral Emergência (Todos: {activeData.totalGlobalAttendances} pac.)
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs">
+              <div>
+                <div className="font-bold text-slate-300 mb-1.5">1. Setores Disponíveis na Base:</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {activeData.availableSectors.map((sec) => {
+                    const active = activeData.selectedSectors.includes(sec.name);
+                    return (
+                      <button
+                        key={sec.name}
+                        onClick={() => toggleSectorSelection(sec.name)}
+                        className={`px-2.5 py-1.5 rounded-lg font-bold border transition ${
+                          active
+                            ? 'bg-sky-600 text-white border-sky-400'
+                            : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-white'
+                        }`}
+                      >
+                        {active ? '✓ ' : ''}{sec.name} ({sec.count})
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div>
+                <div className="font-bold text-slate-300 mb-1.5">2. Clínicas / Especialidades Disponíveis na Base:</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {activeData.availableClinics.map((cli) => {
+                    const active = activeData.selectedClinics.includes(cli.name);
+                    return (
+                      <button
+                        key={cli.name}
+                        onClick={() => toggleClinicSelection(cli.name)}
+                        className={`px-2.5 py-1.5 rounded-lg font-bold border transition ${
+                          active
+                            ? 'bg-indigo-600 text-white border-indigo-400'
+                            : 'bg-slate-900 text-slate-400 border-slate-700 hover:text-white'
+                        }`}
+                      >
+                        {active ? '✓ ' : ''}{cli.name} ({cli.count})
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* MODAL / PAINEL DE EXPORTAÇÃO SELECIONÁVEL (PDF CUSTOMIZADO & 4 PRANCHAS PNG) */}
+        {showExportModal && (
+          <div className="max-w-[1600px] mx-auto mt-4 p-5 rounded-xl bg-slate-800 border border-indigo-500/50 shadow-xl space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-700 pb-3">
+              <div>
+                <span className="text-sm font-extrabold text-white">
+                  ⚙️ CENTRAL DE DOWNLOAD SELECIONÁVEL (PDF VETORIAL &amp; PRANCHAS PNG 2400×1480px PARA SLIDES)
+                </span>
+                <p className="text-xs text-slate-300">
+                  Escolha exatamente quais páginas do PDF ou quais pranchas em imagem (.png) deseja exportar para apresentar à Diretoria, NIR ou Equipe Médica.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  onClick={() =>
+                    setSelectedPdfModules(PDF_MODULE_CATALOG.map((m) => m.key))
+                  }
+                  className="px-2.5 py-1 rounded bg-slate-700 hover:bg-slate-600 text-xs font-bold text-white"
+                >
+                  ✅ Marcar Todas (9 Págs)
+                </button>
+                <button
+                  onClick={() =>
+                    setSelectedPdfModules([
+                      'mod1_vsm',
+                      'mod2_census_chart',
+                      'mod4_census_table',
+                      'mod6_boarding',
+                      'mod9_methodology',
+                    ])
+                  }
+                  className="px-2.5 py-1 rounded bg-blue-700 hover:bg-blue-600 text-xs font-bold text-white"
+                >
+                  🏛️ Preset Diretoria Executiva
+                </button>
+                <button
+                  onClick={() =>
+                    setSelectedPdfModules([
+                      'mod1_vsm',
+                      'mod4_census_table',
+                      'mod7_doctors',
+                      'mod8_governance_cids',
+                    ])
+                  }
+                  className="px-2.5 py-1 rounded bg-teal-700 hover:bg-teal-600 text-xs font-bold text-white"
+                >
+                  👨‍⚕️ Preset Equipe Médica &amp; Feedback
+                </button>
+                <button
+                  onClick={() =>
+                    setSelectedPdfModules(['mod6_boarding', 'mod5_times_sectors', 'mod9_methodology'])
+                  }
+                  className="px-2.5 py-1 rounded bg-rose-700 hover:bg-rose-600 text-xs font-bold text-white"
+                >
+                  🛏️ Preset NIR &amp; Operadoras
+                </button>
+                <button
+                  onClick={() => setShowExportModal(false)}
+                  className="px-2.5 py-1 rounded bg-red-600/80 hover:bg-red-600 text-xs font-bold text-white"
+                >
+                  ✕ Fechar
+                </button>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+              {/* Coluna Esquerda: Seleção de Módulos do PDF */}
+              <div className="lg:col-span-7 space-y-2">
+                <div className="text-xs font-bold text-blue-300 uppercase">
+                  1. Selecione as Páginas do Dossiê PDF Vetorial ({selectedPdfModules.length} de 9 selecionadas):
+                </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  {PDF_MODULE_CATALOG.map((mod) => {
+                    const checked = selectedPdfModules.includes(mod.key);
+                    return (
+                      <label
+                        key={mod.key}
+                        onClick={() => togglePdfModule(mod.key)}
+                        className={`p-2.5 rounded-lg border cursor-pointer transition flex items-start gap-2.5 ${
+                          checked
+                            ? 'bg-blue-950/80 border-blue-400 text-white'
+                            : 'bg-slate-900/70 border-slate-700 text-slate-400'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => {}}
+                          className="mt-0.5 accent-blue-500"
+                        />
+                        <div className="text-[11px] leading-snug">
+                          <div className="font-bold">{mod.title}</div>
+                          <div className="text-[10px] opacity-80 mt-0.5">{mod.subtitle}</div>
+                        </div>
+                      </label>
+                    );
+                  })}
+                </div>
+                <div className="pt-2">
+                  <button
+                    onClick={() => generateSelectableEmergencyPdf(activeData, selectedPdfModules, s)}
+                    disabled={selectedPdfModules.length === 0}
+                    className="w-full py-2.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-40 text-white text-xs font-extrabold shadow"
+                  >
+                    📄 Baixar PDF Vetorial com as {selectedPdfModules.length} Página(s) Selecionada(s)
+                  </button>
+                </div>
+              </div>
+
+              {/* Coluna Direita: Seleção de Pranchas PNG para Slides */}
+              <div className="lg:col-span-5 space-y-2">
+                <div className="text-xs font-bold text-indigo-300 uppercase">
+                  2. Selecione as Pranchas Visuais em PNG (2400×1480px p/ PowerPoint):
+                </div>
+                <div className="space-y-2">
+                  {PNG_BOARD_CATALOG.map((b) => {
+                    const checked = selectedPngBoards.includes(b.key);
+                    return (
+                      <div
+                        key={b.key}
+                        className={`p-2.5 rounded-lg border transition flex items-center justify-between gap-2 ${
+                          checked
+                            ? 'bg-indigo-950/80 border-indigo-400 text-white'
+                            : 'bg-slate-900/70 border-slate-700 text-slate-400'
+                        }`}
+                      >
+                        <label
+                          onClick={() => togglePngBoard(b.key)}
+                          className="flex items-start gap-2.5 cursor-pointer flex-1"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={() => {}}
+                            className="mt-0.5 accent-indigo-500"
+                          />
+                          <div className="text-[11px] leading-snug">
+                            <div className="font-bold">{b.title}</div>
+                            <div className="text-[10px] opacity-80 mt-0.5">{b.subtitle}</div>
+                          </div>
+                        </label>
+                        <button
+                          onClick={() => generateSinglePngBoard(activeData, b.key, s)}
+                          className="px-2.5 py-1.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold shrink-0"
+                        >
+                          ↓ PNG
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="pt-2 flex gap-2">
+                  <button
+                    onClick={() => generateSelectableVsmPngBoards(activeData, selectedPngBoards, s)}
+                    disabled={selectedPngBoards.length === 0}
+                    className="flex-1 py-2.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 text-white text-xs font-extrabold shadow"
+                  >
+                    🖼️ Baixar {selectedPngBoards.length} Prancha(s) PNG Selecionada(s)
+                  </button>
+                  <button
+                    onClick={() =>
+                      generateSelectableVsmPngBoards(
+                        activeData,
+                        PNG_BOARD_CATALOG.map((x) => x.key),
+                        s
+                      )
+                    }
+                    className="px-3 py-2.5 rounded-lg bg-slate-700 hover:bg-slate-600 text-white text-xs font-bold"
+                  >
+                    Baixar Todas (4 PNGs)
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* SUB-ABAS DE NAVEGAÇÃO DO MÓDULO (7 ABAS EXECUTIVAS) */}
         <div className="max-w-[1600px] mx-auto mt-4 pt-3 border-t border-slate-800 flex flex-wrap gap-2">
           {[
-            { id: 'vsm_journey', label: '🗺️ 1. Mapa da Jornada & VSM (Lean)' },
-            { id: 'simultaneous_census', label: '🔥 2. Censo Simultâneo & Heatmaps 24x7' },
-            { id: 'boarding_convenios', label: '🛏️ 3. Boarding Real & Convênios' },
+            { id: 'vsm_journey', label: '🗺️ 1. Mapa da Jornada, VSM & Faixas de Permanência' },
+            { id: 'simultaneous_census', label: '🔥 2. Censo Estratificado (Méd±DP|Med|Mín-Máx) & Heatmaps' },
+            { id: 'boarding_convenios', label: '🛏️ 3. Boarding: UI vs. UTI, Cirúrgico vs. Clínico & Convênios' },
             { id: 'doctors_conduct', label: '👨‍⚕️ 4. Condutas Médicas (1º vs. Último Atend)' },
             { id: 'clinical_governance', label: '🧬 5. Governança Clínica, CIDs & Retorno <48h' },
-            { id: 'temporal_mom', label: `📈 6. Série Diária, Semanas & Comparativo (${loadedMonths.length})` },
-            { id: 'methodology_audit', label: '📐 7. Metodologia & Auditoria' },
+            { id: 'temporal_mom', label: `🏥 6. Setores/Clínicas, Semanas & Comparativo (${loadedMonths.length})` },
+            { id: 'methodology_audit', label: '📐 7. Metodologia, Completude Tasy & Inspetor de Ficha' },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -478,14 +856,14 @@ export function EmergencyAnalyticsView({
       {/* CONTEÚDO PRINCIPAL */}
       <div className="max-w-[1600px] mx-auto px-6 mt-5 space-y-6">
         {/* ====================================================================
-            ABA 1: MAPA DA JORNADA DO PACIENTE & VSM (LEAN HEALTHCARE)
+            ABA 1: MAPA DA JORNADA DO PACIENTE, VSM LEAN & FAIXAS DE PERMANÊNCIA
            ==================================================================== */}
         {activeTab === 'vsm_journey' && (
           <div className="space-y-6">
             {/* Barra de Filtros Globais de Recorte do VSM */}
             <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-4">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-bold text-slate-500 uppercase mr-1">Recorte Analítico do VSM:</span>
+                <span className="text-xs font-bold text-slate-500 uppercase mr-1">Recorte Temporal do VSM:</span>
                 {[
                   { id: 'monthly', label: '📅 Consolidado Mensal' },
                   { id: 'shift', label: '☀️/🌙 Por Turno (Diurno vs. Noturno)' },
@@ -558,7 +936,7 @@ export function EmergencyAnalyticsView({
               </div>
 
               <div className="text-xs font-bold text-slate-700 bg-slate-100 px-3 py-1.5 rounded-lg">
-                Recorte Ativo: <span className="text-blue-700">{s.label}</span> ({s.totalInput} atendimentos)
+                Recorte: <span className="text-blue-700">{s.label}</span> ({s.totalInput} pac.)
               </div>
             </div>
 
@@ -580,7 +958,7 @@ export function EmergencyAnalyticsView({
                 <div className="text-[11px] font-bold text-slate-500 uppercase">2. Porta-Médico (SLA ≤20m)</div>
                 <div className="text-2xl font-extrabold text-slate-900 mt-1">{s.doorToDocTotalStats.mean} min</div>
                 <div className="text-xs text-slate-600 mt-1">
-                  Med: <strong>{s.doorToDocTotalStats.median}m</strong> | P90: {s.doorToDocTotalStats.p90}m | Recepção: {s.waitTotemToRecepStats.mean + s.recepRegistrationStats.mean}m
+                  Med: <strong>{s.doorToDocTotalStats.median}m</strong> | P90: {s.doorToDocTotalStats.p90}m | Meta: {activeData.withinSlaDoorToDocRate}%
                 </div>
               </div>
 
@@ -598,28 +976,32 @@ export function EmergencyAnalyticsView({
                 <div className="text-[11px] font-bold text-slate-500 uppercase">4. Fila Invisível Pós-Laudo</div>
                 <div className="text-2xl font-extrabold text-amber-700 mt-1">{s.postReportReavalWaitStats.mean} min</div>
                 <div className="text-xs text-slate-600 mt-1">
-                  Mediana: <strong>{s.postReportReavalWaitStats.median}m</strong> (±{s.postReportReavalWaitStats.stdDev}m) após último laudo
-                </div>
-              </div>
-
-              <div className="bg-white rounded-xl p-4 border-l-4 border-purple-600 shadow-sm">
-                <div className="text-[11px] font-bold text-slate-500 uppercase">5. Pedágio de Handoff</div>
-                <div className="text-2xl font-extrabold text-purple-700 mt-1">{s.handoffDoctorPct}% trocam</div>
-                <div className="text-xs text-slate-600 mt-1">
-                  Mesmo Méd: Med <strong>{s.sameDoctorLosStats.median}m</strong> vs. Troca: Med <strong>{s.handoffDoctorLosStats.median}m</strong>
+                  Mediana: <strong>{s.postReportReavalWaitStats.median}m</strong> | Passagem Plantão: {vsm.shiftChangeBottleneck.totalShiftChangeRetainedCount} pac.
                 </div>
               </div>
 
               <div className="bg-white rounded-xl p-4 border-l-4 border-rose-600 shadow-sm">
-                <div className="text-[11px] font-bold text-slate-500 uppercase">6. Boarding Real (UI/UTI)</div>
-                <div className="text-2xl font-extrabold text-rose-700 mt-1">{s.totalBoardingStats.mean} min</div>
+                <div className="text-[11px] font-bold text-slate-500 uppercase">5. Boarding UI vs. UTI</div>
+                <div className="text-lg font-extrabold text-rose-700 mt-1">
+                  UI: {s.uiBoardingStats.mean}m | UTI: {s.utiBoardingStats.mean}m
+                </div>
                 <div className="text-xs text-slate-600 mt-1">
-                  Med: <strong>{s.totalBoardingStats.median}m</strong> | {s.admittedTotalCount} int. ({s.admittedUiCount} UI / {s.admittedUtiCount} UTI)
+                  Med UI: <strong>{s.uiBoardingStats.median}m</strong> vs. Med UTI: <strong>{s.utiBoardingStats.median}m</strong>
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl p-4 border-l-4 border-purple-600 shadow-sm">
+                <div className="text-[11px] font-bold text-slate-500 uppercase">6. Cirúrgico vs. Clínico</div>
+                <div className="text-lg font-extrabold text-purple-800 mt-1">
+                  Cir: {s.surgicalBoardingStats.mean}m | Clín: {s.clinicalBoardingStats.mean}m
+                </div>
+                <div className="text-xs text-slate-600 mt-1">
+                  <strong>{vsm.equivalentBlockedBeds24h} macas</strong> bloqueadas 24h/d ({vsm.wastedBedHoursInBoarding}h)
                 </div>
               </div>
             </div>
 
-            {/* FLUXOGRAMA HORIZONTAL INTERATIVO DO VSM (INPUT -> THROUGHPUT -> OUTPUT & BOARDING) */}
+            {/* FLUXOGRAMA HORIZONTAL INTERATIVO DO VSM */}
             <div className="bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between border-b border-slate-100 pb-4 mb-6">
                 <div>
@@ -627,17 +1009,28 @@ export function EmergencyAnalyticsView({
                     FLUXOGRAMA DE VALOR LEAN HEALTHCARE (VALUE STREAM MAPPING — {s.label.toUpperCase()})
                   </h2>
                   <p className="text-xs text-slate-500 mt-0.5">
-                    Rastreamento integral de ponta a ponta: Entrada na Porta → Triagem/Consulta Inicial → Bifurcação por Rota de Throughput → Fila Pós-Laudo → Desfecho e Boarding em 2 Etapas.
+                    Escopo Ativo: <strong>{activeData.activeScopeLabel}</strong> • Rastreamento completo com PCE estratificado por rota e Boarding diferenciado (UI vs. UTI e Cirúrgico vs. Clínico).
                   </p>
                 </div>
-                <span className="mt-2 sm:mt-0 px-3 py-1 rounded-full bg-blue-50 border border-blue-200 text-blue-800 text-xs font-bold">
-                  Eficiência Lean (PCE): {s.pceEfficiencyPct}% Valor Agregado ({s.vaMinutesMean}m VA vs. {s.nvaMinutesMean}m Espera)
-                </span>
+                <div className="flex flex-wrap gap-1.5 mt-2 sm:mt-0">
+                  <span className="px-2.5 py-1 rounded-full bg-blue-50 border border-blue-200 text-blue-800 text-xs font-bold">
+                    PCE Global: {s.pceEfficiencyPct}%
+                  </span>
+                  <span className="px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold">
+                    PCE Ramo A: {s.pceRamoADirectPct}%
+                  </span>
+                  <span className="px-2.5 py-1 rounded-full bg-amber-50 border border-amber-200 text-amber-800 text-xs font-bold">
+                    PCE Fast Reav: {s.pceRamoB1FastReavPct}%
+                  </span>
+                  <span className="px-2.5 py-1 rounded-full bg-orange-50 border border-orange-200 text-orange-800 text-xs font-bold">
+                    PCE Exames: {s.pceRamoB2DiagExamsPct}%
+                  </span>
+                </div>
               </div>
 
               {/* Grid Horizontal de 4 Colunas do Fluxograma VSM */}
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
-                {/* COLUNA 1: INPUT (TOTEM & RECEPÇÃO) */}
+                {/* COLUNA 1: INPUT */}
                 <div className="lg:col-span-2 flex flex-col justify-center">
                   <div className="rounded-xl border-2 border-slate-400 bg-slate-50 overflow-hidden shadow-sm">
                     <div className="bg-slate-900 text-white px-3 py-2 text-xs font-bold text-center">
@@ -662,7 +1055,7 @@ export function EmergencyAnalyticsView({
                   </div>
                 </div>
 
-                {/* COLUNA 2: 1º ATENDIMENTO MÉDICO (GATEKEEPER) */}
+                {/* COLUNA 2: 1º ATENDIMENTO MÉDICO */}
                 <div className="lg:col-span-3 flex flex-col justify-center">
                   <div className="mb-2 text-center">
                     <span className="inline-block px-2.5 py-1 rounded-full bg-red-50 border border-red-200 text-red-700 text-[11px] font-bold">
@@ -692,13 +1085,13 @@ export function EmergencyAnalyticsView({
                   </div>
                 </div>
 
-                {/* COLUNA 3: BIFURCAÇÃO DE THROUGHPUT (RAMO A vs. RAMO B1 FAST REAV vs. RAMO B2 EXAMES) */}
+                {/* COLUNA 3: BIFURCAÇÃO DE THROUGHPUT */}
                 <div className="lg:col-span-4 flex flex-col justify-between gap-3">
-                  {/* RAMO A: ALTA DIRETA NO 1º ATENDIMENTO */}
+                  {/* RAMO A */}
                   <div className="rounded-xl border-2 border-emerald-500 bg-emerald-50/50 overflow-hidden shadow-sm">
                     <div className="bg-emerald-700 text-white px-3 py-1.5 text-xs font-bold flex justify-between">
                       <span>RAMO A: ALTA DIRETA 1º ATENDIMENTO</span>
-                      <span>{s.directDischargePct}% do PS</span>
+                      <span>{s.directDischargePct}% do PS (PCE: {s.pceRamoADirectPct}%)</span>
                     </div>
                     <div className="p-3 text-xs space-y-1">
                       <div className="font-extrabold text-slate-900">
@@ -707,17 +1100,14 @@ export function EmergencyAnalyticsView({
                       <div className="text-slate-700">
                         <strong>Permanência Total (Porta → Alta):</strong> {fmtStatBadge(s.directDischargeLosStats)} | P90: {s.directDischargeLosStats.p90}m
                       </div>
-                      <div className="text-[11px] font-bold text-emerald-800">
-                        ✓ Resolução Single-Touch no Consultório (Zero Fila de Retaguarda)
-                      </div>
                     </div>
                   </div>
 
-                  {/* SUB-RAMO B1: FAST REAV (APENAS MEDICAÇÃO, SEM EXAMES) */}
+                  {/* SUB-RAMO B1: FAST REAV */}
                   <div className="rounded-xl border-2 border-amber-400 bg-amber-50/60 overflow-hidden shadow-sm">
                     <div className="bg-amber-600 text-white px-3 py-1.5 text-xs font-bold flex justify-between">
                       <span>SUB-RAMO B1: FAST REAV (SÓ MEDICAÇÃO)</span>
-                      <span>{s.fastReavMedOnlyPct}% do PS</span>
+                      <span>{s.fastReavMedOnlyPct}% do PS (PCE: {s.pceRamoB1FastReavPct}%)</span>
                     </div>
                     <div className="p-3 text-xs space-y-1">
                       <div className="font-extrabold text-slate-900">
@@ -730,17 +1120,14 @@ export function EmergencyAnalyticsView({
                       <div className="text-slate-700">
                         <strong>Permanência Total Fast Reav:</strong> {fmtStatBadge(s.fastReavMedOnlyLosStats)}
                       </div>
-                      <div className="text-[11px] font-bold text-amber-900">
-                        ⚡ Candidatos a Reavaliação Rápida (Não dependem de laudo externo)
-                      </div>
                     </div>
                   </div>
 
-                  {/* SUB-RAMO B2: GIRO DIAGNÓSTICO (EXAMES LAB / TC / RX / USG) */}
+                  {/* SUB-RAMO B2: GIRO DIAGNÓSTICO */}
                   <div className="rounded-xl border-2 border-orange-500 bg-orange-50/50 overflow-hidden shadow-sm">
                     <div className="bg-orange-700 text-white px-3 py-1.5 text-xs font-bold flex justify-between">
                       <span>SUB-RAMO B2: GIRO DIAGNÓSTICO (EXAMES)</span>
-                      <span>{s.diagnosticExamsLoopPct}% do PS</span>
+                      <span>{s.diagnosticExamsLoopPct}% do PS (PCE: {s.pceRamoB2DiagExamsPct}%)</span>
                     </div>
                     <div className="p-3 text-xs space-y-1.5">
                       <div className="font-extrabold text-slate-900">
@@ -750,7 +1137,7 @@ export function EmergencyAnalyticsView({
                         <div className="p-1.5 rounded bg-white border border-orange-200">
                           <strong>🧪 Lab:</strong> {s.labCount} ({s.labPct}%)
                           <br />
-                          Coleta: {s.waitLabCollectStats.mean}m | Laudo: {s.waitLabReportStats.mean}m
+                          Coleta: {s.waitLabCollectStats.mean}m | Laudo: <strong>{s.waitLabReportStats.mean}m</strong> (Med {s.waitLabReportStats.median}m)
                         </div>
                         <div className="p-1.5 rounded bg-white border border-orange-200">
                           <strong>🖥️ TC:</strong> {s.tcCount} ({s.tcPct}%)
@@ -775,22 +1162,21 @@ export function EmergencyAnalyticsView({
                   </div>
                 </div>
 
-                {/* COLUNA 4: FILA PÓS-LAUDO, OUTPUT DE ALTA PÓS-PROPEDÊUTICA & BOARDING REAL */}
+                {/* COLUNA 4: FILA PÓS-LAUDO, OUTPUTS E BOARDING DIFERENCIADO */}
                 <div className="lg:col-span-3 flex flex-col justify-between gap-3">
-                  {/* Alerta da Fila Invisível Pós-Laudo */}
                   <div className="p-2.5 rounded-xl bg-red-50 border border-red-300 text-center">
                     <div className="text-[11px] font-extrabold text-red-800 uppercase">
-                      ⚠️ Gargalo Oculto: Fila Pós-Laudo p/ Reavaliação
+                      ⚠️ Fila Pós-Laudo &amp; Troca de Plantão
                     </div>
                     <div className="text-xs font-bold text-red-900 mt-0.5">
-                      Média: {s.postReportReavalWaitStats.mean} min | Mediana: {s.postReportReavalWaitStats.median} min (P90: {s.postReportReavalWaitStats.p90}m)
+                      Média: {s.postReportReavalWaitStats.mean}m | Mediana: {s.postReportReavalWaitStats.median}m (P90: {s.postReportReavalWaitStats.p90}m)
                     </div>
                     <div className="text-[10px] text-red-700">
-                      Tempo entre liberação do último laudo (Lab/TC) e decisão médica final
+                      Retidos na passagem (07h/19h): <strong>{vsm.shiftChangeBottleneck.totalShiftChangeRetainedCount} pac.</strong> ({vsm.shiftChangeBottleneck.pctOfAllPostLaudoPatients}%)
                     </div>
                   </div>
 
-                  {/* OUTPUT 1: ALTA PÓS-PROPEDÊUTICA + PEDÁGIO DE HANDOFF */}
+                  {/* OUTPUT 1 */}
                   <div className="rounded-xl border-2 border-sky-500 bg-sky-50/50 overflow-hidden shadow-sm">
                     <div className="bg-sky-700 text-white px-3 py-1.5 text-xs font-bold flex justify-between">
                       <span>OUTPUT 1: ALTA PÓS-REAVALIAÇÃO</span>
@@ -801,53 +1187,45 @@ export function EmergencyAnalyticsView({
                         N = {s.postPropDischargeCount} altas pós-giro (+{s.postConsultEvasionCount} evasões)
                       </div>
                       <div className="text-slate-700">
-                        <strong>Permanência Total:</strong> {fmtStatBadge(s.postPropDischargeLosStats)}
+                        <strong>Permanência:</strong> {fmtStatBadge(s.postPropDischargeLosStats)}
                       </div>
-                      <div className="p-2 rounded bg-white border border-sky-200">
-                        <div className="font-bold text-sky-900">Impacto de Handoff ({s.handoffDoctorPct}% trocam de médico):</div>
-                        <div className="text-slate-700 text-[11px]">
-                          • Mesmo Médico ({s.sameDoctorCount}): Méd <strong>{s.sameDoctorLosStats.mean}m</strong> | Med <strong>{s.sameDoctorLosStats.median}m</strong>
-                          <br />• Troca Médico ({s.handoffDoctorCount}): Méd <strong>{s.handoffDoctorLosStats.mean}m</strong> | Med <strong>{s.handoffDoctorLosStats.median}m</strong>
-                        </div>
+                      <div className="p-2 rounded bg-white border border-sky-200 text-[11px]">
+                        <div className="font-bold text-sky-900">Impacto Handoff ({s.handoffDoctorPct}% trocam):</div>
+                        • Mesmo Méd ({s.sameDoctorCount}): Med <strong>{s.sameDoctorLosStats.median}m</strong> (Méd {s.sameDoctorLosStats.mean}m)
+                        <br />• Troca Méd ({s.handoffDoctorCount}): Med <strong>{s.handoffDoctorLosStats.median}m</strong> (Méd {s.handoffDoctorLosStats.mean}m)
                       </div>
                     </div>
                   </div>
 
-                  {/* OUTPUT 2: INTERNAÇÃO HOSPITALAR & BOARDING REAL EM 2 ETAPAS */}
+                  {/* OUTPUT 2: BOARDING DIFERENCIADO UI vs UTI & CIRÚRGICO */}
                   <div className="rounded-xl border-2 border-rose-600 bg-rose-50/60 overflow-hidden shadow-sm">
                     <div className="bg-rose-700 text-white px-3 py-1.5 text-xs font-bold flex justify-between">
-                      <span>OUTPUT 2: INTERNAÇÃO &amp; BOARDING REAL</span>
+                      <span>OUTPUT 2: BOARDING (UI / UTI / CIRÚRGICO)</span>
                       <span>{s.admittedTotalPct}% Internam</span>
                     </div>
                     <div className="p-3 text-xs space-y-1.5">
                       <div className="font-extrabold text-slate-900">
-                        N = {s.admittedTotalCount} Internados (UI: {s.admittedUiCount} [{s.admittedUiPct}%] | UTI: {s.admittedUtiCount} [{s.admittedUtiPct}%])
+                        N = {s.admittedTotalCount} (UI: {s.admittedUiCount} | UTI: {s.admittedUtiCount} | Cir: {s.admittedSurgicalCount})
                       </div>
                       <div className="p-2 rounded bg-white border border-rose-200 space-y-1 text-[11px]">
                         <div>
-                          <strong className="text-rose-900">Etapa 1 (Desfecho → Leito Virtual/Plano):</strong>{' '}
-                          {fmtStatBadge(s.t1DecisionToVirtualBedStats)}
+                          <strong className="text-rose-900">🛏️ Enfermaria (UI):</strong> T1 {s.uiT1AguardoToVirtualStats.mean}m + T2{' '}
+                          {s.uiT2VirtualToPhysicalStats.mean}m = <strong>{s.uiBoardingStats.mean}m</strong> (Med {s.uiBoardingStats.median}m)
                         </div>
                         <div>
-                          <strong className="text-rose-900">Etapa 2 (Virtual → Leito Físico UI/UTI):</strong>{' '}
-                          {vsm.hasCate3493Data
-                            ? `+${s.t2VirtualToPhysicalBedStats.mean}m (Med ${s.t2VirtualToPhysicalBedStats.median}m | P90 ${s.t2VirtualToPhysicalBedStats.p90}m)`
-                            : 'Anexe o CATE 3493 p/ medir subida física'}
+                          <strong className="text-rose-900">🚨 UTI:</strong> T1 {s.utiT1AguardoToVirtualStats.mean}m + T2{' '}
+                          {s.utiT2VirtualToPhysicalStats.mean}m = <strong>{s.utiBoardingStats.mean}m</strong> (Med {s.utiBoardingStats.median}m)
                         </div>
-                        <div className="pt-1 border-t border-rose-100 font-bold text-rose-800">
-                          Boarding Total no PS: Méd {s.totalBoardingStats.mean}m (Med {s.totalBoardingStats.median}m | P90 {s.totalBoardingStats.p90}m)
+                        <div className="pt-1 border-t border-rose-100 font-bold text-purple-900">
+                          🔪 Cirúrgico: Méd {s.surgicalBoardingStats.mean}m (Med {s.surgicalBoardingStats.median}m) vs. Clínico: {s.clinicalBoardingStats.mean}m
                         </div>
-                      </div>
-                      <div className="text-[11px] font-bold text-rose-900 flex justify-between">
-                        <span>Mudança CID: {vsm.diagnosticGovernance.reclassifiedPct}%</span>
-                        <span>CC (Cirúrgico): {vsm.surgicalAdmissionsPct}%</span>
                       </div>
                     </div>
                   </div>
                 </div>
               </div>
 
-              {/* LINHA DO TEMPO LEAN "DENTE DE SERRA" (VALOR AGREGADO vs. DESPERDÍCIO / ESPERA) */}
+              {/* LINHA DO TEMPO LEAN "DENTE DE SERRA" (COM ESPERA DE LAUDO CORRIGIDA SEM FALSO ZERO) */}
               <div className="mt-6 pt-5 border-t border-slate-200">
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-xs font-extrabold text-slate-800 uppercase">
@@ -855,7 +1233,7 @@ export function EmergencyAnalyticsView({
                   </span>
                   <span className="text-xs font-bold text-slate-600">
                     Soma VA: <strong className="text-emerald-700">{s.vaMinutesMean} min</strong> vs. Soma NVA (s/ Boarding):{' '}
-                    <strong className="text-red-700">{s.nvaMinutesMean} min</strong> (PCE = {s.pceEfficiencyPct}%)
+                    <strong className="text-red-700">{s.nvaMinutesMean} min</strong> (PCE Global = {s.pceEfficiencyPct}%)
                   </span>
                 </div>
 
@@ -870,7 +1248,7 @@ export function EmergencyAnalyticsView({
                     { step: '7. Espera Laudo', val: `${s.waitLabReportStats.mean}m`, med: `Med ${s.waitLabReportStats.median}m`, va: false },
                     { step: '8. Fila Pós-Laudo', val: `${s.postReportReavalWaitStats.mean}m`, med: `Med ${s.postReportReavalWaitStats.median}m`, va: false },
                     { step: '9. Reaval/Decisão', val: '12.0m', med: 'Cuidado Ativo', va: true },
-                    { step: '10. Boarding PS', val: `${s.totalBoardingStats.mean}m`, med: `Med ${s.totalBoardingStats.median}m`, va: false },
+                    { step: '10. Boarding PS', val: `${s.totalBoardingStats.mean}m`, med: `UI ${s.uiBoardingStats.mean}m / UTI ${s.utiBoardingStats.mean}m`, va: false },
                   ].map((item, idx) => (
                     <div
                       key={idx}
@@ -890,25 +1268,70 @@ export function EmergencyAnalyticsView({
                 </div>
               </div>
             </div>
+
+            {/* FAIXAS DE ENVELHECIMENTO DE PERMANÊNCIA (LOS AGING BUCKETS) */}
+            <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4">
+                <div>
+                  <h3 className="text-sm font-extrabold text-slate-900 uppercase">
+                    Faixas de Envelhecimento de Permanência no PS (LOS Aging Buckets — Onde Nascem as Longas Permanências)
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Estratificação da população total por tempo de permanência (≤1h até &gt;12h) cruzada com a rota de throughput.
+                  </p>
+                </div>
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-center border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-900 text-white">
+                      <th className="p-2.5 text-left">Faixa de Permanência (LOS)</th>
+                      <th className="p-2.5 text-left">Perfil Operacional Predominante</th>
+                      <th className="p-2.5">Pacientes (N)</th>
+                      <th className="p-2.5">% do Total PS</th>
+                      <th className="p-2.5 bg-emerald-900">Alta Direta 1ºAt</th>
+                      <th className="p-2.5 bg-amber-800">Fast Reav (Só Med)</th>
+                      <th className="p-2.5 bg-orange-900">Giro Exames c/ Alta</th>
+                      <th className="p-2.5 bg-rose-900">Internações</th>
+                      <th className="p-2.5">LOS Médio na Faixa</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {vsm.losAgingBuckets.map((b, idx) => (
+                      <tr key={idx} className="border-b border-slate-200 hover:bg-slate-50">
+                        <td className="p-2.5 text-left font-extrabold text-slate-900">{b.bucketLabel}</td>
+                        <td className="p-2.5 text-left text-slate-600">{b.rangeDescription}</td>
+                        <td className="p-2.5 font-bold">{b.count}</td>
+                        <td className="p-2.5 font-extrabold text-blue-700">{b.percentage}%</td>
+                        <td className="p-2.5 bg-emerald-50/40 font-semibold text-emerald-800">{b.directDischargeCount}</td>
+                        <td className="p-2.5 bg-amber-50/40 font-semibold text-amber-900">{b.fastReavCount}</td>
+                        <td className="p-2.5 bg-orange-50/40 font-semibold text-orange-900">{b.diagnosticExamsCount}</td>
+                        <td className="p-2.5 bg-rose-50/40 font-bold text-rose-800">{b.admittedCount}</td>
+                        <td className="p-2.5 font-bold">{b.meanLos} min</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           </div>
         )}
-
         {/* ====================================================================
-            ABA 2: CENSO SIMULTÂNEO ESTRATIFICADO & DUPLO HEATMAP 24x7
+            ABA 2: CENSO SIMULTÂNEO ESTRATIFICADO (MÉD, DP, MED, MÍN–MÁX) & HEATMAPS 24x7
            ==================================================================== */}
         {activeTab === 'simultaneous_census' && (
           <div className="space-y-6">
             {/* Barra de Filtros do Censo Simultâneo */}
             <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-4">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-xs font-bold text-slate-500 uppercase">Filtrar Dia da Semana:</span>
+                <span className="text-xs font-bold text-slate-500 uppercase">Filtrar Dia do Plantão (07h–06h):</span>
                 <button
                   onClick={() => setSelectedCensusDayIdx('all')}
                   className={`px-3 py-1.5 rounded-lg text-xs font-bold ${
                     selectedCensusDayIdx === 'all' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'
                   }`}
                 >
-                  Todos os Dias (Média Mensal)
+                  Todos os Dias (Consolidado Mensal)
                 </button>
                 {WEEKDAY_NAMES.map((dName, idx) => (
                   <button
@@ -924,7 +1347,7 @@ export function EmergencyAnalyticsView({
               </div>
 
               <div className="flex items-center gap-1.5">
-                <span className="text-xs font-bold text-slate-500 uppercase mr-1">Turno:</span>
+                <span className="text-xs font-bold text-slate-500 uppercase mr-1">Janela:</span>
                 {[
                   { id: '24h', label: '24h (07h–06h)' },
                   { id: 'day', label: '☀️ Diurno (07h–18h)' },
@@ -943,15 +1366,15 @@ export function EmergencyAnalyticsView({
               </div>
             </div>
 
-            {/* GRÁFICO EMPILHADO DE CENSO SIMULTÂNEO NAS 4 FRENTES DE TRABALHO vs. CHEGADAS */}
+            {/* GRÁFICO EMPILHADO DE CENSO SIMULTÂNEO ACUMULADO NAS 4 FRENTES vs. CHEGADAS */}
             <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
               <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-2 pb-4 border-b border-slate-100">
                 <div>
                   <h2 className="text-base font-extrabold text-slate-900">
-                    CURVA DE PRESSÃO ASSISTENCIAL REAL: CENSO SIMULTÂNEO POR FRENTE DE TRABALHO vs. CHEGADAS NA PORTA
+                    CURVA DE LOTAÇÃO SIMULTÂNEA ACUMULADA POR FRENTE DE TRABALHO vs. CHEGADAS NA PORTA
                   </h2>
                   <p className="text-xs text-slate-500">
-                    Bússola de dimensionamento de escala médica: separa quem aguarda consulta inicial (Porta) de quem precisa de Fast Reav (Só Medicação), Giro de Exames (Lab/TC/RX) e Boarding (UI/UTI).
+                    Ciclo Operacional de Plantão (07h00 D → 06h59 D+1) • Máquina de estados corrigida (Alta Direta permanece 100% na Porta sem inflar Exames).
                   </p>
                 </div>
                 <div className="flex flex-wrap items-center gap-3 text-xs font-bold">
@@ -970,7 +1393,6 @@ export function EmergencyAnalyticsView({
                 </div>
               </div>
 
-              {/* Barras Empilhadas Interativas */}
               {(() => {
                 const maxBarVal = Math.max(
                   ...activeSimultaneousCurve.map((p) => p.totalSimultaneousMean),
@@ -988,17 +1410,20 @@ export function EmergencyAnalyticsView({
 
                         return (
                           <div key={pt.hour} className="flex flex-col items-center group relative">
-                            {/* Tooltip detalhado no hover */}
-                            <div className="hidden group-hover:block absolute -top-28 z-20 w-52 p-2.5 rounded-xl bg-slate-900 text-white text-[11px] shadow-xl pointer-events-none">
-                              <div className="font-extrabold border-b border-slate-700 pb-1 mb-1">
-                                Faixa {pt.label} • Total: {pt.totalSimultaneousMean.toFixed(1)} pac. (Pico: {pt.totalSimultaneousMax})
+                            {/* Tooltip com dispersão completa no hover */}
+                            <div className="hidden group-hover:block absolute -top-36 z-20 w-64 p-3 rounded-xl bg-slate-900 text-white text-[11px] shadow-xl pointer-events-none">
+                              <div className="font-extrabold border-b border-slate-700 pb-1 mb-1 text-amber-300">
+                                Faixa {pt.label} • Censo Total: {fmtStatFullCell(pt.totalStats)}
                               </div>
-                              <div>🚪 Porta / 1º Atend: <strong>{pt.portaMean.toFixed(1)}</strong></div>
-                              <div>⚡ Fast Reav (Só Med): <strong>{pt.fastReavMedMean.toFixed(1)}</strong></div>
-                              <div>🔬 Giro Exames (Lab/TC): <strong>{pt.giroExamesMean.toFixed(1)}</strong></div>
-                              <div>🛏️ Boarding Internação: <strong>{pt.boardingMean.toFixed(1)}</strong></div>
+                              <div>🚪 1. Porta: <strong>{fmtStatFullCell(pt.portaStats)}</strong></div>
+                              <div>⚡ 2A. Fast Reav: <strong>{fmtStatFullCell(pt.fastReavMedStats)}</strong></div>
+                              <div>🔬 2B. Exames: <strong>{fmtStatFullCell(pt.giroExamesStats)}</strong></div>
+                              <div>🛏️ 3. Boarding: <strong>{fmtStatFullCell(pt.boardingStats)}</strong></div>
                               <div className="mt-1 pt-1 border-t border-slate-700 text-sky-300">
-                                📥 Novas Chegadas/h: <strong>{pt.newArrivalsMean.toFixed(1)}</strong>
+                                📥 Chegadas/h: <strong>{fmtStatFullCell(pt.newArrivalsStats)}</strong>
+                              </div>
+                              <div className="text-emerald-300 font-bold mt-0.5">
+                                👨‍⚕️ Escala Sugerida: {pt.recommendedDocsTotal} méd. ({pt.recommendedDocsPorta}P + {pt.recommendedDocsGiroReav}G)
                               </div>
                             </div>
 
@@ -1021,33 +1446,82 @@ export function EmergencyAnalyticsView({
                         );
                       })}
                     </div>
-                    <div className="text-[11px] text-slate-500 mt-2 flex justify-between">
-                      <span>* Os valores no topo das barras indicam o Censo Simultâneo Médio dentro do PS naquela hora.</span>
-                      <span>* Os valores azuis (+X.X) abaixo do eixo indicam a média de Novas Chegadas na porta naquela hora.</span>
-                    </div>
                   </div>
                 );
               })()}
             </div>
 
-            {/* HEATMAP 24x7 #1: CENSO OCUPACIONAL SIMULTÂNEO (COM SELETOR DE FRENTE DE TRABALHO) */}
+            {/* TABELA COMPLETA DO CENSO ESTRATIFICADO NAS 4 FRENTES (MÉDIA, ±DP, MEDIANA, P90 E AMPLITUDE MÍN–MÁX) */}
+            <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900">
+                    TABELA HORÁRIA DO CENSO ESTRATIFICADO POR FRENTE DE TRABALHO (MÉDIA, ±DP, MEDIANA, P90 E AMPLITUDE [MÍN–MÁX])
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Dimensionamento de equipe baseado na variabilidade real de cada frente (evita subdimensionamento nos picos de P90 e amplitude máxima).
+                  </p>
+                </div>
+                <button
+                  onClick={() => generateSinglePngBoard(activeData, 'png_census_4fronts', s)}
+                  className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shrink-0"
+                >
+                  🖼️ Baixar Tabela em PNG p/ Slide
+                </button>
+              </div>
+
+              <div className="overflow-x-auto max-h-[540px]">
+                <table className="w-full text-center border-collapse text-xs">
+                  <thead className="sticky top-0 bg-slate-900 text-white z-10">
+                    <tr>
+                      <th className="p-2.5 text-left">Hora</th>
+                      <th className="p-2.5">Novas Chegadas/h (Méd±DP | Med [Mín–Máx])</th>
+                      <th className="p-2.5 bg-blue-900">1. Porta / 1º Atend (Méd±DP | Med [Mín–Máx])</th>
+                      <th className="p-2.5 bg-amber-800">2A. Fast Reav Só Med (Méd±DP | Med [Mín–Máx])</th>
+                      <th className="p-2.5 bg-orange-900">2B. Giro Exames Lab/TC (Méd±DP | Med [Mín–Máx])</th>
+                      <th className="p-2.5 bg-rose-900">3. Boarding UI/UTI (Méd±DP | Med [Mín–Máx])</th>
+                      <th className="p-2.5 bg-slate-800">CENSO TOTAL ACUMULADO (Méd±DP | Med [Mín–Máx])</th>
+                      <th className="p-2.5 bg-emerald-900">Escala Médica Sugerida</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activeSimultaneousCurve.map((pt) => (
+                      <tr key={pt.hour} className="border-b border-slate-200 hover:bg-slate-50 text-[11px]">
+                        <td className="p-2 text-left font-extrabold text-slate-900">{pt.label}</td>
+                        <td className="p-2 text-slate-700">{fmtStatFullCell(pt.newArrivalsStats)}</td>
+                        <td className="p-2 bg-blue-50/40 font-semibold text-blue-950">{fmtStatFullCell(pt.portaStats)}</td>
+                        <td className="p-2 bg-amber-50/40 font-semibold text-amber-950">{fmtStatFullCell(pt.fastReavMedStats)}</td>
+                        <td className="p-2 bg-orange-50/40 font-semibold text-orange-950">{fmtStatFullCell(pt.giroExamesStats)}</td>
+                        <td className="p-2 bg-rose-50/40 font-semibold text-rose-950">{fmtStatFullCell(pt.boardingStats)}</td>
+                        <td className="p-2 bg-slate-100 font-extrabold text-slate-900">{fmtStatFullCell(pt.totalStats)}</td>
+                        <td className="p-2 bg-emerald-50/50 font-bold text-emerald-900">
+                          {pt.recommendedDocsTotal} méd. ({pt.recommendedDocsPorta} Porta + {pt.recommendedDocsGiroReav} Giro)
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* HEATMAP 24x7 #1: CENSO OCUPACIONAL SIMULTÂNEO ACUMULADO */}
             <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
               <div className="flex flex-col xl:flex-row xl:items-center xl:justify-between gap-4 pb-4 border-b border-slate-100 mb-4">
                 <div>
                   <h3 className="text-base font-extrabold text-slate-900">
-                    HEATMAP 24x7 DE CENSO OCUPACIONAL SIMULTÂNEO (SEGUNDA A DOMINGO, 07h ÀS 06h)
+                    1. HEATMAP 24x7 DE CENSO OCUPACIONAL SIMULTÂNEO ACUMULADO (CICLO DE PLANTÃO: 07h D → 06h59 D+1)
                   </h3>
                   <p className="text-xs text-slate-500">
-                    Selecione abaixo a frente de trabalho para visualizar onde alocar médicos de Porta, Fast Reav (Só Medicação), Reavaliação de Exames ou Suporte de Boarding.
+                    Representa o <strong>Total Acumulado de Pacientes Presentes Dentro do PS</strong> naquela hora (Passivo Herdado + Novas Entradas - Altas). Filtre abaixo por frente operacional:
                   </p>
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
                   {[
-                    { id: 'total', label: '🔥 Censo Total Simultâneo' },
-                    { id: 'porta', label: '🚪 1. Aguardando Porta' },
-                    { id: 'fastReav', label: '⚡ 2A. Fast Reav (Só Medicação)' },
-                    { id: 'exames', label: '🔬 2B. Giro Exames (Lab/Imagem)' },
+                    { id: 'total', label: '🔥 Censo Total Acumulado' },
+                    { id: 'porta', label: '🚪 1. Porta / 1º Atend' },
+                    { id: 'fastReav', label: '⚡ 2A. Fast Reav (Só Med)' },
+                    { id: 'exames', label: '🔬 2B. Giro Exames (Lab/TC)' },
                     { id: 'boarding', label: '🛏️ 3. Boarding (UI/UTI)' },
                   ].map((layer) => (
                     <button
@@ -1097,17 +1571,18 @@ export function EmergencyAnalyticsView({
                           const cell = vsm.censusHeatmap24x7.find((c) => c.dayIndex === dIdx && c.hour === h);
                           if (!cell) return <td key={h}>—</td>;
 
-                          const val =
+                          const layerSt =
                             censusHeatLayer === 'total'
-                              ? cell.totalMean
+                              ? cell.totalStats
                               : censusHeatLayer === 'porta'
-                              ? cell.portaMean
+                              ? cell.portaStats
                               : censusHeatLayer === 'fastReav'
-                              ? cell.fastReavMedMean
+                              ? cell.fastReavMedStats
                               : censusHeatLayer === 'exames'
-                              ? cell.giroExamesMean
-                              : cell.boardingMean;
+                              ? cell.giroExamesStats
+                              : cell.boardingStats;
 
+                          const val = layerSt.mean;
                           const highThresh = censusHeatLayer === 'total' ? 20 : 6;
                           const medThresh = censusHeatLayer === 'total' ? 13 : 3.5;
 
@@ -1124,17 +1599,15 @@ export function EmergencyAnalyticsView({
                             <td key={h} className={`p-1.5 border border-slate-100 ${bgClass}`}>
                               {censusHeatMode === 'mean_sd' && (
                                 <div>
-                                  <div>{val.toFixed(1)}</div>
-                                  {censusHeatLayer === 'total' && (
-                                    <div className="text-[9px] opacity-75">±{cell.totalStdDev.toFixed(1)}</div>
-                                  )}
+                                  <div>{layerSt.mean.toFixed(1)}</div>
+                                  <div className="text-[9px] opacity-75">±{layerSt.stdDev.toFixed(1)}</div>
                                 </div>
                               )}
                               {censusHeatMode === 'median_range' && (
                                 <div>
-                                  <div>{cell.totalMedian.toFixed(1)}</div>
+                                  <div>{layerSt.median.toFixed(1)}</div>
                                   <div className="text-[9px] opacity-75">
-                                    [{cell.totalMin.toFixed(0)}–{cell.totalMax.toFixed(0)}]
+                                    [{layerSt.min.toFixed(0)}–{layerSt.max.toFixed(0)}]
                                   </div>
                                 </div>
                               )}
@@ -1156,15 +1629,15 @@ export function EmergencyAnalyticsView({
               </div>
             </div>
 
-            {/* HEATMAP 24x7 #2: CHEGADAS NA PORTA (FICHAS DE ENTRADA — MANTIDO E APRIMORADO) */}
+            {/* HEATMAP 24x7 #2: PRESSÃO DE ENTRADA NA PORTA */}
             <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
               <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b border-slate-100 mb-4">
                 <div>
                   <h3 className="text-base font-extrabold text-slate-900">
-                    HEATMAP 24x7 DE PRESSÃO DE ENTRADA NA PORTA (NOVAS FICHAS ABERTAS — SEGUNDA A DOMINGO, 07h ÀS 06h)
+                    2. HEATMAP 24x7 DE PRESSÃO DE ENTRADA NA PORTA (NOVAS FICHAS ABERTAS NA HORA — CICLO 07h → 06h59 D+1)
                   </h3>
                   <p className="text-xs text-slate-500">
-                    Demanda pura de chegada na recepção/totem por faixa horária.
+                    Fluxo puro de novas chegadas na recepção/totem dentro de cada faixa horária.
                   </p>
                 </div>
 
@@ -1248,60 +1721,137 @@ export function EmergencyAnalyticsView({
         )}
 
         {/* ====================================================================
-            ABA 3: BOARDING REAL EM 2 ETAPAS & RANKING POR OPERADORA (CONVÊNIO)
+            ABA 3: BOARDING DIFERENCIADO (UI vs. UTI E CIRÚRGICO vs. CLÍNICO) & CONVÊNIOS
            ==================================================================== */}
         {activeTab === 'boarding_convenios' && (
           <div className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-              <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
-                <div className="text-xs font-bold text-slate-500 uppercase">Total Internações PS</div>
+            {/* Cards Executivos de Comparação Direta do Boarding */}
+            <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+              <div className="bg-white rounded-xl p-4 border-l-4 border-slate-800 shadow-sm">
+                <div className="text-[11px] font-bold text-slate-500 uppercase">Total Internações PS</div>
                 <div className="text-2xl font-extrabold text-slate-900 mt-1">
                   {activeData.totalAdmissions} ({activeData.conversionRate}%)
                 </div>
                 <div className="text-xs text-slate-600 mt-1">
-                  Enfermaria (UI): <strong>{activeData.uiAdmissions}</strong> | UTI: <strong>{activeData.utiAdmissions}</strong>
+                  UI: <strong>{activeData.uiAdmissions}</strong> | UTI: <strong>{activeData.utiAdmissions}</strong> | Cir: <strong>{activeData.surgicalAdmissions}</strong>
                 </div>
               </div>
 
-              <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
-                <div className="text-xs font-bold text-slate-500 uppercase">Etapa 1: Aprovação Plano / Virtual</div>
-                <div className="text-2xl font-extrabold text-amber-700 mt-1">
-                  {vsm.monthlyOverall.t1DecisionToVirtualBedStats.mean} min
-                </div>
-                <div className="text-xs text-slate-600 mt-1">
-                  Mediana: <strong>{vsm.monthlyOverall.t1DecisionToVirtualBedStats.median}m</strong> | P90:{' '}
-                  {vsm.monthlyOverall.t1DecisionToVirtualBedStats.p90}m
-                </div>
-              </div>
-
-              <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
-                <div className="text-xs font-bold text-slate-500 uppercase">Etapa 2: Virtual → Leito Físico UI/UTI</div>
+              <div className="bg-white rounded-xl p-4 border-l-4 border-rose-600 shadow-sm">
+                <div className="text-[11px] font-bold text-rose-700 uppercase">Gargalo 1: Enfermaria (UI)</div>
                 <div className="text-2xl font-extrabold text-rose-700 mt-1">
-                  {vsm.hasCate3493Data ? `+${vsm.monthlyOverall.t2VirtualToPhysicalBedStats.mean} min` : 'Pendente 3493'}
+                  {bbt.ui.totalBoardingStats.mean} min
                 </div>
                 <div className="text-xs text-slate-600 mt-1">
-                  {vsm.hasCate3493Data
-                    ? `Mediana: ${vsm.monthlyOverall.t2VirtualToPhysicalBedStats.median}m | P90: ${vsm.monthlyOverall.t2VirtualToPhysicalBedStats.p90}m`
-                    : 'Anexe o CATE 3493 no topo para calcular'}
+                  T1 Plano: <strong>{bbt.ui.t1AguardoToVirtualStats.mean}m</strong> | T2 Físico: <strong>+{bbt.ui.t2VirtualToPhysicalStats.mean}m</strong> (Med Total: {bbt.ui.totalBoardingStats.median}m)
                 </div>
               </div>
 
-              <div className="bg-white rounded-xl p-4 border border-slate-200 shadow-sm">
-                <div className="text-xs font-bold text-slate-500 uppercase">Horas-Maca Retidas em Boarding</div>
-                <div className="text-2xl font-extrabold text-red-700 mt-1">{vsm.wastedBedHoursInBoarding} horas</div>
+              <div className="bg-white rounded-xl p-4 border-l-4 border-blue-600 shadow-sm">
+                <div className="text-[11px] font-bold text-blue-700 uppercase">Gargalo 2: Terapia Intensiva (UTI)</div>
+                <div className="text-2xl font-extrabold text-blue-800 mt-1">
+                  {bbt.uti.totalBoardingStats.mean} min
+                </div>
                 <div className="text-xs text-slate-600 mt-1">
-                  Cirúrgicos (CC=S): <strong>{vsm.surgicalAdmissionsCount}</strong> ({vsm.surgicalAdmissionsPct}%) | Perm. Hosp:{' '}
-                  <strong>{vsm.hospitalStayDaysStats.mean}d</strong>
+                  T1 Plano: <strong>{bbt.uti.t1AguardoToVirtualStats.mean}m</strong> | T2 Físico: <strong>+{bbt.uti.t2VirtualToPhysicalStats.mean}m</strong> (Med Total: {bbt.uti.totalBoardingStats.median}m)
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl p-4 border-l-4 border-purple-600 shadow-sm">
+                <div className="text-[11px] font-bold text-purple-700 uppercase">Boarding Cirúrgico vs. Clínico</div>
+                <div className="text-lg font-extrabold text-purple-900 mt-1">
+                  Cir: {bbt.surgical.totalBoardingStats.mean}m vs. Clín: {bbt.clinical.totalBoardingStats.mean}m
+                </div>
+                <div className="text-xs text-slate-600 mt-1">
+                  Med Cirúrgico: <strong>{bbt.surgical.totalBoardingStats.median}m</strong> (P90: {bbt.surgical.totalBoardingStats.p90}m)
+                </div>
+              </div>
+
+              <div className="bg-white rounded-xl p-4 border-l-4 border-red-600 shadow-sm">
+                <div className="text-[11px] font-bold text-red-700 uppercase">Macas do PS Bloqueadas 24h/dia</div>
+                <div className="text-2xl font-extrabold text-red-700 mt-1">
+                  {vsm.equivalentBlockedBeds24h} macas/d
+                </div>
+                <div className="text-xs text-slate-600 mt-1">
+                  Total: <strong>{vsm.wastedBedHoursInBoarding}h</strong> (UI: {bbt.ui.equivalentBlockedBeds24h} macas | UTI: {bbt.uti.equivalentBlockedBeds24h} macas)
                 </div>
               </div>
             </div>
 
+            {/* TABELA 1: COMPARATIVO DIRETO ENTRE OS 5 PERFIS DE BOARDING */}
+            <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900">
+                    1. COMPARATIVO ESTRATÉGICO DE BOARDING: DESTINO (ENFERMARIA UI vs. UTI) E PERFIL (CIRÚRGICO vs. CLÍNICO NÃO CIRÚRGICO)
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Separa a Etapa 1 (Aprovação do Plano / Leito Virtual) da Etapa 2 (Subida Física ao Leito Definitivo) e converte as horas perdidas em macas físicas bloqueadas 24h/dia.
+                  </p>
+                </div>
+                <button
+                  onClick={() => generateSinglePngBoard(activeData, 'png_boarding_ui_uti_surg', s)}
+                  className="px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold shrink-0"
+                >
+                  🖼️ Baixar Prancha Boarding em PNG
+                </button>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-left border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-rose-900 text-white">
+                      <th className="p-2.5">Recorte / Perfil de Internação</th>
+                      <th className="p-2.5 text-center">Pacientes (N / %)</th>
+                      <th className="p-2.5 text-center">UI / UTI (Cirúrgicos)</th>
+                      <th className="p-2.5 text-center">Etapa 1: Solicitação → Leito Virtual (Plano)</th>
+                      <th className="p-2.5 text-center">Etapa 2: Leito Virtual → Subida Física</th>
+                      <th className="p-2.5 text-center">BOARDING TOTAL (Méd±DP | Med [Mín–Máx] | P90)</th>
+                      <th className="p-2.5 text-center">Macas Bloqueadas 24h/d</th>
+                      <th className="p-2.5 text-center">Perm. Hosp (Dias)</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {[bbt.global, bbt.ui, bbt.uti, bbt.surgical, bbt.clinical].map((prof) => (
+                      <tr key={prof.bedType} className="border-b border-slate-200 hover:bg-rose-50/30">
+                        <td className="p-2.5 font-extrabold text-slate-900">{prof.label}</td>
+                        <td className="p-2.5 text-center font-bold">
+                          {prof.admittedCount} ({prof.pctOfAdmissions}%)
+                        </td>
+                        <td className="p-2.5 text-center">
+                          {prof.uiCount} UI / {prof.utiCount} UTI ({prof.surgicalCount} Cir.)
+                        </td>
+                        <td className="p-2.5 text-center">
+                          {fmtStatBadge(prof.t1AguardoToVirtualStats)} (P90: {prof.t1AguardoToVirtualStats.p90}m)
+                        </td>
+                        <td className="p-2.5 text-center">
+                          {fmtStatBadge(prof.t2VirtualToPhysicalStats)} (P90: {prof.t2VirtualToPhysicalStats.p90}m)
+                        </td>
+                        <td className="p-2.5 text-center font-extrabold text-rose-800 bg-rose-50/40">
+                          {fmtStatFullCell(prof.totalBoardingStats, 'm')}
+                        </td>
+                        <td className="p-2.5 text-center font-bold text-red-700">
+                          {prof.equivalentBlockedBeds24h} macas ({prof.wastedBedHours}h)
+                        </td>
+                        <td className="p-2.5 text-center">
+                          {prof.hospitalStayDaysStats.count > 0
+                            ? `${prof.hospitalStayDaysStats.mean}d (Med ${prof.hospitalStayDaysStats.median}d)`
+                            : '—'}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            {/* TABELA 2: RANKING POR OPERADORA DE SAÚDE COM ABERTURA UI vs. UTI E CIRÚRGICO vs. CLÍNICO */}
             <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
               <h3 className="text-base font-extrabold text-slate-900 mb-1">
-                RANKING DE RETENÇÃO E BOARDING POR OPERADORA DE SAÚDE (CONVÊNIO — CATE 3333 + CATE 3493)
+                2. RANKING DE RETENÇÃO E BOARDING POR OPERADORA DE SAÚDE (COM DIFERENCIAÇÃO UI vs. UTI E CIRÚRGICO vs. CLÍNICO)
               </h3>
               <p className="text-xs text-slate-500 mb-4">
-                Separação clara entre o atraso de autorização da operadora (Etapa 1: Leito Virtual) e o tempo de liberação física do leito hospitalar nos andares/UTI (Etapa 2).
+                Permite auditar em cada convênio se o atraso ocorre na Enfermaria (UI), na UTI ou nos casos Cirúrgicos.
               </p>
 
               <div className="overflow-x-auto">
@@ -1309,13 +1859,13 @@ export function EmergencyAnalyticsView({
                   <thead>
                     <tr className="bg-slate-900 text-white">
                       <th className="p-2.5">Operadora / Convênio</th>
-                      <th className="p-2.5 text-center">Internações (N / %)</th>
-                      <th className="p-2.5 text-center">UI / UTI</th>
-                      <th className="p-2.5 text-center">Centro Cirúrgico (CC=S)</th>
-                      <th className="p-2.5 text-center">Etapa 1: Aprovação Plano / Virtual</th>
-                      <th className="p-2.5 text-center">Etapa 2: Virtual → Leito Físico</th>
-                      <th className="p-2.5 text-center">Boarding Total (Aguardo → Unidade)</th>
-                      <th className="p-2.5 text-center">Perm. Hospitalar (Dias)</th>
+                      <th className="p-2.5 text-center">Intern. (N / %)</th>
+                      <th className="p-2.5 text-center">UI / UTI (Cir.)</th>
+                      <th className="p-2.5 text-center">Etapa 1 Geral (Plano/Virtual)</th>
+                      <th className="p-2.5 text-center">Etapa 2 Geral (Subida Física)</th>
+                      <th className="p-2.5 text-center bg-rose-900">Boarding ENFERMARIA (UI): T1 | T2 | Total</th>
+                      <th className="p-2.5 text-center bg-blue-900">Boarding UTI: T1 | T2 | Total</th>
+                      <th className="p-2.5 text-center bg-purple-900">Cirúrgico vs. Clínico (Total)</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -1326,18 +1876,23 @@ export function EmergencyAnalyticsView({
                           {c.admittedCount} ({c.pctOfAdmissions}%)
                         </td>
                         <td className="p-2.5 text-center">
-                          {c.uiCount} UI / {c.utiCount} UTI
+                          {c.uiCount} UI / {c.utiCount} UTI ({c.ccCount} Cir.)
                         </td>
-                        <td className="p-2.5 text-center">{c.ccCount}</td>
                         <td className="p-2.5 text-center">{fmtStatBadge(c.t1VirtualApprovalStats)}</td>
                         <td className="p-2.5 text-center">{fmtStatBadge(c.t2PhysicalUploadStats)}</td>
-                        <td className="p-2.5 text-center font-bold text-rose-800">
-                          {fmtStatBadge(c.totalBoardingStats)} [P90: {c.totalBoardingStats.p90}m]
-                        </td>
-                        <td className="p-2.5 text-center">
-                          {c.hospitalStayDaysStats.count > 0
-                            ? `${c.hospitalStayDaysStats.mean}d (Med ${c.hospitalStayDaysStats.median}d)`
+                        <td className="p-2.5 text-center bg-rose-50/40 font-semibold text-rose-950">
+                          {c.uiCount > 0
+                            ? `T1: ${c.uiT1VirtualStats.mean}m | T2: ${c.uiT2PhysicalStats.mean}m | Tot: ${c.uiTotalBoardingStats.mean}m (Med ${c.uiTotalBoardingStats.median}m)`
                             : '—'}
+                        </td>
+                        <td className="p-2.5 text-center bg-blue-50/40 font-semibold text-blue-950">
+                          {c.utiCount > 0
+                            ? `T1: ${c.utiT1VirtualStats.mean}m | T2: ${c.utiT2PhysicalStats.mean}m | Tot: ${c.utiTotalBoardingStats.mean}m (Med ${c.utiTotalBoardingStats.median}m)`
+                            : '—'}
+                        </td>
+                        <td className="p-2.5 text-center bg-purple-50/40 font-semibold text-purple-950">
+                          Cir: {c.surgicalTotalBoardingStats.count > 0 ? `${c.surgicalTotalBoardingStats.mean}m` : '—'} | Clín:{' '}
+                          {c.clinicalTotalBoardingStats.count > 0 ? `${c.clinicalTotalBoardingStats.mean}m` : '—'}
                         </td>
                       </tr>
                     ))}
@@ -1354,7 +1909,7 @@ export function EmergencyAnalyticsView({
         {activeTab === 'doctors_conduct' && (
           <div className="space-y-6">
             <div className="bg-white rounded-xl p-4 shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-4">
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   onClick={() => setDoctorViewMode('conduct_matrix')}
                   className={`px-3.5 py-2 rounded-lg text-xs font-bold ${
@@ -1373,13 +1928,21 @@ export function EmergencyAnalyticsView({
                 </button>
               </div>
 
-              <input
-                type="text"
-                placeholder="🔍 Filtrar médico por nome..."
-                value={doctorSearch}
-                onChange={(e) => setDoctorSearch(e.target.value)}
-                className="px-3.5 py-2 rounded-lg border border-slate-300 text-xs font-semibold w-64"
-              />
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  placeholder="🔍 Filtrar médico por nome..."
+                  value={doctorSearch}
+                  onChange={(e) => setDoctorSearch(e.target.value)}
+                  className="px-3.5 py-2 rounded-lg border border-slate-300 text-xs font-semibold w-64"
+                />
+                <button
+                  onClick={() => generateSinglePngBoard(activeData, 'png_doctors_and_cids', s)}
+                  className="px-3 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold"
+                >
+                  🖼️ PNG Condutas + CIDs
+                </button>
+              </div>
             </div>
 
             {doctorViewMode === 'conduct_matrix' ? (
@@ -1388,7 +1951,7 @@ export function EmergencyAnalyticsView({
                   MATRIZ DE CONDUTAS MÉDICAS: MÉDICO ANAMNESE (PORTA) vs. MÉDICO DO ÚLTIMO ATENDIMENTO (REAVALIAÇÃO / FECHAMENTO)
                 </h3>
                 <p className="text-xs text-slate-500 mb-4">
-                  Identifica o perfil de cada profissional para alocação na escala: quem resolve rápido na porta (% Alta 1º Atendimento), quem direciona para Fast Reav (% Só Medicação), quem solicita mais exames (Lab/TC/RX) e quem absorve o passivo de reavaliação (Handoff).
+                  Escopo Ativo: <strong>{activeData.activeScopeLabel}</strong> • Identifica quem resolve rápido na porta (% Alta 1º Atendimento), quem direciona para Fast Reav (% Só Medicação), quem solicita mais exames e quem absorve o passivo de reavaliação (Handoff).
                 </p>
 
                 <div className="overflow-x-auto max-h-[620px]">
@@ -1502,7 +2065,6 @@ export function EmergencyAnalyticsView({
            ==================================================================== */}
         {activeTab === 'clinical_governance' && (
           <div className="space-y-6">
-            {/* Cards de Governança Diagnóstica e Retorno Precoce */}
             <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
               <div className="bg-white rounded-xl p-4 border-l-4 border-teal-600 shadow-sm">
                 <div className="text-xs font-bold text-slate-500 uppercase">Concordância Exata CID (CHAA 3704)</div>
@@ -1525,6 +2087,17 @@ export function EmergencyAnalyticsView({
                 </div>
               </div>
 
+              <div className="bg-white rounded-xl p-4 border-l-4 border-purple-600 shadow-sm">
+                <div className="text-xs font-bold text-slate-500 uppercase">Retenção na Passagem (07h / 19h)</div>
+                <div className="text-2xl font-extrabold text-purple-800 mt-1">
+                  {vsm.shiftChangeBottleneck.totalShiftChangeRetainedCount} pac. ({vsm.shiftChangeBottleneck.pctOfAllPostLaudoPatients}%)
+                </div>
+                <div className="text-xs text-slate-600 mt-1">
+                  Manhã (pré-07h): <strong>{vsm.shiftChangeBottleneck.morningWindowReadyBefore7hCount}</strong> | Noite (pré-19h):{' '}
+                  <strong>{vsm.shiftChangeBottleneck.eveningWindowReadyBefore19hCount}</strong>
+                </div>
+              </div>
+
               <div className="bg-white rounded-xl p-4 border-l-4 border-rose-600 shadow-sm">
                 <div className="text-xs font-bold text-slate-500 uppercase">Retorno Precoce ≤ 48 Horas</div>
                 <div className="text-2xl font-extrabold text-rose-700 mt-1">
@@ -1535,17 +2108,6 @@ export function EmergencyAnalyticsView({
                   <strong>{vsm.returnVisits.return48hAdmissionRate}%</strong> vs {activeData.conversionRate}% geral)
                 </div>
               </div>
-
-              <div className="bg-white rounded-xl p-4 border-l-4 border-indigo-600 shadow-sm">
-                <div className="text-xs font-bold text-slate-500 uppercase">Retorno Precoce ≤ 72 Horas</div>
-                <div className="text-2xl font-extrabold text-indigo-800 mt-1">
-                  {vsm.returnVisits.return72hCount} ({vsm.returnVisits.return72hPct}%)
-                </div>
-                <div className="text-xs text-slate-600 mt-1">
-                  Internam no retorno ≤72h: <strong>{vsm.returnVisits.return72hAdmittedCount}</strong> (
-                  {vsm.returnVisits.return72hAdmissionRate}%)
-                </div>
-              </div>
             </div>
 
             {/* MATRIZ CID x ROTA DE THROUGHPUT */}
@@ -1554,7 +2116,7 @@ export function EmergencyAnalyticsView({
                 MATRIZ CID × ROTA DE THROUGHPUT (AUDITORIA DE PERTINÊNCIA PROPEDÊUTICA POR DIAGNÓSTICO)
               </h3>
               <p className="text-xs text-slate-500 mb-4">
-                Responde exatamente onde cada diagnóstico consome recursos: qual % recebe Alta Direta no 1º Atendimento (Rota 1), qual % vai para Fast Reav / Só Medicação (Rota 2), qual % aciona Exames Lab/Imagem e tem alta (Rota 3) e qual % interna (Rota 4).
+                Responde onde cada diagnóstico consome recursos: Alta Direta no 1º Atendimento (Rota 1), Fast Reav / Só Medicação (Rota 2), Giro de Exames c/ Alta (Rota 3) e Internação (Rota 4).
               </p>
 
               <div className="overflow-x-auto max-h-[520px]">
@@ -1653,10 +2215,108 @@ export function EmergencyAnalyticsView({
         )}
 
         {/* ====================================================================
-            ABA 6: SÉRIE DIÁRIA, SEMANAS S1–S5 E COMPARATIVO MULTIMENSAL (MOM)
+            ABA 6: MATRIZ MULTI-SETOR/CLÍNICA, SEMANAS S1–S5 E COMPARATIVO MOM
            ==================================================================== */}
         {activeTab === 'temporal_mom' && (
           <div className="space-y-6">
+            {/* MATRIZ COMPARATIVA MULTI-SETOR E MULTI-CLÍNICA */}
+            <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 mb-4">
+                <div>
+                  <h3 className="text-base font-extrabold text-slate-900">
+                    MATRIZ COMPARATIVA MULTI-SETOR E MULTI-CLÍNICA (VISÃO GLOBAL DO HOSPITAL: {activeData.totalGlobalAttendances} ATENDIMENTOS)
+                  </h3>
+                  <p className="text-xs text-slate-500">
+                    Clique em qualquer linha abaixo para filtrar instantaneamente toda a Dashboard para aquele Setor e Clínica, ou use o botão ao lado para ver o Consolidado Geral.
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => handleApplySectorClinicFilter(activeData.availableSectors.map((x) => x.name), ['Médica'])}
+                    className="px-3 py-1.5 rounded-lg bg-blue-600 text-white text-xs font-bold"
+                  >
+                    🎯 Focar Clínica Médica
+                  </button>
+                  <button
+                    onClick={() =>
+                      handleApplySectorClinicFilter(
+                        activeData.availableSectors.map((x) => x.name),
+                        activeData.availableClinics.map((x) => x.name)
+                      )
+                    }
+                    className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-xs font-bold"
+                  >
+                    🏥 Ver Todos Consolidados ({activeData.totalGlobalAttendances})
+                  </button>
+                </div>
+              </div>
+
+              <div className="overflow-x-auto">
+                <table className="w-full text-center border-collapse text-xs">
+                  <thead>
+                    <tr className="bg-slate-900 text-white">
+                      <th className="p-2.5 text-left">Setor de Emergência</th>
+                      <th className="p-2.5 text-left">Clínica / Especialidade</th>
+                      <th className="p-2.5">Volume (% Global)</th>
+                      <th className="p-2.5">Diurno / Noturno</th>
+                      <th className="p-2.5">% Alta 1ºAt</th>
+                      <th className="p-2.5">% Fast Reav Med</th>
+                      <th className="p-2.5">% Giro Exames</th>
+                      <th className="p-2.5">Internações (UI / UTI / Cir)</th>
+                      <th className="p-2.5">Porta-Médico</th>
+                      <th className="p-2.5">LOS Médio / Med</th>
+                      <th className="p-2.5">Ação</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activeData.sectorClinicBreakdown.map((sc, idx) => {
+                      const isSelected =
+                        activeData.selectedSectors.includes(sc.setor) &&
+                        activeData.selectedClinics.includes(sc.clinica) &&
+                        activeData.selectedClinics.length === 1;
+                      return (
+                        <tr
+                          key={idx}
+                          className={`border-b border-slate-200 hover:bg-blue-50/40 ${
+                            isSelected ? 'bg-blue-50/70 font-bold' : ''
+                          }`}
+                        >
+                          <td className="p-2.5 text-left font-bold text-slate-900">{sc.setor}</td>
+                          <td className="p-2.5 text-left font-extrabold text-blue-900">{sc.clinica}</td>
+                          <td className="p-2.5 font-bold">
+                            {sc.totalCount} ({sc.pctOfGlobal}%)
+                          </td>
+                          <td className="p-2.5">
+                            {sc.dayCount}D / {sc.nightCount}N
+                          </td>
+                          <td className="p-2.5 text-emerald-700 font-bold">{sc.directDischargePct}%</td>
+                          <td className="p-2.5 text-amber-800 font-bold">{sc.fastReavMedPct}%</td>
+                          <td className="p-2.5 text-orange-800 font-bold">{sc.diagnosticExamsPct}%</td>
+                          <td className="p-2.5 text-rose-800 font-semibold">
+                            {sc.admissionsCount} ({sc.conversionRate}%) — {sc.uiCount}UI/{sc.utiCount}UTI ({sc.surgicalAdmissionsCount}C)
+                          </td>
+                          <td className="p-2.5">
+                            {sc.doorToDocStats.mean}m (Med {sc.doorToDocStats.median}m)
+                          </td>
+                          <td className="p-2.5">
+                            {sc.losStats.mean}m / Med {sc.losStats.median}m
+                          </td>
+                          <td className="p-2.5">
+                            <button
+                              onClick={() => handleApplySectorClinicFilter([sc.setor], [sc.clinica])}
+                              className="px-2.5 py-1 rounded bg-slate-800 hover:bg-blue-600 text-white text-[10px] font-bold"
+                            >
+                              Isolar Clínica
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
             {loadedMonths.length > 1 && (
               <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
                 <div className="flex items-center justify-between mb-4">
@@ -1692,10 +2352,10 @@ export function EmergencyAnalyticsView({
                     </thead>
                     <tbody>
                       <tr className="border-b border-slate-200">
-                        <td className="p-2.5 text-left font-bold">Volume Total (N)</td>
+                        <td className="p-2.5 text-left font-bold">Volume Total no Escopo (N)</td>
                         {loadedMonths.map((m) => (
                           <td key={m.monthKey} className="p-2.5 font-extrabold">
-                            {m.totalAttendances}
+                            {m.totalAttendances} (Global: {m.totalGlobalAttendances})
                           </td>
                         ))}
                       </tr>
@@ -1716,19 +2376,18 @@ export function EmergencyAnalyticsView({
                         ))}
                       </tr>
                       <tr className="border-b border-slate-200">
-                        <td className="p-2.5 text-left font-bold">Fila Invisível Pós-Laudo (Média)</td>
+                        <td className="p-2.5 text-left font-bold">Boarding UI vs. UTI (Média)</td>
                         {loadedMonths.map((m) => (
-                          <td key={m.monthKey} className="p-2.5 font-bold text-amber-700">
-                            {m.vsm.monthlyOverall.postReportReavalWaitStats.mean}m
+                          <td key={m.monthKey} className="p-2.5 font-bold text-rose-700">
+                            UI: {m.vsm.monthlyOverall.uiBoardingStats.mean}m | UTI: {m.vsm.monthlyOverall.utiBoardingStats.mean}m
                           </td>
                         ))}
                       </tr>
                       <tr className="border-b border-slate-200">
-                        <td className="p-2.5 text-left font-bold">Boarding Total Real (Média | Mediana)</td>
+                        <td className="p-2.5 text-left font-bold">Boarding Cirúrgico vs. Clínico (Média)</td>
                         {loadedMonths.map((m) => (
-                          <td key={m.monthKey} className="p-2.5 font-bold text-rose-700">
-                            {m.vsm.monthlyOverall.totalBoardingStats.mean}m | Med{' '}
-                            {m.vsm.monthlyOverall.totalBoardingStats.median}m
+                          <td key={m.monthKey} className="p-2.5 font-bold text-purple-800">
+                            Cir: {m.vsm.monthlyOverall.surgicalBoardingStats.mean}m | Clín: {m.vsm.monthlyOverall.clinicalBoardingStats.mean}m
                           </td>
                         ))}
                       </tr>
@@ -1811,86 +2470,189 @@ export function EmergencyAnalyticsView({
         )}
 
         {/* ====================================================================
-            ABA 7: NOTA TÉCNICA, METODOLOGIA ANALÍTICA E AUDITORIA DE DADOS
+            ABA 7: METODOLOGIA, AUDITORIA DE COMPLETUDE TASY E INSPETOR DE FICHA
            ==================================================================== */}
         {activeTab === 'methodology_audit' && (
           <div className="space-y-6">
-            {/* Banner de Certificação Executiva */}
-            <div className="bg-slate-900 text-white rounded-2xl p-6 shadow-sm border border-slate-800">
-              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
+            {/* INSPETOR INTERATIVO DE FICHA INDIVIDUAL POR Nº DE ATENDIMENTO (PROVA REAL DE VERACIDADE) */}
+            <div className="bg-white rounded-2xl p-6 shadow-sm border-2 border-blue-600">
+              <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4 pb-4 border-b border-slate-200">
                 <div>
-                  <span className="px-2.5 py-0.5 rounded bg-blue-600 text-[11px] font-bold uppercase tracking-wider">
-                    Anexo I • Memorial Metodológico &amp; Governança de Dados
+                  <span className="px-2.5 py-0.5 rounded bg-blue-600 text-white text-[11px] font-bold uppercase">
+                    Prova Real em Reunião • 100% Rastreável &amp; Anónimo (LGPD)
                   </span>
-                  <h2 className="text-lg font-extrabold mt-1.5">
-                    Rastreabilidade Matemática, Arquitetura de Fusão Determinística e Conformidade LGPD
-                  </h2>
-                  <p className="text-xs text-slate-300 mt-1">
-                    Este memorial também é exportado automaticamente na <strong>Aba 8 do Excel (.xlsx)</strong> e na{' '}
-                    <strong>Página 7 do Dossiê PDF Vetorial (.pdf)</strong> para blindar apresentações à Diretoria Executiva e Conselho.
+                  <h3 className="text-base font-extrabold text-slate-900 mt-1">
+                    🔍 Inspetor de Auditoria Individual por Nº de Atendimento (`Atendimento ID Lookup`)
+                  </h3>
+                  <p className="text-xs text-slate-600">
+                    Digite abaixo qualquer número de <strong>Atendimento</strong> da planilha original para exibir exatamente como o sistema reconstruiu os carimbos de data/hora, exames, laudos e boarding daquela ficha.
                   </p>
                 </div>
-                <div className="bg-slate-800 border border-slate-700 rounded-xl p-3.5 text-xs space-y-1 min-w-[290px]">
-                  <div className="font-bold text-blue-300">Status de Auditoria da Sessão Ativa:</div>
-                  <div>• Competência: <strong>{activeData.periodLabel}</strong> ({activeData.totalAttendances} pac. / {activeData.totalDays} dias)</div>
-                  <div>
-                    • CATE 3493 (Boarding):{' '}
-                    <strong>{vsm.hasCate3493Data ? `Ativo (${vsm.matched3493Count} cruzados)` : 'Não anexado'}</strong>
-                  </div>
-                  <div>
-                    • CHAA 3704 (CIDs):{' '}
-                    <strong>{vsm.hasChaa3704Data ? `Ativo (${vsm.matched3704Count} cruzados)` : 'Não anexado'}</strong>
-                  </div>
+
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    placeholder="Ex: digite o Nº Atendimento..."
+                    value={auditSearchId}
+                    onChange={(e) => setAuditSearchId(e.target.value)}
+                    className="px-3.5 py-2 rounded-lg border-2 border-blue-400 text-xs font-bold w-56"
+                  />
+                  <button
+                    onClick={() => {
+                      const randRec =
+                        activeData.sanitizedRecords[
+                          Math.floor(Math.random() * activeData.sanitizedRecords.length)
+                        ];
+                      if (randRec) setAuditSearchId(String(randRec.atendimentoId));
+                    }}
+                    className="px-3 py-2 rounded-lg bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold"
+                  >
+                    🎲 Sortear Ficha p/ Auditar
+                  </button>
                 </div>
               </div>
+
+              {inspectedRecord ? (
+                <div className="mt-4 grid grid-cols-1 md:grid-cols-4 gap-3 text-xs">
+                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
+                    <div className="font-extrabold text-blue-900 uppercase text-[11px]">
+                      1. Identificação &amp; Porta (CATE 3333)
+                    </div>
+                    <div>• Nº Atendimento: <strong>#{inspectedRecord.atendimentoId}</strong></div>
+                    <div>• Setor / Clínica: <strong>{inspectedRecord.setor} • {inspectedRecord.clinica}</strong></div>
+                    <div>• Entrada Porta: <strong>{fmtTsBr(inspectedRecord.entradaTs)}</strong> ({inspectedRecord.shift})</div>
+                    <div>• Data Operacional Plantão: <strong>{inspectedRecord.operationalDateStr}</strong></div>
+                    <div>• Porta-Médico: <strong>{inspectedRecord.doorToDocMin ?? '—'} min</strong></div>
+                    <div>• 1ª Consulta: <strong>{inspectedRecord.consultMin ?? '—'} min</strong></div>
+                  </div>
+
+                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
+                    <div className="font-extrabold text-amber-900 uppercase text-[11px]">
+                      2. Rota de Throughput &amp; Laudos
+                    </div>
+                    <div>
+                      • Rota Classificada:{' '}
+                      <strong className="text-blue-800">
+                        {inspectedRecord.isDirectDischarge
+                          ? 'Ramo A (Alta Direta 1ºAt)'
+                          : inspectedRecord.isFastReavMedOnly
+                          ? 'Sub-ramo B1 (Fast Reav Só Med)'
+                          : inspectedRecord.isDiagnosticExamsLoop
+                          ? 'Sub-ramo B2 (Giro Exames)'
+                          : 'Internação / Outros'}
+                      </strong>
+                    </div>
+                    <div>• Medicação: <strong>{inspectedRecord.hasMed ? `Sim (Esp: ${inspectedRecord.waitMedMin ?? 0}m / ADM: ${inspectedRecord.admMedMin ?? 0}m)` : 'Não'}</strong></div>
+                    <div>
+                      • Laboratório:{' '}
+                      <strong>
+                        {inspectedRecord.hasLab
+                          ? `Sim (Coleta: ${inspectedRecord.waitLabCollectMin ?? 0}m | Laudo: ${inspectedRecord.waitLabReportMin ?? 0}m${
+                              inspectedRecord.isLabReportReconstructed ? ' [Reconstruído via Timestamp]' : ''
+                            })`
+                          : 'Não'}
+                      </strong>
+                    </div>
+                    <div>• TC / RX / USG: <strong>TC: {inspectedRecord.waitTcTotalMin ?? 'Não'}m | RX: {inspectedRecord.waitRxMin ?? 'Não'}m</strong></div>
+                    <div>• Último Laudo Liberado: <strong>{fmtTsBr(inspectedRecord.lastExamReportTs)}</strong></div>
+                  </div>
+
+                  <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-1">
+                    <div className="font-extrabold text-purple-900 uppercase text-[11px]">
+                      3. Reavaliação, Handoff &amp; Desfecho
+                    </div>
+                    <div>• 1º Médico (Porta): <strong>{inspectedRecord.medicoAnamnese || '—'}</strong></div>
+                    <div>• Último Médico (Fech.): <strong>{inspectedRecord.medicoUltimoAtend || '—'}</strong></div>
+                    <div>• Handoff (Troca): <strong>{inspectedRecord.isSameDoctor ? 'Não (Mesmo Médico)' : 'Sim (Troca de Plantonista)'}</strong></div>
+                    <div>• Fila Pós-Laudo p/ Decisão: <strong>{inspectedRecord.postLaudoReavalWaitMin ?? '—'} min</strong></div>
+                    <div>• Data Desfecho PS: <strong>{fmtTsBr(inspectedRecord.desfechoTs)}</strong></div>
+                    <div>• Permanência Total (LOS): <strong>{inspectedRecord.losMin ?? '—'} min</strong></div>
+                  </div>
+
+                  <div className="p-3.5 rounded-xl bg-rose-50/50 border border-rose-200 space-y-1">
+                    <div className="font-extrabold text-rose-900 uppercase text-[11px]">
+                      4. Boarding (3493) &amp; CID (3704)
+                    </div>
+                    <div>
+                      • Internado:{' '}
+                      <strong>
+                        {inspectedRecord.isAdmitted
+                          ? `SIM (${inspectedRecord.tipoLeito} • ${inspectedRecord.isSurgicalProfile ? 'Cirúrgico' : 'Clínico'})`
+                          : 'Não (Alta Externa)'}
+                      </strong>
+                    </div>
+                    <div>• Etapa 1 (Plano/Virtual): <strong>{inspectedRecord.waitAguardoToVirtualMin ?? inspectedRecord.waitDecisionToVirtualMin ?? '—'} min</strong></div>
+                    <div>• Etapa 2 (Subida Física): <strong>{inspectedRecord.waitVirtualToPhysicalMin ?? '—'} min</strong> ({inspectedRecord.unidFisicaNome || '—'})</div>
+                    <div>• Boarding Total Real: <strong>{inspectedRecord.totalBoardingMin ?? '—'} min</strong></div>
+                    <div>• CID Porta: <strong>{inspectedRecord.diagEntrada3704 || inspectedRecord.cid}</strong></div>
+                    <div>• CID Internação (3704): <strong>{inspectedRecord.diagSaida3704 || '—'}</strong></div>
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-4 p-4 rounded-xl bg-amber-50 border border-amber-200 text-xs text-amber-900">
+                  Nenhum atendimento encontrado com o número <strong>{auditSearchId}</strong>. Verifique o código digitado.
+                </div>
+              )}
             </div>
 
-            {/* Seção 1: Arquitetura de Fusão Determinística e LGPD */}
+            {/* AUDITORIA DE COMPLETUDE E SANEAMENTO DA BASE BRUTA (TASY) */}
             <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
               <h3 className="text-sm font-extrabold text-slate-900 uppercase mb-3">
-                1. Arquitetura de Fusão Determinística (1:1 por Nº de Atendimento) e Conformidade LGPD Stateless
+                1. Auditoria de Completude do Prontuário (Tasy) e Saneamento Estatístico nesta Competência
               </h3>
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse text-xs">
                   <thead>
                     <tr className="bg-slate-900 text-white">
-                      <th className="p-2.5 w-56">Fonte Primária / Diretriz</th>
-                      <th className="p-2.5 w-56">Chave de Cruzamento (Join)</th>
-                      <th className="p-2.5 w-64">Filtro Populacional / Escopo</th>
-                      <th className="p-2.5">Variáveis Auditadas e Garantia de Integridade</th>
+                      <th className="p-2.5 w-80">Métrica de Qualidade e Preenchimento da Base Bruta</th>
+                      <th className="p-2.5 w-52 text-center">Resultado Auditado</th>
+                      <th className="p-2.5">Regra de Engenharia de Dados Aplicada</th>
                     </tr>
                   </thead>
                   <tbody>
                     <tr className="border-b border-slate-200">
-                      <td className="p-2.5 font-extrabold text-slate-900">1.1. Relatório CATE 3333 (Master)</td>
-                      <td className="p-2.5 font-semibold text-blue-800">Chave Primária: [Atendimento]</td>
-                      <td className="p-2.5">Setor contendo &quot;PS ADULTO&quot; &amp; Clínica contendo &quot;MEDICA&quot;</td>
-                      <td className="p-2.5 text-slate-700">
-                        Timestamps de Entrada, Recepção, Consulta, Medicação, Lab, RX, TC, USG, Data Desfecho, Leito Virtual, Médico Anamnese, Médico Último Atend, CID, Convênio e DT Últ Passagem PS.
+                      <td className="p-2.5 font-bold">Total de Fichas Avaliadas no Escopo vs. Base Global</td>
+                      <td className="p-2.5 text-center font-extrabold text-blue-800">
+                        {vsm.dataQualityAudit.totalRecordsEvaluated} / {activeData.totalGlobalAttendances}
+                      </td>
+                      <td className="p-2.5 text-slate-600">
+                        Deduplicação automática 1:1 pela chave primária [Atendimento] ao somar relatórios segmentados.
                       </td>
                     </tr>
                     <tr className="border-b border-slate-200 bg-slate-50/60">
-                      <td className="p-2.5 font-extrabold text-slate-900">1.2. Relatório CATE 3493 (Boarding)</td>
-                      <td className="p-2.5 font-semibold text-rose-800">Left Join 1:1: [Nr atendimento]</td>
-                      <td className="p-2.5">Pacientes internados via Pronto-Socorro</td>
-                      <td className="p-2.5 text-slate-700">
-                        Extrai [Dt ent aguard], [Dt ent unid] (subida física real UI/UTI diferenciada de &quot;Leito de Espera&quot;), [Dif aguardando/Ent. Unid], [Cc] (Centro Cirúrgico S/N) e [Tempo permanencia] (dias).
+                      <td className="p-2.5 font-bold">Completude Porta-Médico e 1ª Consulta Médica</td>
+                      <td className="p-2.5 text-center font-bold">
+                        Porta: {vsm.dataQualityAudit.doorToDocCompletenessPct}% | Cons: {vsm.dataQualityAudit.consultTimeCompletenessPct}%
+                      </td>
+                      <td className="p-2.5 text-slate-600">
+                        Utiliza [Esp. Totem x Médico] com fallback determinístico para [Tempo Esp. Atend. Ficha x Médico].
                       </td>
                     </tr>
                     <tr className="border-b border-slate-200">
-                      <td className="p-2.5 font-extrabold text-slate-900">1.3. Relatório CHAA 3704 (CIDs)</td>
-                      <td className="p-2.5 font-semibold text-teal-800">Left Join 1:1: [Atendimento]</td>
-                      <td className="p-2.5">Internados com duplo registo diagnóstico</td>
-                      <td className="p-2.5 text-slate-700">
-                        Compara [Diag entrada] (hipótese diagnóstica inicial da porta) com [Diag saida] (diagnóstico consolidado no ato da solicitação de internação pós-propedêutica).
+                      <td className="p-2.5 font-bold">Reconstrução do Tempo de Laudo Lab (Correção do Falso Zero)</td>
+                      <td className="p-2.5 text-center font-extrabold text-emerald-700">
+                        {vsm.dataQualityAudit.labReportReconstructedFromTsCount} laudos reconstruídos
+                      </td>
+                      <td className="p-2.5 text-slate-600">
+                        Quando a coluna [Espera Laudo Laboratório] vem vazia ({vsm.dataQualityAudit.labReportNativeColPct}% nativa), reconstrói via timestamp [Dt Laudo Lab] - [Fim Estimado Coleta].
                       </td>
                     </tr>
-                    <tr className="border-b border-slate-200 bg-emerald-50/40">
-                      <td className="p-2.5 font-extrabold text-emerald-950">1.4. Proteção LGPD Stateless</td>
-                      <td className="p-2.5 font-semibold text-emerald-800">Processamento Local em RAM</td>
-                      <td className="p-2.5">Descarte imediato de PII na leitura</td>
-                      <td className="p-2.5 text-slate-700">
-                        As colunas [Paciente], [Nm paciente], [Nome], [Email], [Endereço], [Numero], [bairro] e [Dt. Nascimento] nunca são lidas nem armazenadas em memória ou banco de dados.
+                    <tr className="border-b border-slate-200 bg-slate-50/60">
+                      <td className="p-2.5 font-bold">Expurgo de Micro-Tempos Negativos e Capping de Outliers</td>
+                      <td className="p-2.5 text-center font-bold text-amber-800">
+                        {vsm.dataQualityAudit.negativeTimesPurgedCount} neg. | {vsm.dataQualityAudit.cappedOutliersCount} capped
+                      </td>
+                      <td className="p-2.5 text-slate-600">
+                        Anula apenas a micro-etapa inválida sem excluir o paciente da contagem volumétrica global do PS.
+                      </td>
+                    </tr>
+                    <tr className="border-b border-slate-200">
+                      <td className="p-2.5 font-bold">Taxa de Cruzamento CATE 3493 (Boarding) e CHAA 3704 (CIDs)</td>
+                      <td className="p-2.5 text-center font-bold text-rose-800">
+                        3493: {vsm.dataQualityAudit.cate3493MatchRateOnAdmissionsPct}% | 3704: {vsm.dataQualityAudit.chaa3704MatchRateOnAdmissionsPct}%
+                      </td>
+                      <td className="p-2.5 text-slate-600">
+                        Left Join determinístico 1:1 em memória RAM pelo número único de atendimento.
                       </td>
                     </tr>
                   </tbody>
@@ -1898,10 +2660,10 @@ export function EmergencyAnalyticsView({
               </div>
             </div>
 
-            {/* Seção 2: Dicionário de Fórmulas Matemáticas */}
+            {/* DICIONÁRIO DE FÓRMULAS MATEMÁTICAS */}
             <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-200">
               <h3 className="text-sm font-extrabold text-slate-900 uppercase mb-3">
-                2. Dicionário de Fórmulas Matemáticas e Regras de Negócio (Como Cada Indicador é Calculado)
+                2. Dicionário de Fórmulas Matemáticas e Regras de Negócio Auditáveis
               </h3>
               <div className="overflow-x-auto">
                 <table className="w-full text-left border-collapse text-xs">
@@ -1916,70 +2678,34 @@ export function EmergencyAnalyticsView({
                   <tbody>
                     {[
                       [
-                        'Turnos (Diurno vs. Noturno)',
-                        'Diurno: 07h00 <= Hora(Entrada) <= 18h59 | Noturno: 19h00 <= Hora(Entrada) <= 06h59',
+                        'Ciclo Operacional 07h → 06h59 D+1',
+                        'Se Hora(Entrada) < 07h00, pertence à Data Operacional do plantão iniciado às 07h de D-1',
                         'Coluna [Entrada] (CATE 3333)',
-                        'Respeita exatamente a janela de plantão de 12 horas da emergência (07h–19h e 19h–07h).',
+                        'Alinha a madrugada (00h–06h) ao plantão noturno que a iniciou (evita quebrar a onda noturna ao meio).',
                       ],
                       [
-                        'Ciclo Recepção e Porta-Médico',
-                        'Fila Guichê = [Espera Recepção] | Cadastro = [Atend. Recepção] | Porta-Médico = [Esp. Totem x Médico]',
-                        'Colunas de Recepção e Porta (3333)',
-                        'Separa o tempo administrativo de abertura de ficha da espera médica real. SLA institucional avalia % <= 20 min.',
+                        'Máquina de Estados do Censo (:30)',
+                        'Sonda em t = DiaOp + Hora + 30m. Ramo A fica 100% em Porta; B1 vai p/ FastReav; B2 p/ Exames; Int p/ Boarding',
+                        'Timestamps Entrada, Consulta, Desfecho e Unid',
+                        'Elimina vazamento de Alta Direta p/ Exames e calcula Média, ±DP, Mediana, P90 e [Mín–Máx] nas 4 frentes.',
                       ],
                       [
-                        'Ramo A: Alta Direta 1º Atend.',
-                        'Internado != "S" AND Sem Evasão AND Sem Medicação AND Sem Lab AND Sem RX AND Sem TC AND Sem USG',
-                        '[Internado], [Espera Medicamento], [Exame Laboratório], [Espera RX/TC/USG]',
-                        'Resolução Single-Touch no consultório: paciente avaliado, orientado/receitado e liberado sem giro interno.',
+                        'Espera de Laudo (Sem Falso Zero)',
+                        'Se [Espera Laudo Laboratório] vazio, calcula [Dt Laudo Lab] - ([Entrada] + [Porta-Méd] + [1ªCons] + [Coleta])',
+                        '[Espera Laudo Laboratório], [Dt Laudo Lab], [Dt Laudo TC]',
+                        'Garante que a etapa "7. Espera Laudo" reflita o tempo real de processamento diagnóstico.',
                       ],
                       [
-                        'Sub-Ramo B1: Fast Reav (Só Med)',
-                        'HasMed == Verdadeiro AND HasLab == Falso AND HasRX == Falso AND HasTC == Falso AND HasUSG == Falso',
-                        '[Espera Medicamento], [Tempo ADM Medicamento] s/ exames',
-                        'Isola pacientes medicados que não dependem de laudos externos (candidatos diretos a reavaliação rápida para liberar poltronas e subir NPS).',
+                        'Boarding UI vs. UTI e Cirúrgico',
+                        'T1 (Plano) = [Dt ent aguard → Data Internação] | T2 (Físico) = [Data Internação → Dt ent unid] | Cirúrgico = (Cc="S" ou Cir/Orto)',
+                        'CATE 3333 + CATE 3493 ([Ds setor unid], [Cc])',
+                        'Separa o gargalo de Enfermaria (UI) vs. UTI e quantifica o impacto superior dos pacientes cirúrgicos.',
                       ],
                       [
-                        'Sub-Ramo B2: Giro Diagnóstico',
-                        '(HasLab OR HasRX OR HasTC OR HasUSG) == Verdadeiro (com ou sem medicação associada)',
-                        '[Exame Laboratório], [Dt Laudo Lab], [Espera RX/TC/USG], [Dt Laudo TC/Usg]',
-                        'Isola pacientes cuja permanência depende da coleta/execução e liberação de laudo de apoio diagnóstico.',
-                      ],
-                      [
-                        'Fila Invisível Pós-Laudo',
-                        'Delta_T = [Data Desfecho] - Máximo([Dt Laudo Lab], [Dt Laudo TC], [Dt Laudo Usg]) (0 <= Delta_T <= 720m)',
-                        '[Data Desfecho], [Dt Laudo Lab], [Dt Laudo TC], [Dt Laudo Usg]',
-                        'Tempo ocioso em que todos os exames já estão laudados no sistema aguardando apenas a reavaliação médica.',
-                      ],
-                      [
-                        'Pedágio de Handoff (Troca Méd.)',
-                        'Compara Upper(Trim([Medico Anamnese])) vs. Upper(Trim([Médico Último Atend])) no mesmo atendimento',
-                        '[Medico Anamnese], [Médico Último Atend], [Qt Minutos Entrada- Desfecho]',
-                        'Quantifica o acréscimo na mediana e na média de permanência quando há troca de médico entre a porta e o desfecho.',
-                      ],
-                      [
-                        'Boarding Real em 2 Etapas',
-                        'Etapa 1 (Plano/Virtual) = [Espera Internação] | Etapa 2 (Físico) = [Dt ent unid] - [Data Internação] | Total = [Dif aguardando/Ent. Unid]',
-                        'CATE 3333 + CATE 3493 ([Ds setor unid] != Leito de Espera)',
-                        'Separa o atraso burocrático da operadora (até o leito virtual) da espera por vaga física nos andares (UI) ou UTI.',
-                      ],
-                      [
-                        'Censo Simultâneo (Sonda :30)',
-                        'Para cada dia d e hora h (07h–06h), sonda em t = d + h + 30min verifica interseção [t_Entrada, t_Fim1aCons, t_Desfecho, t_SaidaUnid]',
-                        'Timestamps de Entrada, Consulta, Desfecho e Saída Física',
-                        'Reconstrói exatamente quantos pacientes estão presentes ao mesmo tempo no PS em cada uma das 4 frentes operacionais.',
-                      ],
-                      [
-                        'Eficiência Lean (PCE %)',
-                        'VA = Cadastro + 1ªConsulta + InfusãoMed + 12m(Reaval) | NVA = Filas + Laudos + Pós-Laudo | PCE = VA / (VA + NVA) * 100',
-                        'Médias auditadas das micro-etapas do processo',
-                        'Métrica padrão Lean Healthcare que demonstra a fração da jornada em cuidado ativo versus espera sistêmica.',
-                      ],
-                      [
-                        'Governança CID & Retorno <48h',
-                        'Compara código CID Entrada vs. Saída (3704) | Retorno: 0.5h < ([Entrada] - [DT Últ Passagem PS]) <= 48h e 72h',
-                        '[Diag entrada], [Diag saida] (3704) e [DT Últ Passagem PS] (3333)',
-                        'Audita o refinamento diagnóstico pós-exames na internação e a segurança da alta através da taxa de retorno precoce.',
+                        'Macas Físicas Bloqueadas 24h/dia',
+                        'Macas_Bloqueadas = Soma(Minutos_Boarding / 60) / (Dias_Período * 24)',
+                        '[Dif aguardando/Ent. Unid] e [Espera Internação]',
+                        'Traduz as horas perdidas em número exato de macas físicas da emergência sequestradas ininterruptamente.',
                       ],
                     ].map(([ind, form, cols, interp], idx) => (
                       <tr key={idx} className={`border-b border-slate-200 ${idx % 2 === 1 ? 'bg-slate-50/60' : ''}`}>
@@ -1991,36 +2717,6 @@ export function EmergencyAnalyticsView({
                     ))}
                   </tbody>
                 </table>
-              </div>
-            </div>
-
-            {/* Seção 3: Saneamento Estatístico e Tratamento de Outliers */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
-                <div className="text-xs font-extrabold text-slate-900 uppercase">
-                  3.1. Expurgo de Tempos Negativos
-                </div>
-                <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
-                  Qualquer micro-etapa com duração calculada inferior a <strong>0 minutos</strong> (decorrente de lançamentos retroativos manuais no prontuário) é tratada como nula (<code>null</code>) exclusivamente naquela micro-etapa, mantendo o atendimento na contagem volumétrica global sem puxar a média da equipe artificialmente para baixo.
-                </p>
-              </div>
-
-              <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
-                <div className="text-xs font-extrabold text-slate-900 uppercase">
-                  3.2. Tetos Operacionais de Outliers (Capping)
-                </div>
-                <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
-                  Para evitar que fichas esquecidas abertas no sistema por vários dias distorçam o desvio-padrão e o censo simultâneo, aplicam-se tetos técnicos estritos: Recepção/Consulta ≤ <strong>240m</strong>, Porta-Médico/Coleta/RX ≤ <strong>600m</strong>, Laudos/TC/USG ≤ <strong>1.440m</strong>, LOS Geral ≤ <strong>2.880m</strong> e Boarding ≤ <strong>4.320m</strong> (48h no censo horário).
-                </p>
-              </div>
-
-              <div className="bg-white rounded-xl p-5 border border-slate-200 shadow-sm">
-                <div className="text-xs font-extrabold text-slate-900 uppercase">
-                  3.3. Exposição Estatística Multivariada
-                </div>
-                <p className="text-xs text-slate-600 mt-1.5 leading-relaxed">
-                  Como tempos hospitalares apresentam distribuição assimétrica positiva (cauda longa), todos os indicadores são reportados simultaneamente com <strong>N válido</strong>, <strong>Média Aritmética</strong>, <strong>Desvio-Padrão Populacional (±DP)</strong>, <strong>Mediana (P50)</strong>, <strong>Percentil 90 (P90)</strong> e <strong>Amplitude [Mín–Máx]</strong>.
-                </p>
               </div>
             </div>
           </div>

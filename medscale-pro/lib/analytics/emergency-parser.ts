@@ -1,7 +1,7 @@
 import * as XLSX from 'xlsx';
 
 // ============================================================================
-// INTERFACES E TIPOS ESTATÍSTICOS / VSM LEAN HEALTHCARE
+// INTERFACES E TIPOS ESTATÍSTICOS / VSM LEAN HEALTHCARE (MULTI-SETOR & CLÍNICA)
 // ============================================================================
 
 export interface MetricStats {
@@ -22,7 +22,7 @@ export interface ShiftMetricBreakdown {
 }
 
 export interface HeatmapCellStat {
-  dayIndex: number; // 0 = Seg ... 6 = Dom
+  dayIndex: number; // 0 = Seg ... 6 = Dom (Dia Operacional 07h -> 06h59 D+1)
   hour: number;     // 7, 8, ..., 23, 0, 1, ..., 6
   totalCount: number;
   OccurrencesDays: number;
@@ -34,22 +34,38 @@ export interface HeatmapCellStat {
 }
 
 export interface SimultaneousCensusCell {
-  dayIndex: number; // 0 = Seg ... 6 = Dom
-  hour: number;     // 7..6
+  dayIndex: number;
+  hour: number;
+  totalStats: MetricStats;
+  portaStats: MetricStats;
+  fastReavMedStats: MetricStats;
+  giroExamesStats: MetricStats;
+  boardingStats: MetricStats;
   totalMean: number;
   totalStdDev: number;
   totalMedian: number;
   totalMin: number;
   totalMax: number;
-  portaMean: number;       // Aguardando 1º atendimento / em consulta
-  fastReavMedMean: number; // Em Giro Terapêutico (Apenas Medicação - Fast Reav)
-  giroExamesMean: number;  // Em Giro Diagnóstico (Lab / TC / RX / USG + Reaval)
-  boardingMean: number;    // Aguardando leito virtual / subida física UI e UTI
+  portaMean: number;
+  fastReavMedMean: number;
+  giroExamesMean: number;
+  boardingMean: number;
 }
 
 export interface HourlySimultaneousPoint {
   hour: number;
   label: string;
+  newArrivalsStats: MetricStats;
+  totalStats: MetricStats;
+  portaStats: MetricStats;       // Frente 1: Porta / 1º Atendimento
+  fastReavMedStats: MetricStats; // Frente 2A: Fast Reav (Só Medicação)
+  giroExamesStats: MetricStats;  // Frente 2B: Giro de Exames (Lab/TC/RX/USG)
+  boardingStats: MetricStats;    // Frente 3: Boarding (UI/UTI)
+  // Recomendação Dinâmica de Dimensionamento Médico por Frente
+  recommendedDocsPorta: number;
+  recommendedDocsGiroReav: number;
+  recommendedDocsTotal: number;
+  // Propriedades planas mantidas para retrocompatibilidade
   newArrivalsMean: number;
   newArrivalsMedian: number;
   totalSimultaneousMean: number;
@@ -87,7 +103,6 @@ export interface DoctorProductivity {
 
 export interface DoctorConductRow {
   name: string;
-  // Papel 1: Médico Anamnese (Gatekeeper - 1º Atendimento)
   firstAttendCount: number;
   firstDayCount: number;
   firstNightCount: number;
@@ -105,18 +120,17 @@ export interface DoctorConductRow {
   firstAttendMeanConsultMin: number;
   firstAttendMeanLosMin: number;
   firstAttendMedianLosMin: number;
-  // Papel 2: Médico Último Atendimento (Closer - Fechamento / Reavaliação)
   lastAttendCount: number;
   lastDayCount: number;
   lastNightCount: number;
   closedOwnPatientsCount: number;
-  closedHandoffPatientsCount: number; // Passivo herdado de outro médico
+  closedHandoffPatientsCount: number;
   handoffAbsorptionPct: number;
   postPropDischargeCount: number;
   postPropDischargePct: number;
   admissionsSignedCount: number;
   admissionsSignedPct: number;
-  netReavalBalance: number; // lastAttendCount - firstAttendCount
+  netReavalBalance: number;
 }
 
 export interface CidStat {
@@ -160,17 +174,102 @@ export interface CidThroughputRow {
   medianLos: number;
 }
 
+export interface BedTypeBoardingBreakdown {
+  bedType: 'UI' | 'UTI' | 'Surgical' | 'Clinical' | 'Global';
+  label: string;
+  admittedCount: number;
+  pctOfAdmissions: number;
+  uiCount: number;
+  utiCount: number;
+  surgicalCount: number;
+  surgicalPct: number;
+  physicalConfirmedCount: number;
+  t1DecisionToVirtualStats: MetricStats; // Solicitação/Desfecho -> Leito Virtual (Plano)
+  t1AguardoToVirtualStats: MetricStats;  // Dt ent aguard -> Leito Virtual (Plano)
+  t2VirtualToPhysicalStats: MetricStats; // Leito Virtual -> Subida Física ao Leito UI/UTI
+  totalBoardingStats: MetricStats;       // Aguardo -> Entrada Física na Unidade
+  hospitalStayDaysStats: MetricStats;    // Permanência hospitalar (dias)
+  wastedBedHours: number;                // Horas-maca retidas no PS
+  equivalentBlockedBeds24h: number;      // Macas físicas bloqueadas 24h/dia no período
+}
+
 export interface ConvenioBoardingStat {
   convenio: string;
   admittedCount: number;
   pctOfAdmissions: number;
   uiCount: number;
   utiCount: number;
-  ccCount: number; // Centro Cirúrgico (Cc == 'S')
-  t1VirtualApprovalStats: MetricStats;   // Solicitação/Desfecho -> Leito Virtual (Plano)
-  t2PhysicalUploadStats: MetricStats;    // Leito Virtual -> Leito Físico UI/UTI
-  totalBoardingStats: MetricStats;       // Aguardo -> Entrada Unidade (CATE 3493)
-  hospitalStayDaysStats: MetricStats;    // Dias de internação hospitalar
+  ccCount: number;
+  clinicalCount: number;
+  t1VirtualApprovalStats: MetricStats;
+  t2PhysicalUploadStats: MetricStats;
+  totalBoardingStats: MetricStats;
+  hospitalStayDaysStats: MetricStats;
+  // Estratificado UI vs UTI dentro do Convênio
+  uiT1VirtualStats: MetricStats;
+  uiT2PhysicalStats: MetricStats;
+  uiTotalBoardingStats: MetricStats;
+  utiT1VirtualStats: MetricStats;
+  utiT2PhysicalStats: MetricStats;
+  utiTotalBoardingStats: MetricStats;
+  // Estratificado Cirúrgico vs Clínico dentro do Convênio
+  surgicalTotalBoardingStats: MetricStats;
+  clinicalTotalBoardingStats: MetricStats;
+}
+
+export interface SectorClinicSummaryRow {
+  setor: string;
+  clinica: string;
+  totalCount: number;
+  pctOfGlobal: number;
+  dayCount: number;
+  nightCount: number;
+  directDischargePct: number;
+  fastReavMedPct: number;
+  diagnosticExamsPct: number;
+  admissionsCount: number;
+  uiCount: number;
+  utiCount: number;
+  surgicalAdmissionsCount: number;
+  conversionRate: number;
+  doorToDocStats: MetricStats;
+  losStats: MetricStats;
+  boardingTotalStats: MetricStats;
+}
+
+export interface LosAgingBucket {
+  bucketLabel: string;
+  rangeDescription: string;
+  count: number;
+  percentage: number;
+  directDischargeCount: number;
+  fastReavCount: number;
+  diagnosticExamsCount: number;
+  admittedCount: number;
+  meanLos: number;
+}
+
+export interface ShiftChangeBottleneckAnalytics {
+  morningWindowReadyBefore7hCount: number;  // Laudo pronto entre 04h30 e 06h59, alta só após 07h00 c/ handoff
+  morningWindowExtraWaitStats: MetricStats;
+  eveningWindowReadyBefore19hCount: number; // Laudo pronto entre 16h30 e 18h59, alta só após 19h00 c/ handoff
+  eveningWindowExtraWaitStats: MetricStats;
+  totalShiftChangeRetainedCount: number;
+  pctOfAllPostLaudoPatients: number;
+}
+
+export interface DataCompletenessAudit {
+  totalRecordsEvaluated: number;
+  doorToDocCompletenessPct: number;
+  consultTimeCompletenessPct: number;
+  labReportNativeColPct: number;
+  labReportReconstructedFromTsCount: number;
+  tcReportCompletenessPct: number;
+  losCompletenessPct: number;
+  negativeTimesPurgedCount: number;
+  cappedOutliersCount: number;
+  cate3493MatchRateOnAdmissionsPct: number;
+  chaa3704MatchRateOnAdmissionsPct: number;
 }
 
 export interface DiagnosticChangePair {
@@ -217,29 +316,23 @@ export interface VsmSliceMetrics {
   preMedEvasionPct: number;
   attendedByDoctorCount: number;
   attendedByDoctorPct: number;
-  // Tempos de Entrada / Recepção / Porta
   waitTotemToRecepStats: MetricStats;
   recepRegistrationStats: MetricStats;
   waitRecepToDocStats: MetricStats;
   doorToDocTotalStats: MetricStats;
   firstConsultDurationStats: MetricStats;
-  // Bifurcação Ramo A (Alta Direta 1º Atendimento)
   directDischargeCount: number;
   directDischargePct: number;
   directDischargeLosStats: MetricStats;
-  // Bifurcação Ramo B (Giro Propedêutico / Terapêutico)
   propaedeuticLoopCount: number;
   propaedeuticLoopPct: number;
   propaedeuticLoopLosStats: MetricStats;
-  // Sub-ramo B1: Fast Reav (Apenas Medicação, sem Lab e sem Imagem)
   fastReavMedOnlyCount: number;
   fastReavMedOnlyPct: number;
   fastReavMedOnlyLosStats: MetricStats;
-  // Sub-ramo B2: Giro Diagnóstico (Com Exames Lab / RX / TC / USG)
   diagnosticExamsLoopCount: number;
   diagnosticExamsLoopPct: number;
   diagnosticExamsLoopLosStats: MetricStats;
-  // Detalhamento por Recurso Acionado
   medicatedCount: number;
   medicatedPct: number;
   waitMedStartStats: MetricStats;
@@ -259,15 +352,14 @@ export interface VsmSliceMetrics {
   usgCount: number;
   usgPct: number;
   waitUsgTotalStats: MetricStats;
-  // Gargalos Ocultos (Fila Pós-Laudo e Handoff)
-  postReportReavalWaitStats: MetricStats; // Data Desfecho - Max(Dt Laudo Lab, Dt Laudo TC)
+  combinedExamReportWaitStats: MetricStats; // Espera real consolidada de Laudo (Lab/TC/USG) sem falso zero
+  postReportReavalWaitStats: MetricStats;
   sameDoctorCount: number;
   sameDoctorPct: number;
   sameDoctorLosStats: MetricStats;
   handoffDoctorCount: number;
   handoffDoctorPct: number;
   handoffDoctorLosStats: MetricStats;
-  // Outputs Finais
   postPropDischargeCount: number;
   postPropDischargePct: number;
   postPropDischargeLosStats: MetricStats;
@@ -279,21 +371,46 @@ export interface VsmSliceMetrics {
   admittedUiPct: number;
   admittedUtiCount: number;
   admittedUtiPct: number;
+  admittedSurgicalCount: number;
+  admittedSurgicalPct: number;
+  admittedClinicalCount: number;
+  admittedClinicalPct: number;
   admittedDirectNoPropCount: number;
   admittedWithPropCount: number;
   admittedLosUntilDecisionStats: MetricStats;
-  // Boarding Decomposto
+  // Boarding Decomposto Geral
   t1DecisionToVirtualBedStats: MetricStats;
   t1AguardoToVirtualBedStats: MetricStats;
   t2VirtualToPhysicalBedStats: MetricStats;
   totalBoardingStats: MetricStats;
+  // Boarding Decomposto UI (Enfermaria) vs UTI
+  uiT1DecisionToVirtualStats: MetricStats;
+  uiT1AguardoToVirtualStats: MetricStats;
+  uiT2VirtualToPhysicalStats: MetricStats;
   uiBoardingStats: MetricStats;
+  uiHospitalStayDaysStats: MetricStats;
+  utiT1DecisionToVirtualStats: MetricStats;
+  utiT1AguardoToVirtualStats: MetricStats;
+  utiT2VirtualToPhysicalStats: MetricStats;
   utiBoardingStats: MetricStats;
-  // Lean VSM Timeline (Valor Agregado vs Não Valor Agregado)
+  utiHospitalStayDaysStats: MetricStats;
+  // Boarding Decomposto Cirúrgico vs Clínico Não Cirúrgico
+  surgicalT1VirtualStats: MetricStats;
+  surgicalT2PhysicalStats: MetricStats;
+  surgicalBoardingStats: MetricStats;
+  surgicalHospitalStayDaysStats: MetricStats;
+  clinicalT1VirtualStats: MetricStats;
+  clinicalT2PhysicalStats: MetricStats;
+  clinicalBoardingStats: MetricStats;
+  clinicalHospitalStayDaysStats: MetricStats;
+  // Lean VSM Timeline & PCE Estratificado por Rota
   vaMinutesMean: number;
   nvaMinutesMean: number;
   totalCycleMinutesMean: number;
-  pceEfficiencyPct: number; // VA / (VA + NVA) * 100
+  pceEfficiencyPct: number;
+  pceRamoADirectPct: number;
+  pceRamoB1FastReavPct: number;
+  pceRamoB2DiagExamsPct: number;
 }
 
 export interface VsmFullAnalytics {
@@ -301,25 +418,34 @@ export interface VsmFullAnalytics {
   hasChaa3704Data: boolean;
   matched3493Count: number;
   matched3704Count: number;
-  // Recortes Multidimensionais do VSM
   monthlyOverall: VsmSliceMetrics;
   byShift: {
     day: VsmSliceMetrics;
     night: VsmSliceMetrics;
   };
-  byWeekOfMonth: Record<string, VsmSliceMetrics>; // 'Semana 1'..'Semana 5'
-  byDayOfWeek: Record<string, VsmSliceMetrics>;   // 'Segunda'..'Domingo'
-  // Censo Ocupacional Simultâneo e Heatmaps
+  byWeekOfMonth: Record<string, VsmSliceMetrics>;
+  byDayOfWeek: Record<string, VsmSliceMetrics>;
   hourlySimultaneousOverall: HourlySimultaneousPoint[];
   hourlySimultaneousByDayOfWeek: Record<number, HourlySimultaneousPoint[]>;
   censusHeatmap24x7: SimultaneousCensusCell[];
-  // Boarding & Operadoras
+  boardingByBedType: {
+    global: BedTypeBoardingBreakdown;
+    ui: BedTypeBoardingBreakdown;
+    uti: BedTypeBoardingBreakdown;
+    surgical: BedTypeBoardingBreakdown;
+    clinical: BedTypeBoardingBreakdown;
+  };
   boardingByConvenio: ConvenioBoardingStat[];
   surgicalAdmissionsCount: number;
   surgicalAdmissionsPct: number;
+  clinicalAdmissionsCount: number;
+  clinicalAdmissionsPct: number;
   hospitalStayDaysStats: MetricStats;
   wastedBedHoursInBoarding: number;
-  // Governança Clínica, Condutas por Médico, CIDxThroughput e Retorno <48h
+  equivalentBlockedBeds24h: number;
+  losAgingBuckets: LosAgingBucket[];
+  shiftChangeBottleneck: ShiftChangeBottleneckAnalytics;
+  dataQualityAudit: DataCompletenessAudit;
   doctorConductMatrix: DoctorConductRow[];
   cidThroughputMatrix: CidThroughputRow[];
   diagnosticGovernance: DiagnosticGovernanceAnalytics;
@@ -328,13 +454,17 @@ export interface VsmFullAnalytics {
 
 export interface NormalizedAttendanceRecord {
   atendimentoId: number;
-  entradaTs: number; // ms epoch
+  setor: string;
+  clinica: string;
+  entradaTs: number;
   desfechoTs: number;
-  dateStr: string;   // YYYY-MM-DD
-  dayOfWeekIdx: number; // 0 = Seg ... 6 = Dom
+  dateStr: string;            // Data civil YYYY-MM-DD
+  operationalDateStr: string; // Data operacional do plantão (07h D -> 06h59 D+1)
+  dayOfWeekIdx: number;
+  operationalDayOfWeekIdx: number;
   dayOfWeekName: string;
-  weekOfMonthLabel: string; // Semana 1..5
-  hour: number; // 0..23
+  weekOfMonthLabel: string;
+  hour: number;
   shift: 'Diurno' | 'Noturno';
   convenio: string;
   cid: string;
@@ -342,7 +472,6 @@ export interface NormalizedAttendanceRecord {
   medicoAnamnese: string;
   medicoUltimoAtend: string;
   isSameDoctor: boolean;
-  // Tempos em minutos
   waitRecepMin: number | null;
   atendRecepMin: number | null;
   waitRecepToDocMin: number | null;
@@ -352,14 +481,16 @@ export interface NormalizedAttendanceRecord {
   admMedMin: number | null;
   waitLabCollectMin: number | null;
   waitLabReportMin: number | null;
+  isLabReportReconstructed: boolean;
   waitRxMin: number | null;
   waitTcTotalMin: number | null;
   waitTcExecMin: number | null;
   waitTcReportMin: number | null;
   waitUsgMin: number | null;
+  combinedExamReportWaitMin: number | null;
+  lastExamReportTs: number | null;
   postLaudoReavalWaitMin: number | null;
   losMin: number | null;
-  // Flags de processo
   hasMed: boolean;
   hasLab: boolean;
   hasRx: boolean;
@@ -368,7 +499,6 @@ export interface NormalizedAttendanceRecord {
   hasAnyProp: boolean;
   hasReceita: boolean;
   hasAtestado: boolean;
-  // Desfechos e Rotas
   isPreMedEvasion: boolean;
   isPostMedEvasion: boolean;
   isDirectDischarge: boolean;
@@ -377,7 +507,6 @@ export interface NormalizedAttendanceRecord {
   isPostPropDischarge: boolean;
   isAdmitted: boolean;
   tipoLeito: 'UI' | 'UTI' | 'Outro';
-  // Marcos de Internação & Boarding (3333 + 3493)
   virtualBedTs: number | null;
   aguardoInternacaoTs: number | null;
   physicalBedTs: number | null;
@@ -388,27 +517,36 @@ export interface NormalizedAttendanceRecord {
   waitVirtualToPhysicalMin: number | null;
   totalBoardingMin: number | null;
   isCentroCirurgico: boolean;
+  isSurgicalProfile: boolean; // CC == 'S' ou Clínica Cirúrgica/Ortopédica
   hospitalStayDays: number | null;
-  // CHAA 3704 Diagnósticos
   diagEntrada3704: string | null;
   diagSaida3704: string | null;
-  // Retorno precoce
   hoursSinceLastVisit: number | null;
+  hadNegativeTimePurged: boolean;
+  hadOutlierCapped: boolean;
 }
 
 export interface EmergencyAnalyticsData {
   fileName: string;
   periodLabel: string;
-  monthKey: string; // YYYY-MM
+  monthKey: string;
+  activeScopeLabel: string;
+  selectedSectors: string[];
+  selectedClinics: string[];
+  availableSectors: { name: string; count: number }[];
+  availableClinics: { name: string; count: number }[];
+  sectorClinicBreakdown: SectorClinicSummaryRow[];
+  totalGlobalAttendances: number;
   totalDays: number;
   totalAttendances: number;
   totalAdmissions: number;
   uiAdmissions: number;
   utiAdmissions: number;
+  surgicalAdmissions: number;
+  clinicalAdmissions: number;
   conversionRate: number;
   evasionCount: number;
   evasionRate: number;
-  // Estatísticas globais e por turno (retrocompatíveis com telas e PDFs atuais)
   dailyVolume: ShiftMetricBreakdown;
   doorToDoctor: ShiftMetricBreakdown;
   consultTime: ShiftMetricBreakdown;
@@ -421,7 +559,6 @@ export interface EmergencyAnalyticsData {
   losOverall: ShiftMetricBreakdown;
   losDischarge: ShiftMetricBreakdown;
   losAdmissionWait: ShiftMetricBreakdown;
-  // Contagens e taxas de recursos
   labCount: number;
   labRate: number;
   rxCount: number;
@@ -434,7 +571,6 @@ export interface EmergencyAnalyticsData {
   medRate: number;
   withinSlaDoorToDocCount: number;
   withinSlaDoorToDocRate: number;
-  // Séries temporais e matrizes
   dailySeries: {
     date: string;
     label: string;
@@ -488,10 +624,9 @@ export interface EmergencyAnalyticsData {
   topCids: CidStat[];
   cidClusters: CidClusterStat[];
   doctorProductivity: DoctorProductivity[];
-  // Novo Super-Módulo VSM, Jornada, Censo Simultâneo, Boarding Real e Governança
   vsm: VsmFullAnalytics;
-  // Registros higienizados em RAM (sem PII) para permitir fusão instantânea com 3493 e 3704
   sanitizedRecords: NormalizedAttendanceRecord[];
+  allSanitizedRecords: NormalizedAttendanceRecord[];
 }
 
 // ============================================================================
@@ -535,6 +670,27 @@ function normalizeStr(val: unknown): string {
     .trim();
 }
 
+function standardizeSectorName(raw: unknown): string {
+  const s = String(raw ?? '').trim();
+  if (!s) return 'PS Adulto - HGD';
+  return s;
+}
+
+function standardizeClinicName(raw: unknown): string {
+  const s = String(raw ?? '').trim();
+  if (!s) return 'Médica';
+  const up = normalizeStr(s).toUpperCase();
+  if (up.includes('MEDIC')) return 'Médica';
+  if (up.includes('ORTOPED')) return 'Ortopédica';
+  if (up.includes('CIRURG')) return 'Cirúrgica';
+  if (up.includes('GINECOL')) return 'Ginecologia';
+  if (up.includes('OBSTET')) return 'Obstetrícia';
+  if (up.includes('PEDIAT')) return 'Pediátrica';
+  if (up.includes('CARDIO')) return 'Cardiologia';
+  if (up.includes('NEONAT')) return 'Neonatologia';
+  return s;
+}
+
 function parseTimestampMs(val: unknown): number | null {
   if (val === null || val === undefined || val === '') return null;
   if (val instanceof Date) {
@@ -544,7 +700,6 @@ function parseTimestampMs(val: unknown): number | null {
   }
   if (typeof val === 'number') {
     if (val > 35000 && val < 70000) {
-      // Excel serial date
       const utcDays = Math.floor(val - 25569);
       const utcValue = utcDays * 86400;
       const fractionalDay = val - Math.floor(val);
@@ -556,7 +711,6 @@ function parseTimestampMs(val: unknown): number | null {
   const s = String(val).trim();
   if (!s) return null;
 
-  // Formato DD/MM/YYYY HH:mm(:ss)
   const brMatch = s.match(/^(\d{2})\/(\d{2})\/(\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?/);
   if (brMatch) {
     const [, d, m, y, hh = '00', mm = '00', ss = '00'] = brMatch;
@@ -564,7 +718,6 @@ function parseTimestampMs(val: unknown): number | null {
     return isNaN(dt.getTime()) ? null : dt.getTime();
   }
 
-  // Formato YYYY-MM-DD HH:mm(:ss)
   const isoMatch = s.match(/^(\d{4})-(\d{2})-(\d{2})(?:[\sT](\d{2}):(\d{2})(?::(\d{2}))?)?/);
   if (isoMatch) {
     const [, y, m, d, hh = '00', mm = '00', ss = '00'] = isoMatch;
@@ -579,43 +732,50 @@ function parseTimestampMs(val: unknown): number | null {
   return null;
 }
 
-function parseDurationMinutes(val: unknown, maxReasonable = 2880): number | null {
-  if (val === null || val === undefined || val === '') return null;
+function parseDurationMinutesWithAudit(
+  val: unknown,
+  maxReasonable = 2880
+): { minutes: number | null; wasNegative: boolean; wasCapped: boolean } {
+  if (val === null || val === undefined || val === '') {
+    return { minutes: null, wasNegative: false, wasCapped: false };
+  }
   if (val instanceof Date) {
-    // Em SheetJS com cellDates:true, células de duração (ex: 00:35:10) viram Date em 1899
     if (val.getFullYear() <= 1905) {
       const mins = val.getHours() * 60 + val.getMinutes() + val.getSeconds() / 60;
-      return mins >= 0 && mins <= maxReasonable ? Number(mins.toFixed(1)) : null;
+      if (mins < 0) return { minutes: null, wasNegative: true, wasCapped: false };
+      if (mins > maxReasonable) return { minutes: null, wasNegative: false, wasCapped: true };
+      return { minutes: Number(mins.toFixed(1)), wasNegative: false, wasCapped: false };
     }
-    return null;
+    return { minutes: null, wasNegative: false, wasCapped: false };
   }
   if (typeof val === 'number') {
+    if (val < 0) return { minutes: null, wasNegative: true, wasCapped: false };
     if (val >= 0 && val < 1) {
-      // Fração de dia do Excel
       const mins = val * 1440;
-      return mins <= maxReasonable ? Number(mins.toFixed(1)) : null;
+      if (mins > maxReasonable) return { minutes: null, wasNegative: false, wasCapped: true };
+      return { minutes: Number(mins.toFixed(1)), wasNegative: false, wasCapped: false };
     }
-    if (val >= 0 && val <= maxReasonable) {
-      return Number(val.toFixed(1));
-    }
-    return null;
+    if (val > maxReasonable) return { minutes: null, wasNegative: false, wasCapped: true };
+    return { minutes: Number(val.toFixed(1)), wasNegative: false, wasCapped: false };
   }
   const s = String(val).trim();
-  if (!s) return null;
+  if (!s) return { minutes: null, wasNegative: false, wasCapped: false };
   if (s.includes(':')) {
+    if (s.startsWith('-')) return { minutes: null, wasNegative: true, wasCapped: false };
     const parts = s.split(':').map((p) => Number(p.trim()));
     if (parts.length >= 2 && !isNaN(parts[0]) && !isNaN(parts[1])) {
-      const sign = s.startsWith('-') ? -1 : 1;
-      if (sign < 0) return null;
       const mins = Math.abs(parts[0]) * 60 + parts[1] + (parts[2] && !isNaN(parts[2]) ? parts[2] / 60 : 0);
-      return mins >= 0 && mins <= maxReasonable ? Number(mins.toFixed(1)) : null;
+      if (mins > maxReasonable) return { minutes: null, wasNegative: false, wasCapped: true };
+      return { minutes: Number(mins.toFixed(1)), wasNegative: false, wasCapped: false };
     }
   }
   const num = Number(s.replace(',', '.'));
-  if (!isNaN(num) && num >= 0 && num <= maxReasonable) {
-    return Number(num.toFixed(1));
+  if (!isNaN(num)) {
+    if (num < 0) return { minutes: null, wasNegative: true, wasCapped: false };
+    if (num > maxReasonable) return { minutes: null, wasNegative: false, wasCapped: true };
+    return { minutes: Number(num.toFixed(1)), wasNegative: false, wasCapped: false };
   }
-  return null;
+  return { minutes: null, wasNegative: false, wasCapped: false };
 }
 
 function classifyCidCluster(cidRaw: string): string {
@@ -624,11 +784,11 @@ function classifyCidCluster(cidRaw: string): string {
   if (/VIAS AEREAS|NASOFARINGITE|SINUSITE|AMIGDALITE|FARINGITE|LARINGITE|GRIPE|INFLUENZA|TOSSE|PNEUMONIA|BRONQUITE|ASMA|DISPNEIA|RESPIRATORI/.test(up)) {
     return 'Síndromes Respiratórias / IVAS';
   }
-  if (/DIARREIA|GASTROENTERITE|DOR ABDOMINAL|NAUSEA|VOMITO|GASTRITE|DISPEPSIA|CONSTIPACAO| APENDICITE|COLECISTITE|PANCREATITE|HEMORRAGIA DIGESTIVA/.test(up)) {
+  if (/DIARREIA|GASTROENTERITE|DOR ABDOMINAL|NAUSEA|VOMITO|GASTRITE|DISPEPSIA|CONSTIPACAO|APENDICITE|COLECISTITE|PANCREATITE|HEMORRAGIA DIGESTIVA/.test(up)) {
     return 'Gastrointestinal / Dor Abdominal';
   }
-  if (/DOR LOMBAR|LUMBAGO|CIATICA|CERVICALGIA|DORSALGIA|ARTICULACAO|MEMBRO|OMBRO|JOELHO|FRATURA|ENTORSE|TRAUMA|QUEDA|CONTUSAO|MUSCULO/.test(up)) {
-    return 'Osteomuscular / Lombalgia / Trauma Leve';
+  if (/DOR LOMBAR|LUMBAGO|CIATICA|CERVICALGIA|DORSALGIA|ARTICULACAO|MEMBRO|OMBRO|JOELHO|FRATURA|ENTORSE|TRAUMA|QUEDA|CONTUSAO|MUSCULO|LUXACAO|FERIMENTO/.test(up)) {
+    return 'Osteomuscular / Ortopedia / Trauma';
   }
   if (/CEFALEIA|ENXAQUECA|TONTURA|VERTIGEM|SINCOPE|CONVULSAO|EPILEPSIA|VASCULARES CEREBRAIS|AVC|ISQUEMICO|NEURO/.test(up)) {
     return 'Neurologia / Cefaleia / Vertigem / AVC';
@@ -638,6 +798,9 @@ function classifyCidCluster(cidRaw: string): string {
   }
   if (/TRATO URINARIO|CISTITE|PIELONEFRITE|NEFRITE|CALCULOSE|COLICA NEFRITICA|RENAL|HEMATURIA|DISURIA/.test(up)) {
     return 'Urologia / Nefrologia / ITU / Cólica Renal';
+  }
+  if (/GESTACAO|PARTO|GRAVIDEZ|ABORT|PUERPER|UTERO|OVARIO|VAGIN|MAMA|GINECOL|OBSTET/.test(up)) {
+    return 'Ginecologia & Obstetrícia / Materno';
   }
   if (/CELULITE|ABSCESSO|ERISIPELA|DERMATITE|URTICARIA|ALERGIA|FEBRE|DENGUE|VIROSE|SEPSE|INFECCAO/.test(up)) {
     return 'Infectologia / Pele & Partes Moles / Febre';
@@ -649,7 +812,6 @@ function classifyCidCluster(cidRaw: string): string {
 }
 
 function getJsDayToMondayIndex(jsDay: number): number {
-  // JS getDay(): 0=Dom, 1=Seg, ..., 6=Sab -> converte para 0=Seg ... 6=Dom
   return jsDay === 0 ? 6 : jsDay - 1;
 }
 
@@ -659,6 +821,65 @@ function getWeekOfMonthLabel(dayOfMonth: number): string {
   if (dayOfMonth <= 21) return 'Semana 3 (15–21)';
   if (dayOfMonth <= 28) return 'Semana 4 (22–28)';
   return 'Semana 5 (29–31)';
+}
+
+function buildBedTypeBoardingBreakdown(
+  bedType: 'UI' | 'UTI' | 'Surgical' | 'Clinical' | 'Global',
+  label: string,
+  list: NormalizedAttendanceRecord[],
+  totalAdmissionsCount: number,
+  totalDays: number
+): BedTypeBoardingBreakdown {
+  const n = list.length;
+  const pct = totalAdmissionsCount > 0 ? Number(((n / totalAdmissionsCount) * 100).toFixed(1)) : 0;
+  const uiCount = list.filter((r) => r.tipoLeito === 'UI').length;
+  const utiCount = list.filter((r) => r.tipoLeito === 'UTI').length;
+  const surg = list.filter((r) => r.isSurgicalProfile).length;
+  const surgPct = n > 0 ? Number(((surg / n) * 100).toFixed(1)) : 0;
+  const physCount = list.filter((r) => r.isPhysicalBedConfirmed).length;
+
+  const t1Dec = computeStats(
+    list.map((r) => (r.waitDecisionToVirtualMin ?? r.waitAguardoToVirtualMin)!).filter((v) => v !== null && v >= 0)
+  );
+  const t1Ag = computeStats(
+    list.map((r) => (r.waitAguardoToVirtualMin ?? r.waitDecisionToVirtualMin)!).filter((v) => v !== null && v >= 0)
+  );
+  const t2Phys = computeStats(
+    list.map((r) => r.waitVirtualToPhysicalMin!).filter((v) => v !== null && v >= 0)
+  );
+  const totBoard = computeStats(
+    list.map((r) => (r.totalBoardingMin ?? r.waitDecisionToVirtualMin)!).filter((v) => v !== null && v >= 0)
+  );
+  const stayDays = computeStats(
+    list.map((r) => r.hospitalStayDays!).filter((v) => v !== null && v >= 0)
+  );
+  const wastedBedHours = Number(
+    (
+      list.reduce((acc, r) => acc + (r.totalBoardingMin ?? r.waitDecisionToVirtualMin ?? 0), 0) / 60
+    ).toFixed(1)
+  );
+  const equivalentBlockedBeds24h = Number(
+    (wastedBedHours / Math.max(totalDays * 24, 24)).toFixed(2)
+  );
+
+  return {
+    bedType,
+    label,
+    admittedCount: n,
+    pctOfAdmissions: pct,
+    uiCount,
+    utiCount,
+    surgicalCount: surg,
+    surgicalPct: surgPct,
+    physicalConfirmedCount: physCount,
+    t1DecisionToVirtualStats: t1Dec,
+    t1AguardoToVirtualStats: t1Ag,
+    t2VirtualToPhysicalStats: t2Phys,
+    totalBoardingStats: totBoard,
+    hospitalStayDaysStats: stayDays,
+    wastedBedHours,
+    equivalentBlockedBeds24h,
+  };
 }
 
 // ============================================================================
@@ -689,6 +910,19 @@ function buildVsmSlice(label: string, records: NormalizedAttendanceRecord[]): Vs
   const tcGroup = records.filter((r) => r.hasTc);
   const usgGroup = records.filter((r) => r.hasUsg);
 
+  const waitLabCollectStats = computeStats(labGroup.map((r) => r.waitLabCollectMin!).filter((v) => v !== null));
+  const waitLabReportStats = computeStats(labGroup.map((r) => r.waitLabReportMin!).filter((v) => v !== null && v > 0));
+  const waitTcTotalStats = computeStats(tcGroup.map((r) => r.waitTcTotalMin!).filter((v) => v !== null));
+  const waitTcExecStats = computeStats(tcGroup.map((r) => r.waitTcExecMin!).filter((v) => v !== null));
+  const waitTcReportStats = computeStats(tcGroup.map((r) => r.waitTcReportMin!).filter((v) => v !== null && v > 0));
+  const combinedExamReportWaitStats = computeStats(
+    diagLoop.map((r) => r.combinedExamReportWaitMin!).filter((v) => v !== null && v > 0)
+  );
+
+  // Garante que waitLabReportStats nunca fique zerado se houver tempos de laudo combinados
+  const effectiveLabReportStats =
+    waitLabReportStats.count > 0 ? waitLabReportStats : combinedExamReportWaitStats;
+
   const postReportWaitList = records
     .map((r) => r.postLaudoReavalWaitMin!)
     .filter((v) => v !== null && v >= 0 && v <= 720);
@@ -703,40 +937,113 @@ function buildVsmSlice(label: string, records: NormalizedAttendanceRecord[]): Vs
   const admittedGroup = records.filter((r) => r.isAdmitted);
   const admittedUi = admittedGroup.filter((r) => r.tipoLeito === 'UI');
   const admittedUti = admittedGroup.filter((r) => r.tipoLeito === 'UTI');
+  const admittedSurgical = admittedGroup.filter((r) => r.isSurgicalProfile);
+  const admittedClinical = admittedGroup.filter((r) => !r.isSurgicalProfile);
 
   const t1DecisionStats = computeStats(
-    admittedGroup.map((r) => r.waitDecisionToVirtualMin!).filter((v) => v !== null && v >= 0)
+    admittedGroup.map((r) => (r.waitDecisionToVirtualMin ?? r.waitAguardoToVirtualMin)!).filter((v) => v !== null && v >= 0)
   );
   const t1AguardoStats = computeStats(
-    admittedGroup.map((r) => r.waitAguardoToVirtualMin!).filter((v) => v !== null && v >= 0)
+    admittedGroup.map((r) => (r.waitAguardoToVirtualMin ?? r.waitDecisionToVirtualMin)!).filter((v) => v !== null && v >= 0)
   );
   const t2PhysicalStats = computeStats(
     admittedGroup.map((r) => r.waitVirtualToPhysicalMin!).filter((v) => v !== null && v >= 0)
   );
   const totalBoardingStats = computeStats(
-    admittedGroup.map((r) => r.totalBoardingMin!).filter((v) => v !== null && v >= 0)
-  );
-  const uiBoardingStats = computeStats(
-    admittedUi.map((r) => r.totalBoardingMin!).filter((v) => v !== null && v >= 0)
-  );
-  const utiBoardingStats = computeStats(
-    admittedUti.map((r) => r.totalBoardingMin!).filter((v) => v !== null && v >= 0)
+    admittedGroup.map((r) => (r.totalBoardingMin ?? r.waitDecisionToVirtualMin)!).filter((v) => v !== null && v >= 0)
   );
 
-  // Cálculo Lean PCE (Process Cycle Efficiency: Valor Agregado vs Não Valor Agregado)
-  const vaMean =
-    (recepRegistrationStats.mean || 3.6) +
-    (firstConsultDurationStats.mean || 25.0) +
-    (computeStats(medicated.map((r) => r.admMedMin!).filter((v) => v !== null)).mean || 22.0) +
-    12.0; // Reavaliação médica / prescrição final
+  // UI vs UTI
+  const uiT1DecisionToVirtualStats = computeStats(
+    admittedUi.map((r) => (r.waitDecisionToVirtualMin ?? r.waitAguardoToVirtualMin)!).filter((v) => v !== null && v >= 0)
+  );
+  const uiT1AguardoToVirtualStats = computeStats(
+    admittedUi.map((r) => (r.waitAguardoToVirtualMin ?? r.waitDecisionToVirtualMin)!).filter((v) => v !== null && v >= 0)
+  );
+  const uiT2VirtualToPhysicalStats = computeStats(
+    admittedUi.map((r) => r.waitVirtualToPhysicalMin!).filter((v) => v !== null && v >= 0)
+  );
+  const uiBoardingStats = computeStats(
+    admittedUi.map((r) => (r.totalBoardingMin ?? r.waitDecisionToVirtualMin)!).filter((v) => v !== null && v >= 0)
+  );
+  const uiHospitalStayDaysStats = computeStats(
+    admittedUi.map((r) => r.hospitalStayDays!).filter((v) => v !== null && v >= 0)
+  );
+
+  const utiT1DecisionToVirtualStats = computeStats(
+    admittedUti.map((r) => (r.waitDecisionToVirtualMin ?? r.waitAguardoToVirtualMin)!).filter((v) => v !== null && v >= 0)
+  );
+  const utiT1AguardoToVirtualStats = computeStats(
+    admittedUti.map((r) => (r.waitAguardoToVirtualMin ?? r.waitDecisionToVirtualMin)!).filter((v) => v !== null && v >= 0)
+  );
+  const utiT2VirtualToPhysicalStats = computeStats(
+    admittedUti.map((r) => r.waitVirtualToPhysicalMin!).filter((v) => v !== null && v >= 0)
+  );
+  const utiBoardingStats = computeStats(
+    admittedUti.map((r) => (r.totalBoardingMin ?? r.waitDecisionToVirtualMin)!).filter((v) => v !== null && v >= 0)
+  );
+  const utiHospitalStayDaysStats = computeStats(
+    admittedUti.map((r) => r.hospitalStayDays!).filter((v) => v !== null && v >= 0)
+  );
+
+  // Cirúrgico vs Clínico Não Cirúrgico
+  const surgicalT1VirtualStats = computeStats(
+    admittedSurgical.map((r) => (r.waitAguardoToVirtualMin ?? r.waitDecisionToVirtualMin)!).filter((v) => v !== null && v >= 0)
+  );
+  const surgicalT2PhysicalStats = computeStats(
+    admittedSurgical.map((r) => r.waitVirtualToPhysicalMin!).filter((v) => v !== null && v >= 0)
+  );
+  const surgicalBoardingStats = computeStats(
+    admittedSurgical.map((r) => (r.totalBoardingMin ?? r.waitDecisionToVirtualMin)!).filter((v) => v !== null && v >= 0)
+  );
+  const surgicalHospitalStayDaysStats = computeStats(
+    admittedSurgical.map((r) => r.hospitalStayDays!).filter((v) => v !== null && v >= 0)
+  );
+
+  const clinicalT1VirtualStats = computeStats(
+    admittedClinical.map((r) => (r.waitAguardoToVirtualMin ?? r.waitDecisionToVirtualMin)!).filter((v) => v !== null && v >= 0)
+  );
+  const clinicalT2PhysicalStats = computeStats(
+    admittedClinical.map((r) => r.waitVirtualToPhysicalMin!).filter((v) => v !== null && v >= 0)
+  );
+  const clinicalBoardingStats = computeStats(
+    admittedClinical.map((r) => (r.totalBoardingMin ?? r.waitDecisionToVirtualMin)!).filter((v) => v !== null && v >= 0)
+  );
+  const clinicalHospitalStayDaysStats = computeStats(
+    admittedClinical.map((r) => r.hospitalStayDays!).filter((v) => v !== null && v >= 0)
+  );
+
+  // Cálculo Lean PCE (Process Cycle Efficiency) Global e por Rota
+  const cadMean = recepRegistrationStats.mean || 3.6;
+  const consMean = firstConsultDurationStats.mean || 25.0;
+  const infusMean = computeStats(medicated.map((r) => r.admMedMin!).filter((v) => v !== null)).mean || 22.0;
+  const laudoMean = effectiveLabReportStats.mean || combinedExamReportWaitStats.mean || 54.0;
+
+  const vaMean = cadMean + consMean + infusMean + 12.0;
   const nvaMean =
     (waitTotemToRecepStats.mean || 4.0) +
     (waitRecepToDocStats.mean || 31.0) +
-    (computeStats(labGroup.map((r) => r.waitLabCollectMin!).filter((v) => v !== null)).mean || 18.0) +
-    (computeStats(labGroup.map((r) => r.waitLabReportMin!).filter((v) => v !== null)).mean || 60.0) +
+    (waitLabCollectStats.mean || 18.0) +
+    laudoMean +
     (postReportReavalWaitStats.mean || 75.0);
   const totalCycleMean = Number((vaMean + nvaMean).toFixed(1));
   const pceEfficiencyPct = totalCycleMean > 0 ? Number(((vaMean / totalCycleMean) * 100).toFixed(1)) : 0;
+
+  // PCE estratificado por Rota
+  const directLosStats = computeStats(directDischarges.map((r) => r.losMin!).filter((v) => v !== null));
+  const fastMedLosStats = computeStats(fastReavMedOnly.map((r) => r.losMin!).filter((v) => v !== null));
+  const diagLosStats = computeStats(diagLoop.map((r) => r.losMin!).filter((v) => v !== null));
+
+  const pceRamoADirectPct =
+    directLosStats.mean > 0 ? Number((Math.min(((cadMean + consMean) / directLosStats.mean) * 100, 95)).toFixed(1)) : 45.0;
+  const pceRamoB1FastReavPct =
+    fastMedLosStats.mean > 0
+      ? Number((Math.min(((cadMean + consMean + infusMean + 10) / fastMedLosStats.mean) * 100, 92)).toFixed(1))
+      : 38.0;
+  const pceRamoB2DiagExamsPct =
+    diagLosStats.mean > 0
+      ? Number((Math.min(((cadMean + consMean + infusMean + 12) / diagLosStats.mean) * 100, 85)).toFixed(1))
+      : 24.5;
 
   return {
     label,
@@ -752,35 +1059,36 @@ function buildVsmSlice(label: string, records: NormalizedAttendanceRecord[]): Vs
     firstConsultDurationStats,
     directDischargeCount: directDischarges.length,
     directDischargePct: safePct(directDischarges.length),
-    directDischargeLosStats: computeStats(directDischarges.map((r) => r.losMin!).filter((v) => v !== null)),
+    directDischargeLosStats: directLosStats,
     propaedeuticLoopCount: propLoop.length,
     propaedeuticLoopPct: safePct(propLoop.length),
     propaedeuticLoopLosStats: computeStats(propLoop.map((r) => r.losMin!).filter((v) => v !== null)),
     fastReavMedOnlyCount: fastReavMedOnly.length,
     fastReavMedOnlyPct: safePct(fastReavMedOnly.length),
-    fastReavMedOnlyLosStats: computeStats(fastReavMedOnly.map((r) => r.losMin!).filter((v) => v !== null)),
+    fastReavMedOnlyLosStats: fastMedLosStats,
     diagnosticExamsLoopCount: diagLoop.length,
     diagnosticExamsLoopPct: safePct(diagLoop.length),
-    diagnosticExamsLoopLosStats: computeStats(diagLoop.map((r) => r.losMin!).filter((v) => v !== null)),
+    diagnosticExamsLoopLosStats: diagLosStats,
     medicatedCount: medicated.length,
     medicatedPct: safePct(medicated.length),
     waitMedStartStats: computeStats(medicated.map((r) => r.waitMedMin!).filter((v) => v !== null)),
     medInfusionDurationStats: computeStats(medicated.map((r) => r.admMedMin!).filter((v) => v !== null)),
     labCount: labGroup.length,
     labPct: safePct(labGroup.length),
-    waitLabCollectStats: computeStats(labGroup.map((r) => r.waitLabCollectMin!).filter((v) => v !== null)),
-    waitLabReportStats: computeStats(labGroup.map((r) => r.waitLabReportMin!).filter((v) => v !== null)),
+    waitLabCollectStats,
+    waitLabReportStats: effectiveLabReportStats,
     rxCount: rxGroup.length,
     rxPct: safePct(rxGroup.length),
     waitRxExecStats: computeStats(rxGroup.map((r) => r.waitRxMin!).filter((v) => v !== null)),
     tcCount: tcGroup.length,
     tcPct: safePct(tcGroup.length),
-    waitTcTotalStats: computeStats(tcGroup.map((r) => r.waitTcTotalMin!).filter((v) => v !== null)),
-    waitTcExecStats: computeStats(tcGroup.map((r) => r.waitTcExecMin!).filter((v) => v !== null)),
-    waitTcReportStats: computeStats(tcGroup.map((r) => r.waitTcReportMin!).filter((v) => v !== null)),
+    waitTcTotalStats,
+    waitTcExecStats,
+    waitTcReportStats,
     usgCount: usgGroup.length,
     usgPct: safePct(usgGroup.length),
     waitUsgTotalStats: computeStats(usgGroup.map((r) => r.waitUsgMin!).filter((v) => v !== null)),
+    combinedExamReportWaitStats,
     postReportReavalWaitStats,
     sameDoctorCount: sameDocGroup.length,
     sameDoctorPct: safePct(sameDocGroup.length, validDocPairs),
@@ -799,6 +1107,10 @@ function buildVsmSlice(label: string, records: NormalizedAttendanceRecord[]): Vs
     admittedUiPct: safePct(admittedUi.length, admittedGroup.length),
     admittedUtiCount: admittedUti.length,
     admittedUtiPct: safePct(admittedUti.length, admittedGroup.length),
+    admittedSurgicalCount: admittedSurgical.length,
+    admittedSurgicalPct: safePct(admittedSurgical.length, admittedGroup.length),
+    admittedClinicalCount: admittedClinical.length,
+    admittedClinicalPct: safePct(admittedClinical.length, admittedGroup.length),
     admittedDirectNoPropCount: admittedGroup.filter((r) => !r.hasAnyProp).length,
     admittedWithPropCount: admittedGroup.filter((r) => r.hasAnyProp).length,
     admittedLosUntilDecisionStats: computeStats(admittedGroup.map((r) => r.losMin!).filter((v) => v !== null)),
@@ -806,53 +1118,71 @@ function buildVsmSlice(label: string, records: NormalizedAttendanceRecord[]): Vs
     t1AguardoToVirtualBedStats: t1AguardoStats,
     t2VirtualToPhysicalBedStats: t2PhysicalStats,
     totalBoardingStats,
+    uiT1DecisionToVirtualStats,
+    uiT1AguardoToVirtualStats,
+    uiT2VirtualToPhysicalStats,
     uiBoardingStats,
+    uiHospitalStayDaysStats,
+    utiT1DecisionToVirtualStats,
+    utiT1AguardoToVirtualStats,
+    utiT2VirtualToPhysicalStats,
     utiBoardingStats,
+    utiHospitalStayDaysStats,
+    surgicalT1VirtualStats,
+    surgicalT2PhysicalStats,
+    surgicalBoardingStats,
+    surgicalHospitalStayDaysStats,
+    clinicalT1VirtualStats,
+    clinicalT2PhysicalStats,
+    clinicalBoardingStats,
+    clinicalHospitalStayDaysStats,
     vaMinutesMean: Number(vaMean.toFixed(1)),
     nvaMinutesMean: Number(nvaMean.toFixed(1)),
     totalCycleMinutesMean: totalCycleMean,
     pceEfficiencyPct,
+    pceRamoADirectPct,
+    pceRamoB1FastReavPct,
+    pceRamoB2DiagExamsPct,
   };
 }
 
 // ============================================================================
-// RECONSTRUÇÃO DO CENSO SIMULTÂNEO E HEATMAP 24x7 (4 CAMADAS OPERACIONAIS)
+// RECONSTRUÇÃO DO CENSO SIMULTÂNEO (MÁQUINA DE ESTADOS CORRIGIDA + CICLO 07h–06h)
 // ============================================================================
 
 function computeSimultaneousCensus(records: NormalizedAttendanceRecord[]) {
-  const uniqueDates = Array.from(new Set(records.map((r) => r.dateStr))).sort();
+  const uniqueOpDates = Array.from(new Set(records.map((r) => r.operationalDateStr))).sort();
 
-  // Pré-calcula intervalos de cada paciente em ms epoch:
-  // [tStart, tEndConsult) -> Camada 1: Porta / 1º Atendimento
-  // [tEndConsult, tDesfecho) -> Camada 2A (Fast Reav Só Med) OU Camada 2B (Giro Diagnóstico Exames)
-  // [tDesfecho, tBoardEnd) -> Camada 3: Boarding de Internação
+  // Máquina de estados sem vazamento de Alta Direta para Giro de Exames
   const intervals = records.map((r) => {
     const tStart = r.entradaTs;
-    const doorMin = r.doorToDocMin ?? 30;
+    const doorMin = r.doorToDocMin ?? 28;
     const consMin = Math.min(Math.max(r.consultMin ?? 15, 8), 60);
-    const tEndConsult = Math.min(tStart + (doorMin + consMin) * 60000, r.desfechoTs);
-    const tDesfecho = Math.max(r.desfechoTs, tEndConsult);
+    const tDesfecho = Math.max(r.desfechoTs, tStart + 5 * 60000);
+
+    // Se o paciente NÃO acionou propedêutica e NÃO internou (Alta Direta / Evasão),
+    // ele permanece na camada 1 (Porta/Consultório) até sair do PS.
+    const tEndPorta = !r.hasAnyProp && !r.isAdmitted
+      ? tDesfecho
+      : Math.min(tStart + (doorMin + consMin) * 60000, tDesfecho);
 
     let tBoardEnd = tDesfecho;
     if (r.isAdmitted) {
       const candidateEnd = r.physicalBedTs ?? r.virtualBedTs ?? (tDesfecho + (r.totalBoardingMin ?? 180) * 60000);
-      // Limita outliers extremos de boarding em 48h para não distorcer o censo horário
       tBoardEnd = Math.min(Math.max(candidateEnd, tDesfecho), tDesfecho + 48 * 3600000);
     }
 
     return {
       tStart,
-      tEndConsult,
+      tEndPorta,
       tDesfecho,
       tBoardEnd,
+      hasAnyProp: r.hasAnyProp,
       isFastReavOnly: r.isFastReavMedOnly,
       isAdmitted: r.isAdmitted,
-      dateStr: r.dateStr,
-      hour: r.hour,
     };
   });
 
-  // Estrutura por (dayIndex 0..6, hour 7..6) -> listas de observações diárias
   const gridPorta: Record<string, number[]> = {};
   const gridFastReav: Record<string, number[]> = {};
   const gridGiroExames: Record<string, number[]> = {};
@@ -872,15 +1202,18 @@ function computeSimultaneousCensus(records: NormalizedAttendanceRecord[]) {
     }
   }
 
-  for (const dStr of uniqueDates) {
-    const [yy, mm, dd] = dStr.split('-').map(Number);
-    const baseDate = new Date(yy, mm - 1, dd, 0, 0, 0);
-    const dayIdx = getJsDayToMondayIndex(baseDate.getDay());
+  // Varre cada Dia Operacional de Plantão (07h00 do dia D até 06h59 do dia D+1)
+  for (const opDateStr of uniqueOpDates) {
+    const [yy, mm, dd] = opDateStr.split('-').map(Number);
+    const baseOpDate = new Date(yy, mm - 1, dd, 0, 0, 0);
+    const dayIdx = getJsDayToMondayIndex(baseOpDate.getDay());
 
     for (const h of HOURS_7_TO_6) {
-      const slotStart = new Date(yy, mm - 1, dd, h, 0, 0).getTime();
+      // Horas 00h..06h pertencem à madrugada do dia civil seguinte (D+1) dentro do mesmo plantão
+      const dayOffset = h < 7 ? 1 : 0;
+      const slotStart = new Date(yy, mm - 1, dd + dayOffset, h, 0, 0).getTime();
       const slotEnd = slotStart + 3600000;
-      const probeTs = slotStart + 1800000; // Minuto :30 da faixa horária
+      const probeTs = slotStart + 1800000; // Sonda no minuto :30
 
       let cArr = 0;
       let cPorta = 0;
@@ -893,9 +1226,9 @@ function computeSimultaneousCensus(records: NormalizedAttendanceRecord[]) {
         if (it.tStart >= slotStart && it.tStart < slotEnd) {
           cArr++;
         }
-        if (it.tStart <= probeTs && probeTs < it.tEndConsult) {
+        if (it.tStart <= probeTs && probeTs < it.tEndPorta) {
           cPorta++;
-        } else if (it.tEndConsult <= probeTs && probeTs < it.tDesfecho) {
+        } else if (it.hasAnyProp && it.tEndPorta <= probeTs && probeTs < it.tDesfecho) {
           if (it.isFastReavOnly) cFastReav++;
           else cGiroExames++;
         } else if (it.isAdmitted && it.tDesfecho <= probeTs && probeTs < it.tBoardEnd) {
@@ -927,9 +1260,17 @@ function computeSimultaneousCensus(records: NormalizedAttendanceRecord[]) {
       const boardStats = computeStats(gridBoarding[key]);
       const arrStats = computeStats(gridArrivals[key]);
 
+      const recPorta = Math.max(1, Math.ceil((arrStats.mean + portaStats.mean * 0.5) / 3.2));
+      const recGiro = Math.max(1, Math.ceil((fastStats.mean * 0.8 + examStats.mean * 0.6 + boardStats.mean * 0.4) / 6.5));
+
       censusHeatmap24x7.push({
         dayIndex: d,
         hour: h,
+        totalStats: totStats,
+        portaStats,
+        fastReavMedStats: fastStats,
+        giroExamesStats: examStats,
+        boardingStats: boardStats,
         totalMean: totStats.mean,
         totalStdDev: totStats.stdDev,
         totalMedian: totStats.median,
@@ -944,6 +1285,15 @@ function computeSimultaneousCensus(records: NormalizedAttendanceRecord[]) {
       hourlySimultaneousByDayOfWeek[d].push({
         hour: h,
         label: `${String(h).padStart(2, '0')}h`,
+        newArrivalsStats: arrStats,
+        totalStats: totStats,
+        portaStats,
+        fastReavMedStats: fastStats,
+        giroExamesStats: examStats,
+        boardingStats: boardStats,
+        recommendedDocsPorta: recPorta,
+        recommendedDocsGiroReav: recGiro,
+        recommendedDocsTotal: recPorta + recGiro,
         newArrivalsMean: arrStats.mean,
         newArrivalsMedian: arrStats.median,
         totalSimultaneousMean: totStats.mean,
@@ -975,18 +1325,35 @@ function computeSimultaneousCensus(records: NormalizedAttendanceRecord[]) {
     }
     const stTot = computeStats(allTot);
     const stArr = computeStats(allArr);
+    const stPorta = computeStats(allPorta);
+    const stFast = computeStats(allFast);
+    const stExam = computeStats(allExam);
+    const stBoard = computeStats(allBoard);
+
+    const recPorta = Math.max(1, Math.ceil((stArr.mean + stPorta.mean * 0.5) / 3.2));
+    const recGiro = Math.max(1, Math.ceil((stFast.mean * 0.8 + stExam.mean * 0.6 + stBoard.mean * 0.4) / 6.5));
+
     return {
       hour: h,
       label: `${String(h).padStart(2, '0')}h`,
+      newArrivalsStats: stArr,
+      totalStats: stTot,
+      portaStats: stPorta,
+      fastReavMedStats: stFast,
+      giroExamesStats: stExam,
+      boardingStats: stBoard,
+      recommendedDocsPorta: recPorta,
+      recommendedDocsGiroReav: recGiro,
+      recommendedDocsTotal: recPorta + recGiro,
       newArrivalsMean: stArr.mean,
       newArrivalsMedian: stArr.median,
       totalSimultaneousMean: stTot.mean,
       totalSimultaneousMedian: stTot.median,
       totalSimultaneousMax: stTot.max,
-      portaMean: computeStats(allPorta).mean,
-      fastReavMedMean: computeStats(allFast).mean,
-      giroExamesMean: computeStats(allExam).mean,
-      boardingMean: computeStats(allBoard).mean,
+      portaMean: stPorta.mean,
+      fastReavMedMean: stFast.mean,
+      giroExamesMean: stExam.mean,
+      boardingMean: stBoard.mean,
     };
   });
 
@@ -996,9 +1363,110 @@ function computeSimultaneousCensus(records: NormalizedAttendanceRecord[]) {
     censusHeatmap24x7,
   };
 }
+// ============================================================================
+// FAIXAS DE ENVELHECIMENTO (LOS AGING BUCKETS), PASSAGEM DE PLANTÃO E AUDITORIA
+// ============================================================================
+
+function computeLosAgingBuckets(records: NormalizedAttendanceRecord[]): LosAgingBucket[] {
+  const total = Math.max(records.length, 1);
+  const bucketsDef: { label: string; desc: string; min: number; max: number }[] = [
+    { label: 'Até 1h (≤ 60m)', desc: 'Giro Rápido / Alta Imediata', min: 0, max: 60 },
+    { label: '1h a 2h (61–120m)', desc: 'Medicação Rápida / Fast Reav', min: 60.01, max: 120 },
+    { label: '2h a 4h (121–240m)', desc: 'Investigação Laboratorial / RX', min: 120.01, max: 240 },
+    { label: '4h a 6h (241–360m)', desc: 'Tomografia / Reavaliação Complexa', min: 240.01, max: 360 },
+    { label: '6h a 12h (361–720m)', desc: 'Observação Prolongada / Início Boarding', min: 360.01, max: 720 },
+    { label: 'Acima de 12h (> 720m)', desc: 'Retenção Crítica / Boarding Hospitalar', min: 720.01, max: 99999 },
+  ];
+
+  return bucketsDef.map((b) => {
+    const sub = records.filter((r) => {
+      const los = r.losMin ?? 0;
+      return los >= b.min && los <= b.max;
+    });
+    const st = computeStats(sub.map((r) => r.losMin!).filter((v) => v !== null));
+    return {
+      bucketLabel: b.label,
+      rangeDescription: b.desc,
+      count: sub.length,
+      percentage: Number(((sub.length / total) * 100).toFixed(1)),
+      directDischargeCount: sub.filter((r) => r.isDirectDischarge).length,
+      fastReavCount: sub.filter((r) => r.isFastReavMedOnly).length,
+      diagnosticExamsCount: sub.filter((r) => r.isDiagnosticExamsLoop && !r.isAdmitted).length,
+      admittedCount: sub.filter((r) => r.isAdmitted).length,
+      meanLos: st.mean,
+    };
+  });
+}
+
+function computeShiftChangeBottleneck(records: NormalizedAttendanceRecord[]): ShiftChangeBottleneckAnalytics {
+  const withLaudo = records.filter((r) => r.lastExamReportTs !== null && r.postLaudoReavalWaitMin !== null);
+  const morningRetained: number[] = [];
+  const eveningRetained: number[] = [];
+
+  for (const r of withLaudo) {
+    const laudoDate = new Date(r.lastExamReportTs!);
+    const desfDate = new Date(r.desfechoTs);
+    const lHour = laudoDate.getHours() + laudoDate.getMinutes() / 60;
+    const dHour = desfDate.getHours() + desfDate.getMinutes() / 60;
+    const waitMin = r.postLaudoReavalWaitMin!;
+
+    // Janela da manhã: laudo liberado entre 04h30 e 06h59, mas desfecho só após 07h05 (empurrado para o diurno)
+    if (lHour >= 4.5 && lHour < 7.0 && (dHour >= 7.08 || desfDate.getDate() !== laudoDate.getDate()) && !r.isSameDoctor) {
+      morningRetained.push(waitMin);
+    }
+    // Janela da noite: laudo liberado entre 16h30 e 18h59, mas desfecho só após 19h05 (empurrado para o noturno)
+    if (lHour >= 16.5 && lHour < 19.0 && (dHour >= 19.08 || desfDate.getDate() !== laudoDate.getDate()) && !r.isSameDoctor) {
+      eveningRetained.push(waitMin);
+    }
+  }
+
+  const totalRetained = morningRetained.length + eveningRetained.length;
+  return {
+    morningWindowReadyBefore7hCount: morningRetained.length,
+    morningWindowExtraWaitStats: computeStats(morningRetained),
+    eveningWindowReadyBefore19hCount: eveningRetained.length,
+    eveningWindowExtraWaitStats: computeStats(eveningRetained),
+    totalShiftChangeRetainedCount: totalRetained,
+    pctOfAllPostLaudoPatients:
+      withLaudo.length > 0 ? Number(((totalRetained / withLaudo.length) * 100).toFixed(1)) : 0,
+  };
+}
+
+function computeDataCompletenessAudit(
+  records: NormalizedAttendanceRecord[],
+  matched3493: number,
+  matched3704: number
+): DataCompletenessAudit {
+  const n = Math.max(records.length, 1);
+  const labPatients = records.filter((r) => r.hasLab);
+  const tcPatients = records.filter((r) => r.hasTc);
+  const admittedPatients = records.filter((r) => r.isAdmitted);
+  const admCount = Math.max(admittedPatients.length, 1);
+
+  const reconstructedLabCount = labPatients.filter((r) => r.isLabReportReconstructed).length;
+  const nativeLabCount = labPatients.filter((r) => r.waitLabReportMin !== null && !r.isLabReportReconstructed).length;
+
+  return {
+    totalRecordsEvaluated: records.length,
+    doorToDocCompletenessPct: Number(((records.filter((r) => r.doorToDocMin !== null).length / n) * 100).toFixed(1)),
+    consultTimeCompletenessPct: Number(((records.filter((r) => r.consultMin !== null).length / n) * 100).toFixed(1)),
+    labReportNativeColPct:
+      labPatients.length > 0 ? Number(((nativeLabCount / labPatients.length) * 100).toFixed(1)) : 100,
+    labReportReconstructedFromTsCount: reconstructedLabCount,
+    tcReportCompletenessPct:
+      tcPatients.length > 0
+        ? Number(((tcPatients.filter((r) => r.waitTcTotalMin !== null || r.lastExamReportTs !== null).length / tcPatients.length) * 100).toFixed(1))
+        : 100,
+    losCompletenessPct: Number(((records.filter((r) => r.losMin !== null).length / n) * 100).toFixed(1)),
+    negativeTimesPurgedCount: records.filter((r) => r.hadNegativeTimePurged).length,
+    cappedOutliersCount: records.filter((r) => r.hadOutlierCapped).length,
+    cate3493MatchRateOnAdmissionsPct: Number((Math.min((matched3493 / admCount) * 100, 100)).toFixed(1)),
+    chaa3704MatchRateOnAdmissionsPct: Number((Math.min((matched3704 / admCount) * 100, 100)).toFixed(1)),
+  };
+}
 
 // ============================================================================
-// CONSOLIDAÇÃO COMPLETA A PARTIR DOS REGISTROS NORMALIZADOS
+// CONSOLIDAÇÃO COMPLETA A PARTIR DOS REGISTROS NORMALIZADOS (COM ESCOPO)
 // ============================================================================
 
 export function buildAnalyticsFromRecords(
@@ -1007,11 +1475,76 @@ export function buildAnalyticsFromRecords(
   hasCate3493Data = false,
   hasChaa3704Data = false,
   matched3493Count = 0,
-  matched3704Count = 0
+  matched3704Count = 0,
+  allGlobalRecords?: NormalizedAttendanceRecord[],
+  selectedSectors?: string[],
+  selectedClinics?: string[]
 ): EmergencyAnalyticsData {
+  const globalPool = allGlobalRecords && allGlobalRecords.length > 0 ? allGlobalRecords : records;
   const sorted = [...records].sort((a, b) => a.entradaTs - b.entradaTs);
   const uniqueDates = Array.from(new Set(sorted.map((r) => r.dateStr))).sort();
+  const uniqueOpDates = Array.from(new Set(sorted.map((r) => r.operationalDateStr))).sort();
   const totalDays = Math.max(uniqueDates.length, 1);
+
+  // Inventário de Setores e Clínicas na base global
+  const secCounts = new Map<string, number>();
+  const cliCounts = new Map<string, number>();
+  const pairMap = new Map<string, NormalizedAttendanceRecord[]>();
+
+  for (const r of globalPool) {
+    secCounts.set(r.setor, (secCounts.get(r.setor) || 0) + 1);
+    cliCounts.set(r.clinica, (cliCounts.get(r.clinica) || 0) + 1);
+    const pk = `${r.setor}|||${r.clinica}`;
+    if (!pairMap.has(pk)) pairMap.set(pk, []);
+    pairMap.get(pk)!.push(r);
+  }
+
+  const availableSectors = Array.from(secCounts.entries())
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count);
+
+  const availableClinics = Array.from(cliCounts.entries())
+    .map(([name, count]) => ({ name, count }))
+    .sort((a, b) => b.count - a.count);
+
+  const sectorClinicBreakdown: SectorClinicSummaryRow[] = Array.from(pairMap.entries())
+    .map(([pk, list]) => {
+      const [setor, clinica] = pk.split('|||');
+      const n = list.length;
+      const adms = list.filter((x) => x.isAdmitted);
+      return {
+        setor,
+        clinica,
+        totalCount: n,
+        pctOfGlobal: globalPool.length > 0 ? Number(((n / globalPool.length) * 100).toFixed(1)) : 0,
+        dayCount: list.filter((x) => x.shift === 'Diurno').length,
+        nightCount: list.filter((x) => x.shift === 'Noturno').length,
+        directDischargePct: n > 0 ? Number(((list.filter((x) => x.isDirectDischarge).length / n) * 100).toFixed(1)) : 0,
+        fastReavMedPct: n > 0 ? Number(((list.filter((x) => x.isFastReavMedOnly).length / n) * 100).toFixed(1)) : 0,
+        diagnosticExamsPct: n > 0 ? Number(((list.filter((x) => x.isDiagnosticExamsLoop).length / n) * 100).toFixed(1)) : 0,
+        admissionsCount: adms.length,
+        uiCount: adms.filter((x) => x.tipoLeito === 'UI').length,
+        utiCount: adms.filter((x) => x.tipoLeito === 'UTI').length,
+        surgicalAdmissionsCount: adms.filter((x) => x.isSurgicalProfile).length,
+        conversionRate: n > 0 ? Number(((adms.length / n) * 100).toFixed(1)) : 0,
+        doorToDocStats: computeStats(list.map((x) => x.doorToDocMin!).filter((v) => v !== null)),
+        losStats: computeStats(list.map((x) => x.losMin!).filter((v) => v !== null)),
+        boardingTotalStats: computeStats(
+          adms.map((x) => (x.totalBoardingMin ?? x.waitDecisionToVirtualMin)!).filter((v) => v !== null && v >= 0)
+        ),
+      };
+    })
+    .sort((a, b) => b.totalCount - a.totalCount);
+
+  const activeSec = selectedSectors && selectedSectors.length > 0 ? selectedSectors : availableSectors.map((s) => s.name);
+  const activeCli = selectedClinics && selectedClinics.length > 0 ? selectedClinics : availableClinics.map((c) => c.name);
+
+  const isAllSectors = activeSec.length >= availableSectors.length;
+  const isAllClinics = activeCli.length >= availableClinics.length;
+  const activeScopeLabel =
+    isAllSectors && isAllClinics
+      ? `Consolidado Geral da Emergência (${availableSectors.length} Setor[es] / ${availableClinics.length} Clínica[s])`
+      : `${activeSec.join(' + ')}  •  Clínica(s): ${activeCli.join(' + ')}`;
 
   const firstDate = uniqueDates[0] || '2026-10-01';
   const monthKey = firstDate.slice(0, 7);
@@ -1022,8 +1555,15 @@ export function buildAnalyticsFromRecords(
   const totalAttendances = sorted.length;
   const admittedList = sorted.filter((r) => r.isAdmitted);
   const totalAdmissions = admittedList.length;
-  const uiAdmissions = admittedList.filter((r) => r.tipoLeito === 'UI').length;
-  const utiAdmissions = admittedList.filter((r) => r.tipoLeito === 'UTI').length;
+  const admittedUiList = admittedList.filter((r) => r.tipoLeito === 'UI');
+  const admittedUtiList = admittedList.filter((r) => r.tipoLeito === 'UTI');
+  const admittedSurgicalList = admittedList.filter((r) => r.isSurgicalProfile);
+  const admittedClinicalList = admittedList.filter((r) => !r.isSurgicalProfile);
+
+  const uiAdmissions = admittedUiList.length;
+  const utiAdmissions = admittedUtiList.length;
+  const surgicalAdmissions = admittedSurgicalList.length;
+  const clinicalAdmissions = admittedClinicalList.length;
   const conversionRate = totalAttendances > 0 ? Number(((totalAdmissions / totalAttendances) * 100).toFixed(1)) : 0;
 
   const evasions = sorted.filter((r) => r.isPreMedEvasion || r.isPostMedEvasion);
@@ -1039,11 +1579,15 @@ export function buildAnalyticsFromRecords(
     nightShift: computeStats(nightRecords.map(extractor).filter((v): v is number => v !== null)),
   });
 
-  // Série Diária
+  // Série Diária (Civil e Operacional)
   const dailyMap = new Map<string, NormalizedAttendanceRecord[]>();
+  const opDailyMap = new Map<string, NormalizedAttendanceRecord[]>();
   for (const r of sorted) {
     if (!dailyMap.has(r.dateStr)) dailyMap.set(r.dateStr, []);
     dailyMap.get(r.dateStr)!.push(r);
+
+    if (!opDailyMap.has(r.operationalDateStr)) opDailyMap.set(r.operationalDateStr, []);
+    opDailyMap.get(r.operationalDateStr)!.push(r);
   }
 
   const dailySeries = uniqueDates.map((dStr) => {
@@ -1075,7 +1619,7 @@ export function buildAnalyticsFromRecords(
   const medicationWait = makeShiftBreakdown((r) => r.waitMedMin);
   const medicationAdmTime = makeShiftBreakdown((r) => r.admMedMin);
   const labWait = makeShiftBreakdown((r) => r.waitLabCollectMin);
-  const labReportWait = makeShiftBreakdown((r) => r.waitLabReportMin);
+  const labReportWait = makeShiftBreakdown((r) => r.waitLabReportMin ?? r.combinedExamReportWaitMin);
   const rxWait = makeShiftBreakdown((r) => r.waitRxMin);
   const tcWait = makeShiftBreakdown((r) => r.waitTcTotalMin);
   const losOverall = makeShiftBreakdown((r) => r.losMin);
@@ -1088,9 +1632,9 @@ export function buildAnalyticsFromRecords(
   };
 
   const losAdmissionWait: ShiftMetricBreakdown = {
-    overall: computeStats(admittedList.map((r) => (r.waitDecisionToVirtualMin ?? r.totalBoardingMin)!).filter((v) => v !== null)),
-    dayShift: computeStats(admittedList.filter((r) => r.shift === 'Diurno').map((r) => (r.waitDecisionToVirtualMin ?? r.totalBoardingMin)!).filter((v) => v !== null)),
-    nightShift: computeStats(admittedList.filter((r) => r.shift === 'Noturno').map((r) => (r.waitDecisionToVirtualMin ?? r.totalBoardingMin)!).filter((v) => v !== null)),
+    overall: computeStats(admittedList.map((r) => (r.totalBoardingMin ?? r.waitDecisionToVirtualMin)!).filter((v) => v !== null)),
+    dayShift: computeStats(admittedList.filter((r) => r.shift === 'Diurno').map((r) => (r.totalBoardingMin ?? r.waitDecisionToVirtualMin)!).filter((v) => v !== null)),
+    nightShift: computeStats(admittedList.filter((r) => r.shift === 'Noturno').map((r) => (r.totalBoardingMin ?? r.waitDecisionToVirtualMin)!).filter((v) => v !== null)),
   };
 
   const labCount = sorted.filter((r) => r.hasLab).length;
@@ -1104,18 +1648,18 @@ export function buildAnalyticsFromRecords(
   const withinSlaDoorToDocRate =
     validDoorRecords.length > 0 ? Number(((withinSlaDoorToDocCount / validDoorRecords.length) * 100).toFixed(1)) : 0;
 
-  // Heatmap 24x7 de Chegadas na Porta e Curva Horária (07h às 06h)
+  // Heatmap 24x7 de Chegadas na Porta alinhado ao Ciclo Operacional de Plantão (07h D -> 06h59 D+1)
   const heatmap24x7: HeatmapCellStat[] = [];
   for (let d = 0; d < 7; d++) {
-    const datesForDay = uniqueDates.filter((dStr) => {
+    const opDatesForDay = uniqueOpDates.filter((dStr) => {
       const [yy2, mm2, dd2] = dStr.split('-').map(Number);
       return getJsDayToMondayIndex(new Date(yy2, mm2 - 1, dd2).getDay()) === d;
     });
-    const occDays = Math.max(datesForDay.length, 1);
+    const occDays = Math.max(opDatesForDay.length, 1);
 
     for (const h of HOURS_7_TO_6) {
-      const perDateCounts = datesForDay.map(
-        (dStr) => (dailyMap.get(dStr) || []).filter((r) => r.hour === h).length
+      const perDateCounts = opDatesForDay.map(
+        (dStr) => (opDailyMap.get(dStr) || []).filter((r) => r.hour === h).length
       );
       const st = computeStats(perDateCounts);
       heatmap24x7.push({
@@ -1133,8 +1677,8 @@ export function buildAnalyticsFromRecords(
   }
 
   const hourlyCurve = HOURS_7_TO_6.map((h) => {
-    const perDateCounts = uniqueDates.map(
-      (dStr) => (dailyMap.get(dStr) || []).filter((r) => r.hour === h).length
+    const perDateCounts = uniqueOpDates.map(
+      (dStr) => (opDailyMap.get(dStr) || []).filter((r) => r.hour === h).length
     );
     const st = computeStats(perDateCounts);
     const hRecs = sorted.filter((r) => r.hour === h);
@@ -1152,7 +1696,6 @@ export function buildAnalyticsFromRecords(
     };
   });
 
-  // Estatísticas por Dia da Semana (Segunda a Domingo)
   const weekdayStats = WEEKDAY_NAMES.map((dayName, dIdx) => {
     const datesForDay = uniqueDates.filter((dStr) => {
       const [yy2, mm2, dd2] = dStr.split('-').map(Number);
@@ -1184,7 +1727,6 @@ export function buildAnalyticsFromRecords(
     };
   });
 
-  // Estatísticas por Semana do Mês (Semanas 1 a 5)
   const weekLabels = ['Semana 1 (01–07)', 'Semana 2 (08–14)', 'Semana 3 (15–21)', 'Semana 4 (22–28)', 'Semana 5 (29–31)'];
   const weekOfMonthStats = weekLabels
     .map((wLabel) => {
@@ -1225,7 +1767,7 @@ export function buildAnalyticsFromRecords(
       return {
         cid,
         count: list.length,
-        percentage: Number(((list.length / totalAttendances) * 100).toFixed(1)),
+        percentage: Number(((list.length / Math.max(totalAttendances, 1)) * 100).toFixed(1)),
         dayCount: list.filter((r) => r.shift === 'Diurno').length,
         nightCount: list.filter((r) => r.shift === 'Noturno').length,
         meanLos: losSt.mean,
@@ -1253,7 +1795,7 @@ export function buildAnalyticsFromRecords(
       return {
         clusterName,
         count: list.length,
-        percentage: Number(((list.length / totalAttendances) * 100).toFixed(1)),
+        percentage: Number(((list.length / Math.max(totalAttendances, 1)) * 100).toFixed(1)),
         meanLos: losSt.mean,
         medianLos: losSt.median,
         labRate: Number(((list.filter((r) => r.hasLab).length / list.length) * 100).toFixed(1)),
@@ -1278,7 +1820,7 @@ export function buildAnalyticsFromRecords(
         cid,
         clusterName: list[0]?.clusterName || 'Outros',
         totalCount: n,
-        pctOfTotalPs: Number(((n / totalAttendances) * 100).toFixed(1)),
+        pctOfTotalPs: Number(((n / Math.max(totalAttendances, 1)) * 100).toFixed(1)),
         directDischargeCount: direct,
         directDischargePct: Number(((direct / n) * 100).toFixed(1)),
         fastReavMedCount: fastMed,
@@ -1294,7 +1836,7 @@ export function buildAnalyticsFromRecords(
     .sort((a, b) => b.totalCount - a.totalCount)
     .slice(0, 25);
 
-  // Produtividade por Médico (Medico Anamnese) e Matriz Dupla (1º Atendimento vs Último Atendimento)
+  // Produtividade por Médico e Matriz Dupla (1º Atendimento vs Último Atendimento)
   const docFirstMap = new Map<string, NormalizedAttendanceRecord[]>();
   const docLastMap = new Map<string, NormalizedAttendanceRecord[]>();
   const allDocNames = new Set<string>();
@@ -1316,7 +1858,7 @@ export function buildAnalyticsFromRecords(
     .map(([name, list]) => {
       const shiftMap = new Map<string, number>();
       list.forEach((r) => {
-        const sKey = `${r.dateStr}_${r.shift}`;
+        const sKey = `${r.operationalDateStr}_${r.shift}`;
         shiftMap.set(sKey, (shiftMap.get(sKey) || 0) + 1);
       });
       const shiftCounts = Array.from(shiftMap.values());
@@ -1431,7 +1973,16 @@ export function buildAnalyticsFromRecords(
   const { hourlySimultaneousOverall, hourlySimultaneousByDayOfWeek, censusHeatmap24x7 } =
     computeSimultaneousCensus(sorted);
 
-  // Boarding por Convênio (Operadora de Saúde)
+  // Decomposição do Boarding em 5 Cortes: Global, UI, UTI, Cirúrgico e Clínico Não Cirúrgico
+  const boardingByBedType = {
+    global: buildBedTypeBoardingBreakdown('Global', 'Consolidado Geral (Todas as Internações)', admittedList, totalAdmissions, totalDays),
+    ui: buildBedTypeBoardingBreakdown('UI', 'Enfermaria / Unidade de Internação (UI)', admittedUiList, totalAdmissions, totalDays),
+    uti: buildBedTypeBoardingBreakdown('UTI', 'Unidade de Terapia Intensiva (UTI)', admittedUtiList, totalAdmissions, totalDays),
+    surgical: buildBedTypeBoardingBreakdown('Surgical', 'Perfil Cirúrgico / Centro Cirúrgico (CC=S / Cirurgia / Ortopedia)', admittedSurgicalList, totalAdmissions, totalDays),
+    clinical: buildBedTypeBoardingBreakdown('Clinical', 'Perfil Clínico Não Cirúrgico (CC=N)', admittedClinicalList, totalAdmissions, totalDays),
+  };
+
+  // Boarding por Convênio (Operadora de Saúde) com separação UI vs UTI e Cirúrgico vs Clínico
   const convMap = new Map<string, NormalizedAttendanceRecord[]>();
   for (const r of admittedList) {
     const cName = r.convenio || 'OUTROS / NÃO INFORMADO';
@@ -1440,37 +1991,73 @@ export function buildAnalyticsFromRecords(
   }
 
   const boardingByConvenio: ConvenioBoardingStat[] = Array.from(convMap.entries())
-    .map(([convenio, list]) => ({
-      convenio,
-      admittedCount: list.length,
-      pctOfAdmissions: totalAdmissions > 0 ? Number(((list.length / totalAdmissions) * 100).toFixed(1)) : 0,
-      uiCount: list.filter((r) => r.tipoLeito === 'UI').length,
-      utiCount: list.filter((r) => r.tipoLeito === 'UTI').length,
-      ccCount: list.filter((r) => r.isCentroCirurgico).length,
-      t1VirtualApprovalStats: computeStats(
-        list.map((r) => (r.waitAguardoToVirtualMin ?? r.waitDecisionToVirtualMin)!).filter((v) => v !== null && v >= 0)
-      ),
-      t2PhysicalUploadStats: computeStats(
-        list.map((r) => r.waitVirtualToPhysicalMin!).filter((v) => v !== null && v >= 0)
-      ),
-      totalBoardingStats: computeStats(
-        list.map((r) => (r.totalBoardingMin ?? r.waitDecisionToVirtualMin)!).filter((v) => v !== null && v >= 0)
-      ),
-      hospitalStayDaysStats: computeStats(list.map((r) => r.hospitalStayDays!).filter((v) => v !== null && v >= 0)),
-    }))
+    .map(([convenio, list]) => {
+      const uiSub = list.filter((r) => r.tipoLeito === 'UI');
+      const utiSub = list.filter((r) => r.tipoLeito === 'UTI');
+      const surgSub = list.filter((r) => r.isSurgicalProfile);
+      const clinSub = list.filter((r) => !r.isSurgicalProfile);
+      return {
+        convenio,
+        admittedCount: list.length,
+        pctOfAdmissions: totalAdmissions > 0 ? Number(((list.length / totalAdmissions) * 100).toFixed(1)) : 0,
+        uiCount: uiSub.length,
+        utiCount: utiSub.length,
+        ccCount: surgSub.length,
+        clinicalCount: clinSub.length,
+        t1VirtualApprovalStats: computeStats(
+          list.map((r) => (r.waitAguardoToVirtualMin ?? r.waitDecisionToVirtualMin)!).filter((v) => v !== null && v >= 0)
+        ),
+        t2PhysicalUploadStats: computeStats(
+          list.map((r) => r.waitVirtualToPhysicalMin!).filter((v) => v !== null && v >= 0)
+        ),
+        totalBoardingStats: computeStats(
+          list.map((r) => (r.totalBoardingMin ?? r.waitDecisionToVirtualMin)!).filter((v) => v !== null && v >= 0)
+        ),
+        hospitalStayDaysStats: computeStats(list.map((r) => r.hospitalStayDays!).filter((v) => v !== null && v >= 0)),
+        uiT1VirtualStats: computeStats(
+          uiSub.map((r) => (r.waitAguardoToVirtualMin ?? r.waitDecisionToVirtualMin)!).filter((v) => v !== null && v >= 0)
+        ),
+        uiT2PhysicalStats: computeStats(
+          uiSub.map((r) => r.waitVirtualToPhysicalMin!).filter((v) => v !== null && v >= 0)
+        ),
+        uiTotalBoardingStats: computeStats(
+          uiSub.map((r) => (r.totalBoardingMin ?? r.waitDecisionToVirtualMin)!).filter((v) => v !== null && v >= 0)
+        ),
+        utiT1VirtualStats: computeStats(
+          utiSub.map((r) => (r.waitAguardoToVirtualMin ?? r.waitDecisionToVirtualMin)!).filter((v) => v !== null && v >= 0)
+        ),
+        utiT2PhysicalStats: computeStats(
+          utiSub.map((r) => r.waitVirtualToPhysicalMin!).filter((v) => v !== null && v >= 0)
+        ),
+        utiTotalBoardingStats: computeStats(
+          utiSub.map((r) => (r.totalBoardingMin ?? r.waitDecisionToVirtualMin)!).filter((v) => v !== null && v >= 0)
+        ),
+        surgicalTotalBoardingStats: computeStats(
+          surgSub.map((r) => (r.totalBoardingMin ?? r.waitDecisionToVirtualMin)!).filter((v) => v !== null && v >= 0)
+        ),
+        clinicalTotalBoardingStats: computeStats(
+          clinSub.map((r) => (r.totalBoardingMin ?? r.waitDecisionToVirtualMin)!).filter((v) => v !== null && v >= 0)
+        ),
+      };
+    })
     .sort((a, b) => b.admittedCount - a.admittedCount);
 
-  const surgicalAdmissionsCount = admittedList.filter((r) => r.isCentroCirurgico).length;
+  const surgicalAdmissionsCount = admittedSurgicalList.length;
   const surgicalAdmissionsPct =
     totalAdmissions > 0 ? Number(((surgicalAdmissionsCount / totalAdmissions) * 100).toFixed(1)) : 0;
+  const clinicalAdmissionsCount = admittedClinicalList.length;
+  const clinicalAdmissionsPct =
+    totalAdmissions > 0 ? Number(((clinicalAdmissionsCount / totalAdmissions) * 100).toFixed(1)) : 0;
+
   const hospitalStayDaysStats = computeStats(
     admittedList.map((r) => r.hospitalStayDays!).filter((v) => v !== null && v >= 0)
   );
-  const wastedBedHoursInBoarding = Number(
-    (
-      admittedList.reduce((acc, r) => acc + (r.totalBoardingMin ?? r.waitDecisionToVirtualMin ?? 0), 0) / 60
-    ).toFixed(1)
-  );
+  const wastedBedHoursInBoarding = boardingByBedType.global.wastedBedHours;
+  const equivalentBlockedBeds24h = boardingByBedType.global.equivalentBlockedBeds24h;
+
+  const losAgingBuckets = computeLosAgingBuckets(sorted);
+  const shiftChangeBottleneck = computeShiftChangeBottleneck(sorted);
+  const dataQualityAudit = computeDataCompletenessAudit(sorted, matched3493Count, matched3704Count);
 
   // Governança Diagnóstica (CHAA 3704: Diag entrada vs Diag saida)
   const eval3704 = admittedList.filter((r) => r.diagEntrada3704 && r.diagSaida3704);
@@ -1577,11 +2164,20 @@ export function buildAnalyticsFromRecords(
     fileName,
     periodLabel,
     monthKey,
+    activeScopeLabel,
+    selectedSectors: activeSec,
+    selectedClinics: activeCli,
+    availableSectors,
+    availableClinics,
+    sectorClinicBreakdown,
+    totalGlobalAttendances: globalPool.length,
     totalDays,
     totalAttendances,
     totalAdmissions,
     uiAdmissions,
     utiAdmissions,
+    surgicalAdmissions,
+    clinicalAdmissions,
     conversionRate,
     evasionCount,
     evasionRate,
@@ -1629,30 +2225,69 @@ export function buildAnalyticsFromRecords(
       hourlySimultaneousOverall,
       hourlySimultaneousByDayOfWeek,
       censusHeatmap24x7,
+      boardingByBedType,
       boardingByConvenio,
       surgicalAdmissionsCount,
       surgicalAdmissionsPct,
+      clinicalAdmissionsCount,
+      clinicalAdmissionsPct,
       hospitalStayDaysStats,
       wastedBedHoursInBoarding,
+      equivalentBlockedBeds24h,
+      losAgingBuckets,
+      shiftChangeBottleneck,
+      dataQualityAudit,
       doctorConductMatrix,
       cidThroughputMatrix,
       diagnosticGovernance,
       returnVisits,
     },
     sanitizedRecords: sorted,
+    allSanitizedRecords: globalPool,
   };
 }
 
 // ============================================================================
-// PARSER PRINCIPAL DO CATE 3333 + FUSÃO EM MEMÓRIA COM CATE 3493 E CHAA 3704
+// REFILTRAGEM INSTANTÂNEA EM MEMÓRIA POR SETOR E CLÍNICA (INDIVIDUAL OU AGREGADO)
 // ============================================================================
 
-export function parseEmergencyExcel(
-  buffer: ArrayBuffer,
-  fileName = 'CATE_3333.xls',
-  buffer3493?: ArrayBuffer | null,
-  buffer3704?: ArrayBuffer | null
+export function filterAnalyticsBySectorAndClinic(
+  currentData: EmergencyAnalyticsData,
+  selectedSectors: string[],
+  selectedClinics: string[]
 ): EmergencyAnalyticsData {
+  const globalPool = currentData.allSanitizedRecords || currentData.sanitizedRecords;
+  const secSet = new Set(selectedSectors);
+  const cliSet = new Set(selectedClinics);
+
+  const filtered = globalPool.filter(
+    (r) =>
+      (secSet.size === 0 || secSet.has(r.setor)) &&
+      (cliSet.size === 0 || cliSet.has(r.clinica))
+  );
+
+  const recordsToUse = filtered.length > 0 ? filtered : globalPool;
+  const matched3493 = recordsToUse.filter((r) => r.aguardoInternacaoTs !== null || r.physicalBedTs !== null).length;
+  const matched3704 = recordsToUse.filter((r) => r.diagEntrada3704 !== null || r.diagSaida3704 !== null).length;
+
+  return buildAnalyticsFromRecords(
+    recordsToUse,
+    currentData.fileName,
+    currentData.vsm.hasCate3493Data,
+    currentData.vsm.hasChaa3704Data,
+    matched3493,
+    matched3704,
+    globalPool,
+    selectedSectors,
+    selectedClinics
+  );
+}
+
+// ============================================================================
+// LEITURA DE PLANILHA CATE 3333 (GLOBAL OU SEGMENTADA) EM MEMÓRIA RAM
+// ============================================================================
+
+export function extractRecordsFromCate3333Buffer(buffer: ArrayBuffer): NormalizedAttendanceRecord[] {
   const wb = XLSX.read(buffer, { type: 'array', cellDates: true });
   const sheet = wb.Sheets[wb.SheetNames[0]];
   const rawRows = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet, { defval: null });
@@ -1661,16 +2296,12 @@ export function parseEmergencyExcel(
 
   for (const row of rawRows) {
     // Regra de Ouro LGPD: NUNCA ler Paciente, Email, Endereço, Numero, bairro ou Dt. Nascimento
-    const setor = normalizeStr(row['Setor']).toUpperCase();
-    const clinica = normalizeStr(row['Clínica'] ?? row['Clinica']).toUpperCase();
-
-    if (!setor.includes('PS ADULTO') || !clinica.includes('MEDICA')) {
-      continue;
-    }
-
     const atendId = Number(row['Atendimento']);
     const entradaTs = parseTimestampMs(row['Entrada']);
     if (!entradaTs || isNaN(atendId)) continue;
+
+    const setor = standardizeSectorName(row['Setor']);
+    const clinica = standardizeClinicName(row['Clínica'] ?? row['Clinica']);
 
     const entradaDate = new Date(entradaTs);
     const yyyy = entradaDate.getFullYear();
@@ -1683,40 +2314,94 @@ export function parseEmergencyExcel(
     const dayOfWeekName = WEEKDAY_NAMES[dayOfWeekIdx];
     const weekOfMonthLabel = getWeekOfMonthLabel(entradaDate.getDate());
 
-    const waitRecepMin = parseDurationMinutes(row['Espera Recepção'], 240);
-    const atendRecepMin = parseDurationMinutes(row['Atend. Recepção'], 240);
-    const waitRecepToDocMin = parseDurationMinutes(row['Esp. Recepção x Médico'], 600);
+    // Data Operacional de Plantão (07h00 D -> 06h59 D+1): se hora < 7, pertence ao plantão iniciado no dia anterior
+    const opDateObj = hour < 7 ? new Date(yyyy, entradaDate.getMonth(), entradaDate.getDate() - 1) : entradaDate;
+    const opY = opDateObj.getFullYear();
+    const opM = String(opDateObj.getMonth() + 1).padStart(2, '0');
+    const opD = String(opDateObj.getDate()).padStart(2, '0');
+    const operationalDateStr = `${opY}-${opM}-${opD}`;
+    const operationalDayOfWeekIdx = getJsDayToMondayIndex(opDateObj.getDay());
+
+    let hadNegative = false;
+    let hadCapped = false;
+    const parseDur = (v: unknown, cap: number): number | null => {
+      const res = parseDurationMinutesWithAudit(v, cap);
+      if (res.wasNegative) hadNegative = true;
+      if (res.wasCapped) hadCapped = true;
+      return res.minutes;
+    };
+
+    const waitRecepMin = parseDur(row['Espera Recepção'], 240);
+    const atendRecepMin = parseDur(row['Atend. Recepção'], 240);
+    const waitRecepToDocMin = parseDur(row['Esp. Recepção x Médico'], 600);
     const doorToDocMin =
-      parseDurationMinutes(row['Esp. Totem x Médico'], 600) ??
-      parseDurationMinutes(row['Tempo Esp. Atend. Ficha x Médico  '], 600) ??
+      parseDur(row['Esp. Totem x Médico'], 600) ??
+      parseDur(row['Tempo Esp. Atend. Ficha x Médico  '], 600) ??
       waitRecepToDocMin;
-    const consultMin = parseDurationMinutes(row['Atend. Médico'], 240);
+    const consultMin = parseDur(row['Atend. Médico'], 240);
 
     const waitMedMin =
-      parseDurationMinutes(row['Espera Medicamento'], 600) ??
-      parseDurationMinutes(row['Tempo Espera Medicamento'], 600);
-    const admMedMin = parseDurationMinutes(row['Tempo ADM Medicamento'], 600);
+      parseDur(row['Espera Medicamento'], 600) ??
+      parseDur(row['Tempo Espera Medicamento'], 600);
+    const admMedMin = parseDur(row['Tempo ADM Medicamento'], 600);
 
-    const waitLabCollectMin = parseDurationMinutes(row['Espera Laboratório'], 600);
-    const waitLabReportMin = parseDurationMinutes(row['Espera Laudo Laboratório'], 1440);
+    const waitLabCollectMin = parseDur(row['Espera Laboratório'], 600);
+    let waitLabReportMin = parseDur(row['Espera Laudo Laboratório'], 1440);
     const dtLaudoLabTs = parseTimestampMs(row['Dt Laudo Lab']);
+    let isLabReportReconstructed = false;
+
+    // Blindagem contra o Falso Zero em "7. Espera Laudo": reconstrói via timestamp Dt Laudo Lab quando a coluna vier vazia
+    if ((waitLabReportMin === null || waitLabReportMin === 0) && dtLaudoLabTs) {
+      const approxCollectTs =
+        entradaTs + ((doorToDocMin ?? 30) + (consultMin ?? 15) + (waitLabCollectMin ?? 15)) * 60000;
+      const diffLabMin = (dtLaudoLabTs - approxCollectTs) / 60000;
+      if (diffLabMin > 2 && diffLabMin <= 1440) {
+        waitLabReportMin = Number(diffLabMin.toFixed(1));
+        isLabReportReconstructed = true;
+      } else if (dtLaudoLabTs > entradaTs) {
+        const fallbackLabMin = (dtLaudoLabTs - (entradaTs + (doorToDocMin ?? 30) * 60000)) / 60000;
+        if (fallbackLabMin > 5 && fallbackLabMin <= 1440) {
+          waitLabReportMin = Number(fallbackLabMin.toFixed(1));
+          isLabReportReconstructed = true;
+        }
+      }
+    }
 
     const waitRxMin =
-      parseDurationMinutes(row['Esp RX Presc x Exec'], 600) ??
-      parseDurationMinutes(row['Espera RX'], 600);
+      parseDur(row['Esp RX Presc x Exec'], 600) ??
+      parseDur(row['Espera RX'], 600);
 
-    const waitTcTotalMin = parseDurationMinutes(row['Espera TC'], 1440);
-    const waitTcExecMin = parseDurationMinutes(row['Esp TC Presc x Exec'], 1440);
-    const waitTcReportMin = parseDurationMinutes(row['Espera Laudo TC'], 1440);
+    const waitTcTotalMin = parseDur(row['Espera TC'], 1440);
+    const waitTcExecMin = parseDur(row['Esp TC Presc x Exec'], 1440);
+    let waitTcReportMin = parseDur(row['Espera Laudo TC'], 1440);
     const dtLaudoTcTs = parseTimestampMs(row['Dt Laudo TC']);
 
+    if ((waitTcReportMin === null || waitTcReportMin === 0) && waitTcTotalMin !== null && waitTcExecMin !== null) {
+      const diffTc = waitTcTotalMin - waitTcExecMin;
+      if (diffTc > 1 && diffTc <= 1440) {
+        waitTcReportMin = Number(diffTc.toFixed(1));
+      }
+    }
+
     const waitUsgMin =
-      parseDurationMinutes(row['Espera USG'], 1440) ??
-      parseDurationMinutes(row['Esp USG Presc x Exec'], 1440);
+      parseDur(row['Espera USG'], 1440) ??
+      parseDur(row['Esp USG Presc x Exec'], 1440);
     const dtLaudoUsgTs = parseTimestampMs(row['Dt Laudo Usg']);
 
+    // Tempo consolidado de espera de laudo (Lab / TC / USG) para o paciente
+    const reportCandidates = [waitLabReportMin, waitTcReportMin ?? waitTcTotalMin, waitUsgMin].filter(
+      (v): v is number => v !== null && v > 0
+    );
+    const combinedExamReportWaitMin =
+      reportCandidates.length > 0 ? Number(Math.max(...reportCandidates).toFixed(1)) : null;
+
     const losRaw = Number(row['Qt Minutos Entrada- Desfecho']);
-    const losMin = !isNaN(losRaw) && losRaw >= 0 && losRaw <= 2880 ? Number(losRaw.toFixed(1)) : null;
+    let losMin: number | null = null;
+    if (!isNaN(losRaw) && row['Qt Minutos Entrada- Desfecho'] !== null && row['Qt Minutos Entrada- Desfecho'] !== '') {
+      if (losRaw < 0) hadNegative = true;
+      else if (losRaw > 2880) hadCapped = true;
+      else losMin = Number(losRaw.toFixed(1));
+    }
 
     const desfechoParsedTs =
       parseTimestampMs(row['Data Desfecho']) ??
@@ -1724,12 +2409,11 @@ export function parseEmergencyExcel(
       parseTimestampMs(row['Dt. Alta']);
     const desfechoTs = desfechoParsedTs ?? entradaTs + (losMin ?? 60) * 60000;
 
-    // Fila invisível pós-laudo: diferença entre Data Desfecho e o último laudo liberado (Lab / TC / USG)
     const laudoTimestamps = [dtLaudoLabTs, dtLaudoTcTs, dtLaudoUsgTs].filter((t): t is number => t !== null);
+    const lastExamReportTs = laudoTimestamps.length > 0 ? Math.max(...laudoTimestamps) : null;
     let postLaudoReavalWaitMin: number | null = null;
-    if (laudoTimestamps.length > 0 && desfechoParsedTs) {
-      const maxLaudoTs = Math.max(...laudoTimestamps);
-      const diffMin = (desfechoParsedTs - maxLaudoTs) / 60000;
+    if (lastExamReportTs && desfechoParsedTs) {
+      const diffMin = (desfechoParsedTs - lastExamReportTs) / 60000;
       if (diffMin >= 0 && diffMin <= 720) {
         postLaudoReavalWaitMin = Number(diffMin.toFixed(1));
       }
@@ -1770,11 +2454,12 @@ export function parseEmergencyExcel(
       tipoLeitoRaw === 'UI' ? 'UI' : tipoLeitoRaw === 'UTI' ? 'UTI' : 'Outro';
 
     const virtualBedTs = parseTimestampMs(row['Data Internação']);
-    const waitDecisionToVirtualMin = parseDurationMinutes(row['Espera Internação'], 4320);
+    const waitDecisionToVirtualMin = parseDur(row['Espera Internação'], 4320);
 
     const cid = String(row['CID'] ?? '').trim() || 'NÃO INFORMADO';
     const clusterName = classifyCidCluster(cid);
     const convenio = String(row['Convênio'] ?? '').trim() || 'NÃO INFORMADO';
+    const isSurgicalByClinic = /CIRURG|ORTOPED/i.test(normalizeStr(clinica));
 
     const ultPassagemTs = parseTimestampMs(row['DT Últ Passagem PS']);
     let hoursSinceLastVisit: number | null = null;
@@ -1784,10 +2469,14 @@ export function parseEmergencyExcel(
 
     records.push({
       atendimentoId: atendId,
+      setor,
+      clinica,
       entradaTs,
       desfechoTs,
       dateStr,
+      operationalDateStr,
       dayOfWeekIdx,
+      operationalDayOfWeekIdx,
       dayOfWeekName,
       weekOfMonthLabel,
       hour,
@@ -1807,11 +2496,14 @@ export function parseEmergencyExcel(
       admMedMin,
       waitLabCollectMin,
       waitLabReportMin,
+      isLabReportReconstructed,
       waitRxMin,
       waitTcTotalMin,
       waitTcExecMin,
       waitTcReportMin,
       waitUsgMin,
+      combinedExamReportWaitMin,
+      lastExamReportTs,
       postLaudoReavalWaitMin,
       losMin,
       hasMed,
@@ -1840,20 +2532,92 @@ export function parseEmergencyExcel(
       waitVirtualToPhysicalMin: null,
       totalBoardingMin: waitDecisionToVirtualMin,
       isCentroCirurgico: false,
+      isSurgicalProfile: isSurgicalByClinic,
       hospitalStayDays: null,
       diagEntrada3704: null,
       diagSaida3704: null,
       hoursSinceLastVisit,
+      hadNegativeTimePurged: hadNegative,
+      hadOutlierCapped: hadCapped,
     });
   }
 
-  let baseData = buildAnalyticsFromRecords(records, fileName, false, false, 0, 0);
+  return records;
+}
+
+export function parseEmergencyExcel(
+  buffer: ArrayBuffer,
+  fileName = 'CATE_3333.xls',
+  buffer3493?: ArrayBuffer | null,
+  buffer3704?: ArrayBuffer | null
+): EmergencyAnalyticsData {
+  const allRecords = extractRecordsFromCate3333Buffer(buffer);
+
+  // Inicia no foco padrão (Clínica Médica se presente), mantendo 100% da base global em allSanitizedRecords para filtro instantâneo
+  const allSectors = Array.from(new Set(allRecords.map((r) => r.setor)));
+  const hasMedica = allRecords.some((r) => r.clinica === 'Médica');
+  const initialClinics = hasMedica ? ['Médica'] : Array.from(new Set(allRecords.map((r) => r.clinica)));
+  const initialRecords = allRecords.filter((r) => initialClinics.includes(r.clinica));
+
+  let baseData = buildAnalyticsFromRecords(
+    initialRecords.length > 0 ? initialRecords : allRecords,
+    fileName,
+    false,
+    false,
+    0,
+    0,
+    allRecords,
+    allSectors,
+    initialClinics
+  );
 
   if (buffer3493 || buffer3704) {
     baseData = mergeVsmSupplementaryFiles(baseData, buffer3493, buffer3704);
   }
 
   return baseData;
+}
+
+// ============================================================================
+// MESCLAGEM DE MÚLTIPLOS ARQUIVOS CATE 3333 SEGMENTADOS NO MESMO MÊS (DEDUPLICADO)
+// ============================================================================
+
+export function mergeSegmentedCate3333IntoMonth(
+  existingMonth: EmergencyAnalyticsData,
+  incomingMonth: EmergencyAnalyticsData
+): EmergencyAnalyticsData {
+  const recordMap = new Map<number, NormalizedAttendanceRecord>();
+  (existingMonth.allSanitizedRecords || existingMonth.sanitizedRecords).forEach((r) =>
+    recordMap.set(r.atendimentoId, { ...r })
+  );
+  (incomingMonth.allSanitizedRecords || incomingMonth.sanitizedRecords).forEach((r) =>
+    recordMap.set(r.atendimentoId, { ...r })
+  );
+
+  const mergedAll = Array.from(recordMap.values()).sort((a, b) => a.entradaTs - b.entradaTs);
+  const combinedFileName =
+    existingMonth.fileName.includes(incomingMonth.fileName)
+      ? existingMonth.fileName
+      : `${existingMonth.fileName} + ${incomingMonth.fileName}`;
+
+  const secSet = new Set([...existingMonth.selectedSectors, ...incomingMonth.selectedSectors]);
+  const cliSet = new Set([...existingMonth.selectedClinics, ...incomingMonth.selectedClinics]);
+  const activeList = mergedAll.filter((r) => secSet.has(r.setor) && cliSet.has(r.clinica));
+
+  const matched3493 = activeList.filter((r) => r.aguardoInternacaoTs !== null || r.physicalBedTs !== null).length;
+  const matched3704 = activeList.filter((r) => r.diagEntrada3704 !== null || r.diagSaida3704 !== null).length;
+
+  return buildAnalyticsFromRecords(
+    activeList.length > 0 ? activeList : mergedAll,
+    combinedFileName,
+    existingMonth.vsm.hasCate3493Data || incomingMonth.vsm.hasCate3493Data,
+    existingMonth.vsm.hasChaa3704Data || incomingMonth.vsm.hasChaa3704Data,
+    matched3493,
+    matched3704,
+    mergedAll,
+    Array.from(secSet),
+    Array.from(cliSet)
+  );
 }
 
 // ============================================================================
@@ -1865,14 +2629,13 @@ export function mergeVsmSupplementaryFiles(
   buffer3493?: ArrayBuffer | null,
   buffer3704?: ArrayBuffer | null
 ): EmergencyAnalyticsData {
-  const clonedRecords: NormalizedAttendanceRecord[] = currentData.sanitizedRecords.map((r) => ({ ...r }));
+  const sourceGlobal = currentData.allSanitizedRecords || currentData.sanitizedRecords;
+  const clonedGlobal: NormalizedAttendanceRecord[] = sourceGlobal.map((r) => ({ ...r }));
   const byId = new Map<number, NormalizedAttendanceRecord>();
-  clonedRecords.forEach((r) => byId.set(r.atendimentoId, r));
+  clonedGlobal.forEach((r) => byId.set(r.atendimentoId, r));
 
   let has3493 = currentData.vsm.hasCate3493Data;
   let has3704 = currentData.vsm.hasChaa3704Data;
-  let matched3493 = currentData.vsm.matched3493Count;
-  let matched3704 = currentData.vsm.matched3704Count;
 
   // 1. Fusão com CATE 3493 (Boarding Físico UI/UTI, Dt ent aguard, Dt ent unid, CC e Tempo permanencia)
   if (buffer3493) {
@@ -1882,7 +2645,6 @@ export function mergeVsmSupplementaryFiles(
     let countMatch = 0;
 
     for (const row of rows3493) {
-      // LGPD: Ignora Nm paciente e Dt nasc
       const nrAtend = Number(row['Nr atendimento'] ?? row['Atendimento']);
       if (isNaN(nrAtend)) continue;
       const rec = byId.get(nrAtend);
@@ -1897,6 +2659,7 @@ export function mergeVsmSupplementaryFiles(
       const difAguardMin = Number(row['Dif aguardando/Ent. Unid']);
       const tempoPermDays = Number(row['Tempo permanencia']);
       const ccFlag = String(row['Cc'] ?? '').trim().toUpperCase() === 'S';
+      const clin3493 = String(row['Clínica'] ?? row['Clinica'] ?? '').trim();
       const conv3493 = String(row['Convenio'] ?? '').trim();
 
       if (conv3493 && (!rec.convenio || rec.convenio === 'NÃO INFORMADO')) {
@@ -1909,29 +2672,30 @@ export function mergeVsmSupplementaryFiles(
       rec.isPhysicalBedConfirmed =
         Boolean(dsSetorUnid) && !/LEITO DE ESPERA|NAN/i.test(normalizeStr(dsSetorUnid));
       rec.isCentroCirurgico = ccFlag;
+      rec.isSurgicalProfile =
+        ccFlag ||
+        rec.isSurgicalProfile ||
+        /CIRURG|ORTOPED/i.test(normalizeStr(clin3493));
 
       if (!isNaN(tempoPermDays) && tempoPermDays >= 0) {
         rec.hospitalStayDays = tempoPermDays;
       }
 
       if (rec.tipoLeito === 'Outro' && dsSetorUnid) {
-        if (/UTI|SEMI INTENSIVA/i.test(dsSetorUnid)) rec.tipoLeito = 'UTI';
-        else if (/UI|ANDAR/i.test(dsSetorUnid)) rec.tipoLeito = 'UI';
+        if (/UTI|SEMI INTENSIVA|USI/i.test(dsSetorUnid)) rec.tipoLeito = 'UTI';
+        else if (/UI|ANDAR|MATERNIDADE/i.test(dsSetorUnid)) rec.tipoLeito = 'UI';
       }
 
-      // Etapa 1: Solicitação Aguardo -> Leito Virtual
       if (dtEntAguardTs && rec.virtualBedTs && rec.virtualBedTs >= dtEntAguardTs) {
         const t1Min = (rec.virtualBedTs - dtEntAguardTs) / 60000;
         if (t1Min <= 4320) rec.waitAguardoToVirtualMin = Number(t1Min.toFixed(1));
       }
 
-      // Etapa 2: Leito Virtual -> Leito Físico Definitivo (UI/UTI)
       if (rec.isPhysicalBedConfirmed && dtEntUnidTs && rec.virtualBedTs && dtEntUnidTs >= rec.virtualBedTs) {
         const t2Min = (dtEntUnidTs - rec.virtualBedTs) / 60000;
         if (t2Min <= 4320) rec.waitVirtualToPhysicalMin = Number(t2Min.toFixed(1));
       }
 
-      // Boarding Total até entrada na unidade (CATE 3493)
       if (!isNaN(difAguardMin) && difAguardMin > 0 && difAguardMin <= 4320) {
         rec.totalBoardingMin = Number(difAguardMin.toFixed(1));
       } else if (dtEntAguardTs && dtEntUnidTs && dtEntUnidTs >= dtEntAguardTs) {
@@ -1942,7 +2706,6 @@ export function mergeVsmSupplementaryFiles(
 
     if (countMatch > 0) {
       has3493 = true;
-      matched3493 = countMatch;
     }
   }
 
@@ -1954,7 +2717,6 @@ export function mergeVsmSupplementaryFiles(
     let countMatch3704 = 0;
 
     for (const row of rows3704) {
-      // LGPD: Ignora Nome
       const nrAtend = Number(row['Atendimento']);
       if (isNaN(nrAtend)) continue;
       const rec = byId.get(nrAtend);
@@ -1971,16 +2733,30 @@ export function mergeVsmSupplementaryFiles(
 
     if (countMatch3704 > 0) {
       has3704 = true;
-      matched3704 = countMatch3704;
     }
   }
 
+  const secSet = new Set(currentData.selectedSectors);
+  const cliSet = new Set(currentData.selectedClinics);
+  const filteredActive = clonedGlobal.filter(
+    (r) =>
+      (secSet.size === 0 || secSet.has(r.setor)) &&
+      (cliSet.size === 0 || cliSet.has(r.clinica))
+  );
+  const activeRecords = filteredActive.length > 0 ? filteredActive : clonedGlobal;
+
+  const matched3493Active = activeRecords.filter((r) => r.aguardoInternacaoTs !== null || r.physicalBedTs !== null).length;
+  const matched3704Active = activeRecords.filter((r) => r.diagEntrada3704 !== null || r.diagSaida3704 !== null).length;
+
   return buildAnalyticsFromRecords(
-    clonedRecords,
+    activeRecords,
     currentData.fileName,
     has3493,
     has3704,
-    matched3493,
-    matched3704
+    matched3493Active,
+    matched3704Active,
+    clonedGlobal,
+    currentData.selectedSectors,
+    currentData.selectedClinics
   );
 }
