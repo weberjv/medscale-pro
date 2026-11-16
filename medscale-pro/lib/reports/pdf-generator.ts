@@ -32,8 +32,8 @@ export type PngBoardKey =
 export const PDF_MODULE_CATALOG: { key: PdfModuleKey; title: string; subtitle: string }[] = [
   {
     key: 'mod1_vsm',
-    title: 'Pág. 1 — Mapa da Jornada, Fluxograma VSM & Linha Dente de Serra Lean',
-    subtitle: 'KPIs executivos, bifurcação Porta/Fast Reav/Exames/Boarding e eficiência PCE por rota',
+    title: 'Pág. 1 — Mapa da Jornada, Equação 100% Fechada, VSM & Linha Dente de Serra',
+    subtitle: 'KPIs executivos, conservação de massa (100% das fichas), rotas e eficiência PCE',
   },
   {
     key: 'mod2_census_chart',
@@ -52,51 +52,51 @@ export const PDF_MODULE_CATALOG: { key: PdfModuleKey; title: string; subtitle: s
   },
   {
     key: 'mod5_times_sectors',
-    title: 'Pág. 5 — Tempos Operacionais por Turno, Faixas de Permanência (Aging) & Clínicas',
-    subtitle: 'SLAs Diurno vs. Noturno, distribuição <=1h até >12h e comparativo Setor/Clínica',
+    title: 'Pág. 5 — Tempos Desmembrados por Turno, Aging 100%, Perfil Etário & Clínicas',
+    subtitle: 'Todas as micro-etapas separadas, faixas de permanência, impacto geriátrico e setores',
   },
   {
     key: 'mod6_boarding',
-    title: 'Pág. 6 — Raio-X do Boarding: Enfermaria (UI) vs. UTI, Cirúrgico vs. Clínico & Convênios',
-    subtitle: 'Decomposição Etapa 1 (Plano) vs. Etapa 2 (Físico), macas bloqueadas 24h/d e operadoras',
+    title: 'Pág. 6 — Raio-X do Boarding: Subida Física (T1+T2=Total) vs. Espera, UI/UTI & Convênios',
+    subtitle: 'Fechamento matemático exato de UI, UTI, Cirúrgico vs. Clínico, macas 24h e operadoras',
   },
   {
     key: 'mod7_doctors',
     title: 'Pág. 7 — Matriz Dupla de Condutas por Médico (1º Atendimento vs. Fechamento)',
-    subtitle: 'Perfil Gatekeeper (Porta), Fast Reav, solicitação de exames e absorção de Handoff',
+    subtitle: 'Perfil Gatekeeper (Porta), Fast Reav, exames, receita/atestado e absorção de Handoff',
   },
   {
     key: 'mod8_governance_cids',
-    title: 'Pág. 8 — Matriz CID x Rota de Throughput, Governança CHAA 3704 & Retorno <48h',
+    title: 'Pág. 8 — Matriz CID x Rota (100% Fechada), Governança CHAA 3704 & Retorno <48h',
     subtitle: 'Pertinência propedêutica por diagnóstico, mudança de CID na internação e passagem de plantão',
   },
   {
     key: 'mod9_methodology',
-    title: 'Pág. 9 — Anexo Técnico: Metodologia Analítica, Fórmulas, Completude Tasy & LGPD',
-    subtitle: 'Memorial descritivo, auditoria de preenchimento da base bruta e garantia de veracidade',
+    title: 'Pág. 9 — Anexo Técnico: Equação de Massa, Fórmulas, Completude Tasy & LGPD',
+    subtitle: 'Memorial descritivo sem cortes de texto, auditoria da base bruta e garantia de veracidade',
   },
 ];
 
 export const PNG_BOARD_CATALOG: { key: PngBoardKey; title: string; subtitle: string }[] = [
   {
     key: 'png_vsm_flow',
-    title: 'Prancha PNG 1 — Fluxograma VSM Lean + Linha Dente de Serra + Censo Horário',
-    subtitle: 'Ideal para o slide central de visão geral da jornada e eficiência Lean (2400x1480px)',
+    title: 'Prancha PNG 1 — Fluxograma VSM (100% Fechado) + Linha Dente de Serra + Censo',
+    subtitle: 'Slide central da jornada com equação de conservação de massa e PCE Lean (2400x1480px)',
   },
   {
     key: 'png_census_4fronts',
     title: 'Prancha PNG 2 — Censo Simultâneo Estratificado nas 4 Frentes (Média, DP, Med e Mín–Máx)',
-    subtitle: 'Ideal para apresentar o dimensionamento de escala médica hora a hora (2400x1480px)',
+    subtitle: 'Slide de dimensionamento de escala médica hora a hora nas 4 frentes (2400x1480px)',
   },
   {
     key: 'png_boarding_ui_uti_surg',
-    title: 'Prancha PNG 3 — Raio-X do Boarding: UI vs. UTI, Cirúrgico vs. Clínico e Top Convênios',
-    subtitle: 'Ideal para reunião com Diretoria, NIR e negociação com Operadoras (2400x1480px)',
+    title: 'Prancha PNG 3 — Raio-X do Boarding: Subida Física (T1+T2), UI vs. UTI, Cirúrgico e Convênios',
+    subtitle: 'Slide executivo para Diretoria, NIR e negociação com Operadoras (2400x1480px)',
   },
   {
     key: 'png_doctors_and_cids',
     title: 'Prancha PNG 4 — Matriz de Condutas Médicas + Rotas de Throughput por CID',
-    subtitle: 'Ideal para reunião clínica e feedback pedagógico com a equipe médica (2400x1480px)',
+    subtitle: 'Slide para reunião clínica e alinhamento de condutas com a equipe médica (2400x1480px)',
   },
 ];
 
@@ -111,7 +111,7 @@ function fmtStatWithRange(st: MetricStats, unit = ''): string {
 }
 
 // ============================================================================
-// MOTOR NATIVO DE TABELAS VETORIAIS (ZERO DEPENDÊNCIAS / SEM DISTORÇÃO DE FONTE)
+// MOTOR NATIVO DE TABELAS VETORIAIS (COM SUPORTE A MULTI-LINE SEM TRUNCAMENTO)
 // ============================================================================
 
 interface CellStyleOverride {
@@ -137,6 +137,7 @@ interface VectorTableOptions {
   defaultHalign?: 'left' | 'center' | 'right';
   leftAlignCols?: number[];
   boldCols?: number[];
+  multiline?: boolean;
   cellStyler?: (rowIndex: number, colIndex: number, rawValue: string | number) => CellStyleOverride | null;
 }
 
@@ -154,15 +155,16 @@ function drawVectorTable(doc: jsPDF, opts: VectorTableOptions): number {
   const marginLeft = opts.marginLeft ?? 10;
   const tableWidth = opts.tableWidth ?? 277;
   const colCount = Math.max(opts.head.length, 1);
-  const fontSize = opts.fontSize ?? 6.4;
+  const fontSize = opts.fontSize ?? 6.2;
   const headFontSize = opts.headFontSize ?? fontSize;
-  const rowHeight = opts.rowHeight ?? 4.7;
-  const headHeight = opts.headHeight ?? 5.6;
+  const baseRowHeight = opts.rowHeight ?? 4.6;
+  const headHeight = opts.headHeight ?? 5.4;
   const headFill = opts.headFillColor ?? [15, 23, 42];
   const altFill = opts.alternateRowFillColor ?? [248, 250, 252];
   const defaultHalign = opts.defaultHalign ?? 'center';
   const leftCols = new Set(opts.leftAlignCols ?? [0]);
   const boldCols = new Set(opts.boldCols ?? [0]);
+  const multiline = opts.multiline ?? false;
 
   let colWidths: number[];
   if (opts.colWidths && opts.colWidths.length === colCount) {
@@ -188,8 +190,8 @@ function drawVectorTable(doc: jsPDF, opts: VectorTableOptions): number {
     doc.setFontSize(headFontSize);
     doc.setTextColor(255, 255, 255);
 
-    const txt = fitTextToWidth(doc, String(opts.head[c] ?? ''), cw - 2.0);
-    const tx = align === 'left' ? curX + 1.2 : align === 'right' ? curX + cw - 1.2 : curX + cw / 2;
+    const txt = fitTextToWidth(doc, String(opts.head[c] ?? ''), cw - 1.8);
+    const tx = align === 'left' ? curX + 1.1 : align === 'right' ? curX + cw - 1.1 : curX + cw / 2;
     doc.text(txt, tx, curY + headHeight * 0.67, { align });
     curX += cw;
   }
@@ -199,6 +201,25 @@ function drawVectorTable(doc: jsPDF, opts: VectorTableOptions): number {
   // Corpo
   for (let r = 0; r < opts.body.length; r++) {
     const row = opts.body[r];
+
+    // Se multiline estiver ativo, calcula quantas linhas cada célula precisa
+    const wrappedCells: string[][] = [];
+    let maxLines = 1;
+    for (let c = 0; c < colCount; c++) {
+      const cw = colWidths[c];
+      const rawStr = String(row[c] ?? '');
+      doc.setFont('helvetica', boldCols.has(c) ? 'bold' : 'normal');
+      doc.setFontSize(fontSize);
+      if (multiline) {
+        const lines = doc.splitTextToSize(rawStr, cw - 2.2) as string[];
+        wrappedCells.push(lines.length > 0 ? lines : ['']);
+        if (lines.length > maxLines) maxLines = lines.length;
+      } else {
+        wrappedCells.push([fitTextToWidth(doc, rawStr, cw - 1.8)]);
+      }
+    }
+
+    const dynamicRowH = multiline ? Math.max(baseRowHeight, maxLines * (fontSize * 0.44) + 1.8) : baseRowHeight;
     let cellX = marginLeft;
 
     for (let c = 0; c < colCount; c++) {
@@ -217,20 +238,26 @@ function drawVectorTable(doc: jsPDF, opts: VectorTableOptions): number {
       doc.setFillColor(bg[0], bg[1], bg[2]);
       doc.setDrawColor(226, 232, 240);
       doc.setLineWidth(0.18);
-      doc.rect(cellX, curY, cw, rowHeight, 'FD');
+      doc.rect(cellX, curY, cw, dynamicRowH, 'FD');
 
       doc.setFont('helvetica', fStyle);
       doc.setFontSize(fontSize);
       doc.setTextColor(fg[0], fg[1], fg[2]);
 
-      const txt = fitTextToWidth(doc, String(rawVal), cw - 1.8);
-      const tx = align === 'left' ? cellX + 1.1 : align === 'right' ? cellX + cw - 1.1 : cellX + cw / 2;
-      doc.text(txt, tx, curY + rowHeight * 0.68, { align });
+      const lines = wrappedCells[c];
+      const lineStep = fontSize * 0.43;
+      const totalTextH = lines.length * lineStep;
+      const startTextY = curY + (dynamicRowH - totalTextH) / 2 + lineStep * 0.8;
+
+      lines.forEach((ln, lIdx) => {
+        const tx = align === 'left' ? cellX + 1.1 : align === 'right' ? cellX + cw - 1.1 : cellX + cw / 2;
+        doc.text(ln, tx, startTextY + lIdx * lineStep, { align });
+      });
 
       cellX += cw;
     }
 
-    curY += rowHeight;
+    curY += dynamicRowH;
   }
 
   return curY;
@@ -256,13 +283,13 @@ function drawHeaderBanner(
 
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(11);
-  doc.text(fitTextToWidth(doc, `MEDSCALE PRO  |  ${title}`, 220), 10, 7.6);
+  doc.setFontSize(10.6);
+  doc.text(fitTextToWidth(doc, `MEDSCALE PRO  |  ${title}`, 222), 10, 7.5);
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7.6);
+  doc.setFontSize(7.4);
   doc.setTextColor(148, 163, 184);
-  doc.text(fitTextToWidth(doc, subtitle, 220), 10, 13.4);
+  doc.text(fitTextToWidth(doc, subtitle, 222), 10, 13.3);
 
   doc.setFillColor(30, 41, 59);
   doc.roundedRect(235, 3.0, 52, 11.8, 2, 2, 'F');
@@ -296,19 +323,19 @@ function drawKpiCard(
   doc.rect(x, y, 2.2, h, 'F');
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(6.6);
+  doc.setFontSize(6.3);
   doc.setTextColor(100, 116, 139);
-  doc.text(fitTextToWidth(doc, label.toUpperCase(), w - 6), x + 4.2, y + 4.8);
+  doc.text(fitTextToWidth(doc, label.toUpperCase(), w - 5), x + 3.8, y + 4.6);
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10.5);
+  doc.setFontSize(9.6);
   doc.setTextColor(15, 23, 42);
-  doc.text(fitTextToWidth(doc, mainValue, w - 6), x + 4.2, y + 11.0);
+  doc.text(fitTextToWidth(doc, mainValue, w - 5), x + 3.8, y + 10.6);
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(6.3);
+  doc.setFontSize(6.0);
   doc.setTextColor(71, 85, 105);
-  doc.text(fitTextToWidth(doc, subValue, w - 6), x + 4.2, y + 15.8);
+  doc.text(fitTextToWidth(doc, subValue, w - 5), x + 3.8, y + 15.6);
 }
 
 function drawVsmNodeBox(
@@ -328,34 +355,34 @@ function drawVsmNodeBox(
 ) {
   doc.setFillColor(bgRgb[0], bgRgb[1], bgRgb[2]);
   doc.setDrawColor(borderRgb[0], borderRgb[1], borderRgb[2]);
-  doc.setLineWidth(0.4);
+  doc.setLineWidth(0.38);
   doc.roundedRect(x, y, w, h, 2, 2, 'FD');
 
   doc.setFillColor(headerRgb[0], headerRgb[1], headerRgb[2]);
-  doc.roundedRect(x, y, w, 6.0, 1.5, 1.5, 'F');
-  doc.rect(x, y + 3.0, w, 3, 'F');
+  doc.roundedRect(x, y, w, 5.6, 1.5, 1.5, 'F');
+  doc.rect(x, y + 2.8, w, 2.8, 'F');
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(6.5);
+  doc.setFontSize(6.2);
   doc.setTextColor(255, 255, 255);
-  doc.text(fitTextToWidth(doc, title, w - 3), x + w / 2, y + 4.2, { align: 'center' });
+  doc.text(fitTextToWidth(doc, title, w - 2.4), x + w / 2, y + 3.9, { align: 'center' });
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7.6);
+  doc.setFontSize(7.2);
   doc.setTextColor(15, 23, 42);
-  doc.text(fitTextToWidth(doc, line1, w - 3), x + w / 2, y + 10.6, { align: 'center' });
+  doc.text(fitTextToWidth(doc, line1, w - 2.4), x + w / 2, y + 9.8, { align: 'center' });
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(6.2);
+  doc.setFontSize(6.0);
   doc.setTextColor(51, 65, 85);
-  doc.text(fitTextToWidth(doc, line2, w - 3), x + w / 2, y + 15.0, { align: 'center' });
-  doc.text(fitTextToWidth(doc, line3, w - 3), x + w / 2, y + 19.2, { align: 'center' });
+  doc.text(fitTextToWidth(doc, line2, w - 2.4), x + w / 2, y + 13.8, { align: 'center' });
+  doc.text(fitTextToWidth(doc, line3, w - 2.4), x + w / 2, y + 17.8, { align: 'center' });
 
   if (line4) {
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(6.1);
+    doc.setFontSize(5.9);
     doc.setTextColor(headerRgb[0], headerRgb[1], headerRgb[2]);
-    doc.text(fitTextToWidth(doc, line4, w - 3), x + w / 2, y + 23.6, { align: 'center' });
+    doc.text(fitTextToWidth(doc, line4, w - 2.4), x + w / 2, y + 21.8, { align: 'center' });
   }
 }
 
@@ -369,11 +396,11 @@ function drawVectorArrow(
   rgb: [number, number, number]
 ) {
   doc.setDrawColor(rgb[0], rgb[1], rgb[2]);
-  doc.setLineWidth(0.55);
+  doc.setLineWidth(0.5);
   doc.line(x1, y1, x2, y2);
 
   const angle = Math.atan2(y2 - y1, x2 - x1);
-  const headLen = 2.2;
+  const headLen = 2.0;
   const ax = x2 - headLen * Math.cos(angle - Math.PI / 6);
   const ay = y2 - headLen * Math.sin(angle - Math.PI / 6);
   const bx = x2 - headLen * Math.cos(angle + Math.PI / 6);
@@ -383,9 +410,17 @@ function drawVectorArrow(
 
   if (label) {
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(6.0);
+    doc.setFontSize(5.5);
+    const tw = doc.getTextWidth(label) + 2.2;
+    const mx = (x1 + x2) / 2;
+    const my = (y1 + y2) / 2;
+    // Desenha pílula branca sob o texto da seta para eliminar qualquer sobreposição visual
+    doc.setFillColor(255, 255, 255);
+    doc.setDrawColor(rgb[0], rgb[1], rgb[2]);
+    doc.setLineWidth(0.2);
+    doc.roundedRect(mx - tw / 2, my - 2.1, tw, 3.4, 0.8, 0.8, 'FD');
     doc.setTextColor(rgb[0], rgb[1], rgb[2]);
-    doc.text(label, (x1 + x2) / 2, (y1 + y2) / 2 - 1.5, { align: 'center' });
+    doc.text(label, mx, my + 0.3, { align: 'center' });
   }
 }
 
@@ -401,20 +436,22 @@ function renderPageMod1Vsm(
   totalPages: number
 ) {
   const vsm = data.vsm;
+  const mb = s.massBalance;
+
   drawHeaderBanner(
     doc,
-    'MAPA DA JORNADA DO PACIENTE & VALUE STREAM MAPPING (VSM - LEAN HEALTHCARE)',
-    `Escopo: ${data.activeScopeLabel}  •  Recorte: ${s.label} (N = ${s.totalInput})  •  3333 + ${vsm.hasCate3493Data ? '3493 (Boarding)' : 'Virtual'} + ${vsm.hasChaa3704Data ? '3704 (CIDs)' : 'CID Porta'}`,
+    'MAPA DA JORNADA DO PACIENTE & VALUE STREAM MAPPING (EQUAÇÃO DE MASSA 100% FECHADA)',
+    `Escopo: ${data.activeScopeLabel}  •  Recorte: ${s.label} (N = ${mb.totalFichasPorta} === Soma Desfechos: ${mb.auditSumCheck})`,
     data.periodLabel,
     pageNum,
     totalPages
   );
 
   const cardW = 44.8;
-  const cardH = 18.5;
+  const cardH = 18.0;
   const gap = 1.6;
   const startX = 10;
-  const topY = 21.5;
+  const topY = 21.0;
 
   drawKpiCard(
     doc,
@@ -422,8 +459,8 @@ function renderPageMod1Vsm(
     topY,
     cardW,
     cardH,
-    '1. Input Porta (Escopo)',
-    `${s.totalInput} pac.`,
+    '1. Input Porta (100% Fechado)',
+    `${mb.totalFichasPorta} fichas`,
     `Méd: ${data.dailyVolume.overall.mean}/d (±${data.dailyVolume.overall.stdDev}) | Med: ${data.dailyVolume.overall.median}`,
     [37, 99, 235]
   );
@@ -444,9 +481,9 @@ function renderPageMod1Vsm(
     topY,
     cardW,
     cardH,
-    '3. Alta 1º Atend vs Giro',
-    `${s.directDischargePct}% / ${s.propaedeuticLoopPct}%`,
-    `1ºAt: ${s.directDischargeCount} | Só Med: ${s.fastReavMedOnlyCount} (${s.fastReavMedOnlyPct}%)`,
+    '3. Altas: 1ºAt | Med | Exames',
+    `${mb.b2DirectDischarge1stAttendPct}% | ${mb.b3DischargeAfterMedOnlyPct}% | ${mb.b4DischargeAfterExamsPct}%`,
+    `1ºAt:${mb.b2DirectDischarge1stAttendCount} | Med:${mb.b3DischargeAfterMedOnlyCount} | Ex:${mb.b4DischargeAfterExamsCount}`,
     [13, 148, 136]
   );
   drawKpiCard(
@@ -457,7 +494,7 @@ function renderPageMod1Vsm(
     cardH,
     '4. Fila Invisível Pós-Laudo',
     `${s.postReportReavalWaitStats.mean} min`,
-    `Mediana: ${s.postReportReavalWaitStats.median}m (±${s.postReportReavalWaitStats.stdDev}m) aguard. médico`,
+    `Med: ${s.postReportReavalWaitStats.median}m (±${s.postReportReavalWaitStats.stdDev}m) | P90: ${s.postReportReavalWaitStats.p90}m`,
     [217, 119, 6]
   );
   drawKpiCard(
@@ -466,9 +503,9 @@ function renderPageMod1Vsm(
     topY,
     cardW,
     cardH,
-    '5. Boarding UI vs. UTI',
-    `UI ${s.uiBoardingStats.mean}m | UTI ${s.utiBoardingStats.mean}m`,
-    `Med UI: ${s.uiBoardingStats.median}m vs Med UTI: ${s.utiBoardingStats.median}m`,
+    '5. Boarding Físico UI vs UTI',
+    `UI ${s.uiBoardingStats.mean}m | UTI ${s.utiPhysicalBoardingStats.mean || s.utiBoardingStats.mean}m`,
+    `Med UI: ${s.uiBoardingStats.median}m | UTI Geral: ${s.utiBoardingStats.mean}m`,
     [225, 29, 72]
   );
   drawKpiCard(
@@ -479,37 +516,38 @@ function renderPageMod1Vsm(
     cardH,
     '6. Cirúrgico vs. Clínico',
     `Cir ${s.surgicalBoardingStats.mean}m | Clín ${s.clinicalBoardingStats.mean}m`,
-    `${vsm.equivalentBlockedBeds24h} macas bloqueadas 24h/d (${vsm.wastedBedHoursInBoarding}h)`,
+    `${vsm.equivalentBlockedBeds24h} macas 24h/d (${vsm.wastedBedHoursInBoarding}h retidas)`,
     [124, 58, 237]
   );
 
-  const vsmY = 43;
-  const vsmH = 108;
+  const vsmY = 41.5;
+  const vsmH = 110;
   doc.setFillColor(255, 255, 255);
   doc.setDrawColor(203, 213, 225);
   doc.setLineWidth(0.35);
   doc.roundedRect(10, vsmY, 277, vsmH, 2.5, 2.5, 'FD');
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8.2);
+  doc.setFontSize(7.6);
   doc.setTextColor(15, 23, 42);
   doc.text(
-    `FLUXOGRAMA DE VALOR LEAN HEALTHCARE (INPUT -> THROUGHPUT ESTRATIFICADO -> OUTPUT & BOARDING DIFERENCIADO) — ${s.label.toUpperCase()}`,
-    14,
-    vsmY + 5.8
+    `EQUAÇÃO DE CONSERVAÇÃO DE MASSA: PORTA (${mb.totalFichasPorta}) = EVASÃO PRÉ (${mb.b1PreMedEvasionCount}) + ALTA 1ºAT (${mb.b2DirectDischarge1stAttendCount}) + ALTA SÓ MED (${mb.b3DischargeAfterMedOnlyCount}) + ALTA EXAMES (${mb.b4DischargeAfterExamsCount}) + INTERN. (${mb.b5AdmittedTotalCount}) + EVASÃO PÓS (${mb.b6OtherPostAttendEvasionsCount}) + ESPECIAIS/CORTE (${mb.b7TotalInconsistenciesAndSpecialCount})`,
+    13,
+    vsmY + 5.2
   );
 
+  // Coluna 1: Input
   drawVsmNodeBox(
     doc,
     13,
-    vsmY + 26,
+    vsmY + 25,
     46,
-    28,
+    27,
     '1. INPUT: TOTEM & RECEPÇÃO',
-    `N = ${s.totalInput} (100% Porta)`,
+    `N = ${mb.totalFichasPorta} (100% Porta)`,
     `Fila Totem->Guichê: Méd ${s.waitTotemToRecepStats.mean}m (Med ${s.waitTotemToRecepStats.median}m)`,
     `Cadastro Ficha: Méd ${s.recepRegistrationStats.mean}m (Med ${s.recepRegistrationStats.median}m)`,
-    `Evasão Pré-Médica: ${s.preMedEvasionCount} (${s.preMedEvasionPct}%)`,
+    `Evasão Pré: ${mb.b1PreMedEvasionCount} | Ficha Adm s/Cons: ${mb.b7aAdminNoConsultCount}`,
     [15, 23, 42],
     [248, 250, 252],
     [148, 163, 184]
@@ -518,21 +556,22 @@ function renderPageMod1Vsm(
   drawVectorArrow(
     doc,
     59.5,
-    vsmY + 40,
+    vsmY + 38.5,
     70.5,
-    vsmY + 40,
+    vsmY + 38.5,
     `Fila: ${s.waitRecepToDocStats.mean}m`,
     [220, 38, 38]
   );
 
+  // Coluna 2: Gatekeeper
   drawVsmNodeBox(
     doc,
     71,
-    vsmY + 26,
-    49,
-    28,
+    vsmY + 25,
+    48,
+    27,
     '2. 1º ATENDIMENTO (GATEKEEPER)',
-    `N = ${s.attendedByDoctorCount} (${s.attendedByDoctorPct}% Atendidos)`,
+    `N = ${s.attendedByDoctorCount} (${s.attendedByDoctorPct}% Avaliados)`,
     `Porta-Médico: Méd ${s.doorToDocTotalStats.mean}m | P90 ${s.doorToDocTotalStats.p90}m`,
     `1ª Consulta: Méd ${s.firstConsultDurationStats.mean}m (Med ${s.firstConsultDurationStats.median}m)`,
     `Meta SLA <=20m: ${data.withinSlaDoorToDocRate}% na meta`,
@@ -541,18 +580,19 @@ function renderPageMod1Vsm(
     [96, 165, 250]
   );
 
-  drawVectorArrow(doc, 120.5, vsmY + 32, 133.5, vsmY + 20, `${s.directDischargePct}% Alta 1ºAt`, [22, 163, 74]);
-  drawVectorArrow(doc, 120.5, vsmY + 40, 133.5, vsmY + 49, `${s.fastReavMedOnlyPct}% Só Med`, [217, 119, 6]);
-  drawVectorArrow(doc, 120.5, vsmY + 48, 133.5, vsmY + 80, `${s.diagnosticExamsLoopPct}% Exames`, [180, 83, 9]);
+  drawVectorArrow(doc, 119.5, vsmY + 31, 133.5, vsmY + 19, `${mb.b2DirectDischarge1stAttendPct}% 1ºAt`, [22, 163, 74]);
+  drawVectorArrow(doc, 119.5, vsmY + 38.5, 133.5, vsmY + 46, `${s.fastReavMedOnlyPct}% SóMed`, [217, 119, 6]);
+  drawVectorArrow(doc, 119.5, vsmY + 46, 133.5, vsmY + 78, `${s.diagnosticExamsLoopPct}% Exam`, [180, 83, 9]);
 
+  // Coluna 3: Ramos A, B1 e B2
   drawVsmNodeBox(
     doc,
     134,
-    vsmY + 9,
+    vsmY + 8,
     68,
-    25,
-    'RAMO A: ALTA DIRETA NO 1º ATENDIMENTO (SINGLE-TOUCH)',
-    `N = ${s.directDischargeCount} (${s.directDischargePct}% do PS) — Sem Exames/Med`,
+    24,
+    '2. ALTA DIRETA APÓS 1º ATENDIMENTO (RAMO A)',
+    `N = ${mb.b2DirectDischarge1stAttendCount} (${mb.b2DirectDischarge1stAttendPct}% da Porta) — Sem Med/Exames`,
     `Permanência Total: Méd ${s.directDischargeLosStats.mean}m (±${s.directDischargeLosStats.stdDev}m)`,
     `Mediana: ${s.directDischargeLosStats.median}m | P90: ${s.directDischargeLosStats.p90}m`,
     `Eficiência Lean Ramo A (PCE): ${s.pceRamoADirectPct}% VA`,
@@ -564,14 +604,14 @@ function renderPageMod1Vsm(
   drawVsmNodeBox(
     doc,
     134,
-    vsmY + 37,
+    vsmY + 35,
     68,
-    27,
-    'RAMO B1: FAST REAV / GIRO TERAPÊUTICO (SÓ MEDICAÇÃO)',
-    `N = ${s.fastReavMedOnlyCount} (${s.fastReavMedOnlyPct}% do PS) — Sem Lab/Imagem`,
+    25,
+    '3. GIRO SÓ MEDICAÇÃO / FAST REAV (RAMO B1)',
+    `Entram: ${s.fastReavMedOnlyCount} (${s.fastReavMedOnlyPct}%) -> Alta Fast Reav: ${mb.b3DischargeAfterMedOnlyCount} (${mb.b3DischargeAfterMedOnlyPct}%)`,
     `Espera Início Med: ${s.waitMedStartStats.mean}m | Infusão ADM: ${s.medInfusionDurationStats.mean}m`,
-    `Permanência Total: Méd ${s.fastReavMedOnlyLosStats.mean}m (Med ${s.fastReavMedOnlyLosStats.median}m)`,
-    `PCE Fast Reav: ${s.pceRamoB1FastReavPct}% | Total Medicados: ${s.medicatedPct}%`,
+    `Permanência Alta Só Med: Méd ${s.fastReavMedOnlyLosStats.mean}m (Med ${s.fastReavMedOnlyLosStats.median}m)`,
+    `PCE Fast Reav: ${s.pceRamoB1FastReavPct}% | Total Medicados PS: ${s.medicatedPct}%`,
     [217, 119, 6],
     [255, 251, 235],
     [251, 191, 36]
@@ -580,14 +620,14 @@ function renderPageMod1Vsm(
   drawVsmNodeBox(
     doc,
     134,
-    vsmY + 67,
+    vsmY + 63,
     68,
-    36,
-    'RAMO B2: GIRO DIAGNÓSTICO (LAB / TC / RX / USG)',
-    `N = ${s.diagnosticExamsLoopCount} (${s.diagnosticExamsLoopPct}% do PS em Exames)`,
+    43,
+    '4. GIRO DE EXAMES DIAGNÓSTICOS (RAMO B2)',
+    `Entram: ${s.diagnosticExamsLoopCount} (${s.diagnosticExamsLoopPct}%) -> Alta Pós-Exames: ${mb.b4DischargeAfterExamsCount} (${mb.b4DischargeAfterExamsPct}%)`,
     `• Lab: ${s.labCount} (${s.labPct}%) [Coleta ${s.waitLabCollectStats.mean}m + Laudo ${s.waitLabReportStats.mean}m]`,
     `• TC: ${s.tcCount} (${s.tcPct}%) [Ciclo ${s.waitTcTotalStats.mean}m] | RX: ${s.rxCount} (${s.rxPct}%) [${s.waitRxExecStats.mean}m]`,
-    `• PCE Exames: ${s.pceRamoB2DiagExamsPct}% | LOS: Méd ${s.diagnosticExamsLoopLosStats.mean}m (Med ${s.diagnosticExamsLoopLosStats.median}m)`,
+    `• PCE Exames: ${s.pceRamoB2DiagExamsPct}% | LOS Alta Ex: Méd ${s.diagnosticExamsLoopLosStats.mean}m (Med ${s.diagnosticExamsLoopLosStats.median}m)`,
     [180, 83, 9],
     [254, 243, 199],
     [245, 158, 11]
@@ -596,32 +636,33 @@ function renderPageMod1Vsm(
   drawVectorArrow(
     doc,
     202.5,
-    vsmY + 50,
+    vsmY + 47,
     214.5,
-    vsmY + 32,
-    `Pós-Laudo: ${s.postReportReavalWaitStats.mean}m`,
+    vsmY + 24,
+    `Pós-Laudo ${s.postReportReavalWaitStats.mean}m`,
     [3, 105, 161]
   );
   drawVectorArrow(
     doc,
     202.5,
-    vsmY + 82,
-    214.5,
     vsmY + 75,
-    `${s.admittedTotalPct}% Internam`,
+    214.5,
+    vsmY + 58,
+    `${mb.b5AdmittedTotalPct}% Intern.`,
     [190, 18, 60]
   );
 
+  // Coluna 4: Outputs Finais (Altas Pós-Propedêutica, Internações e Evasões/Inconsistências de Corte)
   drawVsmNodeBox(
     doc,
     215,
-    vsmY + 9,
+    vsmY + 8,
     69,
-    38,
-    'OUTPUT 1: ALTA PÓS-PROPEDÊUTICA / REAVALIAÇÃO',
-    `N = ${s.postPropDischargeCount} (${s.postPropDischargePct}% do PS) + ${s.postConsultEvasionCount} Evasões`,
+    29,
+    'OUTPUT 1: ALTAS PÓS-MEDICAÇÃO / EXAMES (3 + 4)',
+    `N = ${s.postPropDischargeCount} (${s.postPropDischargePct}% da Porta: ${mb.b3DischargeAfterMedOnlyCount} Med + ${mb.b4DischargeAfterExamsCount} Ex)`,
     `Permanência: Méd ${s.postPropDischargeLosStats.mean}m (Med ${s.postPropDischargeLosStats.median}m | P90 ${s.postPropDischargeLosStats.p90}m)`,
-    `Fila Pós-Laudo p/ Reavaliação: Méd ${s.postReportReavalWaitStats.mean}m (Med ${s.postReportReavalWaitStats.median}m)`,
+    `Fila Pós-Laudo p/ Decisão: Méd ${s.postReportReavalWaitStats.mean}m (Med ${s.postReportReavalWaitStats.median}m)`,
     `Handoff (${s.handoffDoctorPct}%): Mediana ${s.sameDoctorLosStats.median}m -> ${s.handoffDoctorLosStats.median}m`,
     [3, 105, 161],
     [240, 249, 255],
@@ -631,19 +672,36 @@ function renderPageMod1Vsm(
   drawVsmNodeBox(
     doc,
     215,
-    vsmY + 51,
+    vsmY + 40,
     69,
-    52,
-    'OUTPUT 2: BOARDING DIFERENCIADO (UI vs UTI / CIRÚRGICO)',
-    `N = ${s.admittedTotalCount} (${s.admittedTotalPct}%) -> UI: ${s.admittedUiCount} | UTI: ${s.admittedUtiCount} | Cir: ${s.admittedSurgicalCount}`,
-    `• UI (Enfermaria): T1 ${s.uiT1AguardoToVirtualStats.mean}m + T2 ${s.uiT2VirtualToPhysicalStats.mean}m = Total ${s.uiBoardingStats.mean}m (Med ${s.uiBoardingStats.median}m)`,
-    `• UTI: T1 ${s.utiT1AguardoToVirtualStats.mean}m + T2 ${s.utiT2VirtualToPhysicalStats.mean}m = Total ${s.utiBoardingStats.mean}m (Med ${s.utiBoardingStats.median}m)`,
+    37,
+    'OUTPUT 2: INTERNAÇÕES & BOARDING FÍSICO (5)',
+    `N = ${mb.b5AdmittedTotalCount} (${mb.b5AdmittedTotalPct}%) -> UI:${s.admittedUiCount} | UTI:${s.admittedUtiCount} | Out:${s.admittedOtherBedCount}`,
+    `• UI (100% Físico): T1 ${s.uiT1AguardoToVirtualStats.mean}m + T2 ${s.uiT2VirtualToPhysicalStats.mean}m = ${s.uiBoardingStats.mean}m`,
+    `• UTI Físico: T1 ${s.utiT1AguardoToVirtualStats.mean}m + T2 ${s.utiT2VirtualToPhysicalStats.mean}m = ${s.utiPhysicalBoardingStats.mean}m (Geral ${s.utiBoardingStats.mean}m)`,
     `• Cirúrgico: Méd ${s.surgicalBoardingStats.mean}m vs Clínico: ${s.clinicalBoardingStats.mean}m | CID Mudou: ${vsm.diagnosticGovernance.reclassifiedPct}%`,
     [190, 18, 60],
     [255, 241, 242],
     [244, 63, 94]
   );
 
+  drawVsmNodeBox(
+    doc,
+    215,
+    vsmY + 80,
+    69,
+    26,
+    'OUTPUT 3: EVASÕES & CORTE DA PLANILHA (1 + 6 + 7)',
+    `Soma Residual = ${mb.b1PreMedEvasionCount + mb.b6OtherPostAttendEvasionsCount + mb.b7TotalInconsistenciesAndSpecialCount} fichas (Fecha 100% de N = ${mb.totalFichasPorta})`,
+    `• Evasões: ${mb.b1PreMedEvasionCount} Pré-Médica + ${mb.b6OtherPostAttendEvasionsCount} Pós-Atendimento (${mb.b6OtherPostAttendEvasionsPct}%)`,
+    `• Sem Desfecho no Corte: ${mb.b7bPendingNoOutcomeAtCutoffCount} | Ficha Adm (LOS=0): ${mb.b7aAdminNoConsultCount}`,
+    `• Transferências Externas / Óbitos: ${mb.b7cTransferOrDeathCount} casos`,
+    [71, 85, 105],
+    [248, 250, 252],
+    [148, 163, 184]
+  );
+
+  // Linha Dente de Serra
   const sawY = 154;
   const sawH = 44;
   doc.setFillColor(248, 250, 252);
@@ -651,7 +709,7 @@ function renderPageMod1Vsm(
   doc.roundedRect(10, sawY, 277, sawH, 2, 2, 'FD');
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7.8);
+  doc.setFontSize(7.6);
   doc.setTextColor(15, 23, 42);
   doc.text(
     'LINHA DO TEMPO LEAN VSM (DENTE DE SERRA): TEMPO DE VALOR AGREGADO (VA - CUIDADO ATIVO) vs. DESPERDÍCIO / ESPERA SISTÊMICA (NVA)',
@@ -669,7 +727,7 @@ function renderPageMod1Vsm(
     { title: '7. Espera Laudo', val: `${s.waitLabReportStats.mean}m (NVA)`, isVa: false },
     { title: '8. Fila Pós-Laudo', val: `${s.postReportReavalWaitStats.mean}m (NVA)`, isVa: false },
     { title: '9. Reaval/Desfecho', val: `12.0m (VA)`, isVa: true },
-    { title: '10. Boarding UI/UTI', val: `${s.totalBoardingStats.mean}m (NVA)`, isVa: false },
+    { title: '10. Boarding Físico', val: `${s.physicalTotalBoardingStats.mean || s.totalBoardingStats.mean}m (NVA)`, isVa: false },
   ];
 
   const stepW = 22.8;
@@ -688,12 +746,12 @@ function renderPageMod1Vsm(
     doc.roundedRect(curX, boxY, stepW, 13, 1.5, 1.5, 'FD');
 
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(6.1);
+    doc.setFontSize(6.0);
     doc.setTextColor(15, 23, 42);
     doc.text(st.title, curX + stepW / 2, boxY + 5, { align: 'center' });
 
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(6.7);
+    doc.setFontSize(6.6);
     doc.setTextColor(txtRgb[0], txtRgb[1], txtRgb[2]);
     doc.text(st.val, curX + stepW / 2, boxY + 10.2, { align: 'center' });
 
@@ -715,15 +773,15 @@ function renderPageMod1Vsm(
   doc.roundedRect(257, sawY + 8, 27, 29, 2, 2, 'FD');
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(6.2);
+  doc.setFontSize(6.1);
   doc.setTextColor(30, 58, 138);
   doc.text('PCE LEAN GLOBAL', 270.5, sawY + 13, { align: 'center' });
 
-  doc.setFontSize(10.5);
+  doc.setFontSize(10.2);
   doc.setTextColor(29, 78, 216);
   doc.text(`${s.pceEfficiencyPct}% VA`, 270.5, sawY + 18.8, { align: 'center' });
 
-  doc.setFontSize(5.8);
+  doc.setFontSize(5.7);
   doc.setTextColor(15, 23, 42);
   doc.text(`Ramo A: ${s.pceRamoADirectPct}%`, 270.5, sawY + 23.5, { align: 'center' });
   doc.text(`FastReav: ${s.pceRamoB1FastReavPct}%`, 270.5, sawY + 27.2, { align: 'center' });
@@ -749,43 +807,44 @@ function renderPageMod2CensusChart(
   );
 
   const chartX = 10;
-  const chartY = 22;
+  const chartY = 21.5;
   const chartW = 277;
-  const chartH = 78;
+  const chartH = 80;
 
   doc.setFillColor(255, 255, 255);
   doc.setDrawColor(203, 213, 225);
   doc.roundedRect(chartX, chartY, chartW, chartH, 2, 2, 'FD');
 
+  // Título na linha 1 e Legenda na linha 2 (zero colisão visual!)
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8.0);
+  doc.setFontSize(7.8);
   doc.setTextColor(15, 23, 42);
   doc.text(
     'CURVA DE LOTAÇÃO SIMULTÂNEA ACUMULADA NO PS POR HORA (07h–06h) vs. NOVAS CHEGADAS NA PORTA (MÉDIA DIÁRIA)',
     chartX + 4,
-    chartY + 6
+    chartY + 5.2
   );
 
   const legItems: { label: string; rgb: [number, number, number] }[] = [
-    { label: '1. Porta / 1º Atend', rgb: [59, 130, 246] },
-    { label: '2A. Fast Reav (Só Med)', rgb: [251, 191, 36] },
-    { label: '2B. Giro Exames (Lab/TC)', rgb: [217, 119, 6] },
-    { label: '3. Boarding (UI/UTI)', rgb: [225, 29, 72] },
-    { label: 'Linha: Chegadas/h', rgb: [15, 23, 42] },
+    { label: '1. Porta / 1º Atend (Azul)', rgb: [59, 130, 246] },
+    { label: '2A. Fast Reav Só Med (Amarelo)', rgb: [251, 191, 36] },
+    { label: '2B. Giro Exames Lab/TC (Laranja)', rgb: [217, 119, 6] },
+    { label: '3. Boarding UI/UTI (Vermelho)', rgb: [225, 29, 72] },
+    { label: 'Linha Preta: Novas Chegadas/h na Porta', rgb: [15, 23, 42] },
   ];
-  let lx = chartX + 134;
+  let lx = chartX + 4;
   legItems.forEach((it) => {
     doc.setFillColor(it.rgb[0], it.rgb[1], it.rgb[2]);
-    doc.rect(lx, chartY + 2.8, 3, 3, 'F');
+    doc.rect(lx, chartY + 7.2, 2.8, 2.8, 'F');
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(6.1);
+    doc.setFontSize(6.0);
     doc.setTextColor(51, 65, 85);
-    doc.text(it.label, lx + 4, chartY + 5.3);
-    lx += it.label.length * 1.42 + 6.5;
+    doc.text(it.label, lx + 3.8, chartY + 9.6);
+    lx += doc.getTextWidth(it.label) + 9;
   });
 
   const plotX = chartX + 12;
-  const plotY = chartY + 12;
+  const plotY = chartY + 14;
   const plotW = chartW - 18;
   const plotH = chartH - 22;
 
@@ -839,12 +898,12 @@ function renderPageMod2CensusChart(
     }
 
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(6.2);
+    doc.setFontSize(6.1);
     doc.setTextColor(15, 23, 42);
-    doc.text(pt.totalSimultaneousMean.toFixed(1), bx + barW / 2, Math.max(curBottom - 1.5, plotY + 2), { align: 'center' });
+    doc.text(pt.totalSimultaneousMean.toFixed(1), bx + barW / 2, Math.max(curBottom - 1.4, plotY + 2), { align: 'center' });
 
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(6.5);
+    doc.setFontSize(6.4);
     doc.setTextColor(51, 65, 85);
     doc.text(pt.label, bx + barW / 2, plotY + plotH + 4.5, { align: 'center' });
 
@@ -863,7 +922,7 @@ function renderPageMod2CensusChart(
   });
 
   drawVectorTable(doc, {
-    startY: 105,
+    startY: 105.5,
     marginLeft: 10,
     tableWidth: 132,
     colWidths: [28, 10, 14, 24, 14, 14, 14, 14],
@@ -879,12 +938,12 @@ function renderPageMod2CensusChart(
       w.admissions,
     ]),
     headFillColor: [15, 23, 42],
-    fontSize: 6.4,
-    rowHeight: 5.2,
+    fontSize: 6.3,
+    rowHeight: 5.1,
   });
 
   drawVectorTable(doc, {
-    startY: 105,
+    startY: 105.5,
     marginLeft: 146,
     tableWidth: 141,
     colWidths: [20, 13, 24, 26, 14, 14, 15, 15],
@@ -900,8 +959,8 @@ function renderPageMod2CensusChart(
       `${wd.meanLos}m`,
     ]),
     headFillColor: [30, 58, 138],
-    fontSize: 6.4,
-    rowHeight: 5.2,
+    fontSize: 6.3,
+    rowHeight: 5.1,
   });
 }
 
@@ -1069,37 +1128,42 @@ function renderPageMod5TimesAndSectors(
   const vsm = data.vsm;
   drawHeaderBanner(
     doc,
-    'DECOMPOSIÇÃO DE TEMPOS POR TURNO, FAIXAS DE PERMANÊNCIA (AGING) & COMPARATIVO SETOR/CLÍNICA',
-    `Escopo Ativo: ${data.activeScopeLabel}  •  Média, Desvio-Padrão, Mediana, P90 e Amplitude [Mín–Máx] em 24h, Diurno e Noturno`,
+    'TEMPOS DESMEMBRADOS POR TURNO, FAIXAS DE PERMANÊNCIA (100% FECHADAS) & PERFIL ETÁRIO',
+    `Escopo Ativo: ${data.activeScopeLabel}  •  Cada micro-etapa isolada com N válido, Média (±DP), Mediana, P90 e Amplitude [Mín–Máx]`,
     data.periodLabel,
     pageNum,
     totalPages
   );
 
+  // Todas as 18 etapas de tempo separadas individualmente (sem juntar duas métricas num mesmo rótulo!)
   const timeRows: [string, MetricStats, MetricStats, MetricStats][] = [
     ['1. Fila Totem -> Guichê Recepção', s.waitTotemToRecepStats, vsm.byShift.day.waitTotemToRecepStats, vsm.byShift.night.waitTotemToRecepStats],
     ['2. Cadastro na Recepção (Abertura Ficha)', s.recepRegistrationStats, vsm.byShift.day.recepRegistrationStats, vsm.byShift.night.recepRegistrationStats],
-    ['3. Fila Pós-Recepção -> Médico', s.waitRecepToDocStats, vsm.byShift.day.waitRecepToDocStats, vsm.byShift.night.waitRecepToDocStats],
-    ['4. Porta-Médico Total (Meta SLA <= 20m)', s.doorToDocTotalStats, vsm.byShift.day.doorToDocTotalStats, vsm.byShift.night.doorToDocTotalStats],
-    ['5. 1ª Consulta Médica (Anamnese)', s.firstConsultDurationStats, vsm.byShift.day.firstConsultDurationStats, vsm.byShift.night.firstConsultDurationStats],
-    ['6. Espera p/ Início Medicação + Infusão ADM', s.waitMedStartStats, vsm.byShift.day.waitMedStartStats, vsm.byShift.night.waitMedStartStats],
-    ['7. Espera Coleta Lab + Liberação Laudo Lab', s.waitLabReportStats, vsm.byShift.day.waitLabReportStats, vsm.byShift.night.waitLabReportStats],
-    ['8. Ciclo Tomografia (TC) + Execução Raio-X', s.waitTcTotalStats, vsm.byShift.day.waitTcTotalStats, vsm.byShift.night.waitTcTotalStats],
-    ['9. Fila Invisível Pós-Laudo p/ Reavaliação', s.postReportReavalWaitStats, vsm.byShift.day.postReportReavalWaitStats, vsm.byShift.night.postReportReavalWaitStats],
-    ['10. LOS Ramo A (Alta Direta 1º Atendimento)', s.directDischargeLosStats, vsm.byShift.day.directDischargeLosStats, vsm.byShift.night.directDischargeLosStats],
-    ['11. LOS Ramo B1 (Fast Reav — Só Medicação)', s.fastReavMedOnlyLosStats, vsm.byShift.day.fastReavMedOnlyLosStats, vsm.byShift.night.fastReavMedOnlyLosStats],
-    ['12. LOS Ramo B2 (Giro Diagnóstico Exames)', s.diagnosticExamsLoopLosStats, vsm.byShift.day.diagnosticExamsLoopLosStats, vsm.byShift.night.diagnosticExamsLoopLosStats],
-    ['13. LOS Mesmo Médico vs. Com Troca (Handoff)', s.handoffDoctorLosStats, vsm.byShift.day.handoffDoctorLosStats, vsm.byShift.night.handoffDoctorLosStats],
-    ['14. Boarding Total Real (UI / UTI / Cirúrgico)', s.totalBoardingStats, vsm.byShift.day.totalBoardingStats, vsm.byShift.night.totalBoardingStats],
+    ['3. Triagem Enfermagem (Espera + Atend Enf)', vsm.nursingTriage.waitTriageStats, vsm.nursingTriage.waitTriageStats, vsm.nursingTriage.waitTriageStats],
+    ['4. Fila Pós-Recepção/Triagem -> Médico', s.waitRecepToDocStats, vsm.byShift.day.waitRecepToDocStats, vsm.byShift.night.waitRecepToDocStats],
+    ['5. Porta-Médico Total (Meta SLA <= 20m)', s.doorToDocTotalStats, vsm.byShift.day.doorToDocTotalStats, vsm.byShift.night.doorToDocTotalStats],
+    ['6. 1ª Consulta Médica (Anamnese)', s.firstConsultDurationStats, vsm.byShift.day.firstConsultDurationStats, vsm.byShift.night.firstConsultDurationStats],
+    ['7. Espera p/ Início da Medicação (Presc->Chec)', s.waitMedStartStats, vsm.byShift.day.waitMedStartStats, vsm.byShift.night.waitMedStartStats],
+    ['8. Tempo de Infusão / ADM de Medicação', s.medInfusionDurationStats, vsm.byShift.day.medInfusionDurationStats, vsm.byShift.night.medInfusionDurationStats],
+    ['9. Espera p/ Coleta Laboratorial', s.waitLabCollectStats, vsm.byShift.day.waitLabCollectStats, vsm.byShift.night.waitLabCollectStats],
+    ['10. Tempo de Liberação do Laudo Lab', s.waitLabReportStats, vsm.byShift.day.waitLabReportStats, vsm.byShift.night.waitLabReportStats],
+    ['11. Espera Execução de Raio-X (RX)', s.waitRxExecStats, vsm.byShift.day.waitRxExecStats, vsm.byShift.night.waitRxExecStats],
+    ['12. Ciclo Total de Tomografia (TC)', s.waitTcTotalStats, vsm.byShift.day.waitTcTotalStats, vsm.byShift.night.waitTcTotalStats],
+    ['13. Fila Invisível Pós-Laudo p/ Reavaliação', s.postReportReavalWaitStats, vsm.byShift.day.postReportReavalWaitStats, vsm.byShift.night.postReportReavalWaitStats],
+    ['14. LOS Ramo A (Alta Direta 1º Atendimento)', s.directDischargeLosStats, vsm.byShift.day.directDischargeLosStats, vsm.byShift.night.directDischargeLosStats],
+    ['15. LOS Ramo B1 (Alta Só Med / Fast Reav)', s.fastReavMedOnlyLosStats, vsm.byShift.day.fastReavMedOnlyLosStats, vsm.byShift.night.fastReavMedOnlyLosStats],
+    ['16. LOS Ramo B2 (Alta Pós-Exames)', s.diagnosticExamsLoopLosStats, vsm.byShift.day.diagnosticExamsLoopLosStats, vsm.byShift.night.diagnosticExamsLoopLosStats],
+    ['17. LOS Mesmo Médico (Sem Handoff)', s.sameDoctorLosStats, vsm.byShift.day.sameDoctorLosStats, vsm.byShift.night.sameDoctorLosStats],
+    ['18. LOS Com Troca de Médico (Com Handoff)', s.handoffDoctorLosStats, vsm.byShift.day.handoffDoctorLosStats, vsm.byShift.night.handoffDoctorLosStats],
   ];
 
   drawVectorTable(doc, {
-    startY: 21.5,
+    startY: 21.0,
     marginLeft: 10,
     tableWidth: 277,
-    colWidths: [64, 16, 44, 35, 59, 59],
+    colWidths: [62, 16, 44, 37, 59, 59],
     head: [
-      'Etapa / Indicador Operacional (minutos)',
+      'Etapa / Indicador Operacional Isolado (min)',
       'N Válido',
       '24h: Média (±DP)',
       '24h: Mediana [Mín–Máx] | P90',
@@ -1115,18 +1179,18 @@ function renderPageMod5TimesAndSectors(
       stN.count > 0 ? `${stN.mean}m (±${stN.stdDev}) | Med ${stN.median}m (P90:${stN.p90}m)` : '—',
     ]),
     headFillColor: [15, 23, 42],
-    fontSize: 6.2,
-    rowHeight: 5.2,
-    headHeight: 5.5,
+    fontSize: 5.8,
+    rowHeight: 4.3,
+    headHeight: 4.8,
   });
 
-  // Tabelas inferiores: Faixas de Permanência (Aging) à esquerda e Setor/Clínica à direita
+  // Tabelas inferiores: Faixas de Permanência 100% Fechadas (esquerda) e Perfil Etário/Geriátrico (direita)
   drawVectorTable(doc, {
-    startY: 104,
+    startY: 105.5,
     marginLeft: 10,
-    tableWidth: 134,
-    colWidths: [34, 18, 18, 16, 16, 16, 16],
-    head: ['Faixa Permanência (Aging)', 'Pac. (N)', '% PS', 'Alta 1ºAt', 'Só Med', 'Exames', 'Intern.'],
+    tableWidth: 136,
+    colWidths: [32, 16, 14, 15, 15, 15, 14, 15],
+    head: ['Faixa Permanência (Aging)', 'Pac.(N)', '% PS', 'Alta 1º', 'Só Med', 'Exames', 'Intern.', 'Ev/Pend'],
     body: vsm.losAgingBuckets.map((b) => [
       b.bucketLabel,
       b.count,
@@ -1135,33 +1199,32 @@ function renderPageMod5TimesAndSectors(
       b.fastReavCount,
       b.diagnosticExamsCount,
       b.admittedCount,
+      b.evasionsAndPendingCount,
     ]),
     headFillColor: [30, 58, 138],
-    fontSize: 6.1,
-    rowHeight: 5.0,
+    fontSize: 5.9,
+    rowHeight: 4.6,
   });
 
   drawVectorTable(doc, {
-    startY: 104,
-    marginLeft: 148,
-    tableWidth: 139,
-    colWidths: [32, 24, 18, 16, 16, 16, 17],
-    head: ['Setor Emergência', 'Clínica', 'Volume (%Glob)', '%Alta 1º', 'Intern.', 'Porta-Méd', 'LOS Méd'],
-    body: data.sectorClinicBreakdown.slice(0, 7).map((sc) => [
-      sc.setor.replace(' - HGD', ''),
-      sc.clinica,
-      `${sc.totalCount} (${sc.pctOfGlobal}%)`,
-      `${sc.directDischargePct}%`,
-      `${sc.admissionsCount} (${sc.conversionRate}%)`,
-      `${sc.doorToDocStats.mean}m`,
-      `${sc.losStats.mean}m`,
+    startY: 105.5,
+    marginLeft: 149,
+    tableWidth: 138,
+    colWidths: [36, 20, 15, 15, 24, 28],
+    head: ['Faixa Etária (Perfil Geriátrico)', 'Volume (%PS)', '% Lab', '% TC', 'Intern. (N / %)', 'LOS Méd / Mediano'],
+    body: vsm.ageBrackets.map((ag) => [
+      ag.bracketLabel,
+      `${ag.count} (${ag.pctOfTotal}%)`,
+      `${ag.labRate}%`,
+      `${ag.tcRate}%`,
+      `${ag.admittedCount} (${ag.admissionRate}%)`,
+      `${ag.losStats.mean}m / Med ${ag.losStats.median}m`,
     ]),
     headFillColor: [13, 148, 136],
-    fontSize: 6.1,
-    rowHeight: 5.0,
+    fontSize: 5.9,
+    rowHeight: 4.6,
   });
-}
-// ============================================================================
+}// ============================================================================
 // MÓDULOS DE PÁGINAS INDIVIDUAIS DO PDF VETORIAL (MÓDULOS 6 A 9)
 // ============================================================================
 
@@ -1176,99 +1239,110 @@ function renderPageMod6Boarding(
 
   drawHeaderBanner(
     doc,
-    'RAIO-X DO BOARDING HOSPITALAR: ENFERMARIA (UI) vs. UTI E PERFIL CIRÚRGICO vs. CLÍNICO',
-    `Escopo: ${data.activeScopeLabel}  •  Total: ${data.totalAdmissions} Internações (${vsm.wastedBedHoursInBoarding}h retidas = ${vsm.equivalentBlockedBeds24h} macas do PS bloqueadas 24h/dia)`,
+    'RAIO-X DO BOARDING HOSPITALAR: FECHAMENTO EXATO (T1 + T2 = TOTAL FÍSICO) & UI vs. UTI / CIRÚRGICO',
+    `Escopo: ${data.activeScopeLabel}  •  Total: ${data.totalAdmissions} Internações (${data.uiAdmissions} UI + ${data.utiAdmissions} UTI + ${data.otherBedAdmissions} Out/Esp = 100% | ${vsm.wastedBedHoursInBoarding}h = ${vsm.equivalentBlockedBeds24h} macas 24h/d)`,
     data.periodLabel,
     pageNum,
     totalPages
   );
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7.8);
+  doc.setFontSize(7.5);
   doc.setTextColor(15, 23, 42);
   doc.text(
-    '1. COMPARATIVO ESTRATÉGICO DE GARGALOS DE BOARDING: DESTINO (UI vs. UTI) E ESPECIALIDADE (CIRÚRGICO vs. CLÍNICO NÃO CIRÚRGICO)',
+    '1. FECHAMENTO MATEMÁTICO DO BOARDING: SUBIDA FÍSICA (ETAPA 1 + ETAPA 2 = TOTAL FÍSICO) vs. LEITO DE ESPERA VIRTUAL',
     10,
-    22.5
+    22.2
   );
 
-  const profiles = [bbt.global, bbt.ui, bbt.uti, bbt.surgical, bbt.clinical];
+  const profiles = [
+    bbt.global,
+    bbt.ui,
+    bbt.uti,
+    ...(bbt.otherBed.admittedCount > 0 ? [bbt.otherBed] : []),
+    bbt.surgical,
+    bbt.clinical,
+  ];
 
   drawVectorTable(doc, {
-    startY: 24,
+    startY: 23.5,
     marginLeft: 10,
     tableWidth: 277,
-    colWidths: [52, 22, 24, 48, 48, 53, 30],
+    colWidths: [48, 20, 26, 42, 42, 46, 28, 25],
     leftAlignCols: [0],
     head: [
       'Recorte / Perfil de Internação',
-      'Intern. (N / %)',
-      'UI / UTI (Cir.)',
-      'Etapa 1: Aprovação Plano / Leito Virtual',
-      'Etapa 2: Leito Virtual -> Subida Física',
-      'BOARDING TOTAL (Aguardo -> Unidade Física)',
-      'Macas Bloqueadas 24h',
+      'Intern. (N/%)',
+      'Físico vs Espera',
+      'Etapa 1 Geral (Plano/Virtual)',
+      'Etapa 2 (Virtual -> Subida Física)',
+      'TOTAL FÍSICO (= T1 Fís + T2 Fís)',
+      'TOTAL GERAL (Todos)',
+      'Macas Bloq. 24h',
     ],
     body: profiles.map((p) => [
       p.label,
       `${p.admittedCount} (${p.pctOfAdmissions}%)`,
-      `${p.uiCount}UI/${p.utiCount}UTI (${p.surgicalCount}C)`,
-      `${fmtStatShort(p.t1AguardoToVirtualStats)} [P90:${p.t1AguardoToVirtualStats.p90}m]`,
-      `${fmtStatShort(p.t2VirtualToPhysicalStats)} [P90:${p.t2VirtualToPhysicalStats.p90}m]`,
-      `${fmtStatShort(p.totalBoardingStats)} [${p.totalBoardingStats.min.toFixed(0)}–${p.totalBoardingStats.max.toFixed(0)}m]`,
-      `${p.equivalentBlockedBeds24h} macas (${p.wastedBedHours}h)`,
+      `${p.physicalConfirmedCount} Fís / ${p.virtualWaitOnlyCount} Esp`,
+      fmtStatShort(p.t1AguardoToVirtualStats),
+      p.physicalConfirmedCount > 0 ? fmtStatShort(p.t2VirtualToPhysicalStats) : '— (S/ Subida)',
+      p.physicalConfirmedCount > 0
+        ? `${p.t1PhysicalCohortStats.mean}m+${p.t2VirtualToPhysicalStats.mean}m = ${p.physicalTotalBoardingStats.mean}m (Med ${p.physicalTotalBoardingStats.median}m)`
+        : '—',
+      `${p.totalBoardingStats.mean}m (Med ${p.totalBoardingStats.median}m)`,
+      `${p.equivalentBlockedBeds24h} (${p.wastedBedHours}h)`,
     ]),
     headFillColor: [190, 18, 60],
     alternateRowFillColor: [255, 241, 242],
-    fontSize: 6.2,
-    rowHeight: 5.4,
-    boldCols: [0, 5, 6],
+    fontSize: 5.9,
+    rowHeight: 4.8,
+    boldCols: [0, 5, 6, 7],
   });
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7.8);
+  doc.setFontSize(7.5);
   doc.setTextColor(15, 23, 42);
   doc.text(
-    '2. RANKING DE BOARDING POR OPERADORA DE SAÚDE (COM ABERTURA INTERNA: ENFERMARIA UI vs. UTI E CIRÚRGICO vs. CLÍNICO)',
+    '2. RANKING DE BOARDING POR OPERADORA DE SAÚDE (COM FECHAMENTO INTERNO: ENFERMARIA UI vs. UTI FÍSICO/GERAL E CIRÚRGICO vs. CLÍNICO)',
     10,
-    60.5
+    62.5
   );
 
   drawVectorTable(doc, {
-    startY: 62,
+    startY: 64,
     marginLeft: 10,
     tableWidth: 277,
-    colWidths: [36, 20, 22, 38, 38, 45, 44, 34],
+    colWidths: [34, 18, 24, 34, 34, 48, 51, 34],
     leftAlignCols: [0],
     head: [
       'Operadora / Convênio',
       'Intern. (N/%)',
-      'UI/UTI (Cir)',
-      'Etapa 1 Geral (Plano/Virtual)',
-      'Etapa 2 Geral (Subida Física)',
-      'Boarding ENFERMARIA (UI): T1 | T2 | Total',
-      'Boarding UTI: T1 | T2 | Total',
-      'Cirúrgico vs. Clínico (Tot)',
+      'UI / UTI (Fís/Esp)',
+      'Etapa 1 Geral (Virtual)',
+      'Etapa 2 Geral (Físico)',
+      'ENFERMARIA (UI): T1 + T2 = Total UI (Med)',
+      'UTI: T1 | T2 | Total Físico vs. Geral (Med)',
+      'Cirúrgico vs. Clínico',
     ],
     body: vsm.boardingByConvenio.slice(0, 18).map((c) => [
       c.convenio,
       `${c.admittedCount} (${c.pctOfAdmissions}%)`,
-      `${c.uiCount}UI/${c.utiCount}UTI (${c.ccCount}C)`,
+      `${c.uiCount}UI/${c.utiCount}UTI (${c.physicalConfirmedCount}F/${c.virtualWaitOnlyCount}E)`,
       fmtStatShort(c.t1VirtualApprovalStats),
       fmtStatShort(c.t2PhysicalUploadStats),
       c.uiCount > 0
-        ? `T1:${c.uiT1VirtualStats.mean}m | T2:${c.uiT2PhysicalStats.mean}m | Tot:${c.uiTotalBoardingStats.mean}m (Med ${c.uiTotalBoardingStats.median}m)`
+        ? `${c.uiT1VirtualStats.mean}m + ${c.uiT2PhysicalStats.mean}m = ${c.uiTotalBoardingStats.mean}m (Med ${c.uiTotalBoardingStats.median}m)`
         : '—',
       c.utiCount > 0
-        ? `T1:${c.utiT1VirtualStats.mean}m | T2:${c.utiT2PhysicalStats.mean}m | Tot:${c.utiTotalBoardingStats.mean}m (Med ${c.utiTotalBoardingStats.median}m)`
+        ? `T1:${c.utiT1VirtualStats.mean}m | T2:${c.utiT2PhysicalStats.mean}m | Fís:${c.utiPhysicalTotalStats.mean}m | Ger:${c.utiTotalBoardingStats.mean}m (Med ${c.utiTotalBoardingStats.median}m)`
         : '—',
       `Cir:${c.surgicalTotalBoardingStats.count > 0 ? `${c.surgicalTotalBoardingStats.mean}m` : '—'} | Clín:${
         c.clinicalTotalBoardingStats.count > 0 ? `${c.clinicalTotalBoardingStats.mean}m` : '—'
       }`,
     ]),
     headFillColor: [15, 23, 42],
-    fontSize: 6.0,
-    rowHeight: 5.2,
+    fontSize: 5.8,
+    rowHeight: 5.0,
     boldCols: [0],
   });
 }
@@ -1283,27 +1357,28 @@ function renderPageMod7Doctors(
   drawHeaderBanner(
     doc,
     'GOVERNANÇA DE EQUIPE: MATRIZ DUPLA DE CONDUTAS MÉDICAS (1º ATENDIMENTO vs. FECHAMENTO)',
-    `Escopo: ${data.activeScopeLabel}  •  Alocação por Perfil: Gatekeeper (Alta Direta Porta), Fast Reav (Só Med), Investigação (Lab/TC) e Closer (Handoff)`,
+    `Escopo: ${data.activeScopeLabel}  •  Baseado em [Medico Anamnese] vs. [Médico Último Atend] (Exclui Coordenador Padrão em Fichas s/ Consulta)`,
     data.periodLabel,
     pageNum,
     totalPages
   );
 
   drawVectorTable(doc, {
-    startY: 22,
+    startY: 21.5,
     marginLeft: 10,
     tableWidth: 277,
-    colWidths: [46, 23, 18, 18, 16, 15, 15, 15, 16, 19, 21, 33, 22],
+    colWidths: [43, 21, 17, 17, 14, 14, 13, 14, 16, 15, 18, 20, 33, 22],
     leftAlignCols: [0],
     head: [
-      'Profissional Médico (Top 24 Volume)',
+      'Profissional Médico (Top 24)',
       '1º Atend (D/N)',
       '% Alta 1ºAt',
-      '% Só Med (Fast)',
-      '% Med Tot',
+      '% Alta SóMed',
+      '% Med',
       '% Lab',
       '% RX',
       '% TC',
+      'Rec/Atest',
       '% Intern.',
       'LOS Méd/Med',
       'Últ. Atend',
@@ -1319,16 +1394,17 @@ function renderPageMod7Doctors(
       `${d.labOrderedPct}%`,
       `${d.rxOrderedPct}%`,
       `${d.tcOrderedPct}%`,
+      `${d.receitaPct.toFixed(0)}%/${d.atestadoPct.toFixed(0)}%`,
       `${d.convertedToAdmissionPct}%`,
-      `${d.firstAttendMeanLosMin}m / ${d.firstAttendMedianLosMin}m`,
+      `${d.firstAttendMeanLosMin}m/${d.firstAttendMedianLosMin}m`,
       `${d.lastAttendCount}`,
       `${d.closedHandoffPatientsCount} (${d.handoffAbsorptionPct}%)`,
       d.netReavalBalance > 0 ? `+${d.netReavalBalance}` : `${d.netReavalBalance}`,
     ]),
     headFillColor: [15, 23, 42],
-    fontSize: 6.1,
+    fontSize: 5.9,
     rowHeight: 5.5,
-    boldCols: [0, 2, 12],
+    boldCols: [0, 2, 13],
   });
 }
 
@@ -1345,33 +1421,34 @@ function renderPageMod8GovernanceAndCids(
 
   drawHeaderBanner(
     doc,
-    'MATRIZ CID x ROTA DE THROUGHPUT, GOVERNANÇA DIAGNÓSTICA (CHAA 3704) & PASSAGEM DE PLANTÃO',
-    `Escopo: ${data.activeScopeLabel}  •  Auditoria de Pertinência Propedêutica por Diagnóstico, Mudança de CID na Internação e Retorno Precoce`,
+    'MATRIZ CID x ROTA (100% FECHADA), GOVERNANÇA DIAGNÓSTICA (CHAA 3704) & PASSAGEM DE PLANTÃO',
+    `Escopo: ${data.activeScopeLabel}  •  Partição Horizontal Exata por Diagnóstico (Rota 1 + Rota 2 + Rota 3 + Rota 4 + Outros = 100%)`,
     data.periodLabel,
     pageNum,
     totalPages
   );
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7.8);
+  doc.setFontSize(7.6);
   doc.setTextColor(15, 23, 42);
-  doc.text('1. MATRIZ CID x ROTA DE THROUGHPUT (COMO OS PRINCIPAIS DIAGNÓSTICOS SE DIVIDEM NAS 4 ROTAS DO PS)', 10, 22.5);
+  doc.text('1. MATRIZ CID x ROTA DE THROUGHPUT (PARTIÇÃO 100% FECHADA HORIZONTALMENTE PARA OS TOP 14 DIAGNÓSTICOS)', 10, 22.2);
 
   drawVectorTable(doc, {
-    startY: 24,
+    startY: 23.8,
     marginLeft: 10,
     tableWidth: 277,
-    colWidths: [64, 46, 22, 31, 31, 31, 24, 28],
+    colWidths: [58, 42, 21, 28, 28, 28, 22, 24, 26],
     leftAlignCols: [0, 1],
     head: [
       'Diagnóstico Principal (Top 14 CIDs)',
       'Cluster Sindrômico',
       'Volume (%PS)',
-      'Rota 1: Alta Direta 1ºAt',
-      'Rota 2: Fast Reav Só Med',
-      'Rota 3: Giro Exames c/ Alta',
-      'Rota 4: Internação',
-      'LOS Médio / Mediano',
+      'Rota 1: Alta 1ºAt',
+      'Rota 2: Alta SóMed',
+      'Rota 3: Alta Exames',
+      'Rota 4: Intern.',
+      'Rota 5: Ev/Pend',
+      'LOS Méd / Mediano',
     ],
     body: vsm.cidThroughputMatrix.slice(0, 14).map((r) => [
       r.cid,
@@ -1381,14 +1458,14 @@ function renderPageMod8GovernanceAndCids(
       `${r.fastReavMedCount} (${r.fastReavMedPct}%)`,
       `${r.diagnosticGiroCount} (${r.diagnosticGiroPct}%)`,
       `${r.admittedCount} (${r.admittedPct}%)`,
-      `${r.meanLos}m / Med ${r.medianLos}m`,
+      `${r.otherOutcomesCount} (${r.otherOutcomesPct}%)`,
+      r.meanLos > 0 ? `${r.meanLos}m / Med ${r.medianLos}m` : 'Ficha Adm',
     ]),
     headFillColor: [30, 58, 138],
-    fontSize: 6.1,
+    fontSize: 5.9,
     rowHeight: 4.8,
   });
 
-  // Tabelas inferiores: Pares de Reclassificação CHAA 3704 (esquerda) e Indicadores de Governança/Passagem de Plantão (direita)
   drawVectorTable(doc, {
     startY: 102,
     marginLeft: 10,
@@ -1406,7 +1483,7 @@ function renderPageMod8GovernanceAndCids(
           ])
         : [['CHAA 3704 não anexado nesta sessão', 'Anexe o CHAA 3704 para auditar pares de CID', '—', '—']],
     headFillColor: [15, 23, 42],
-    fontSize: 6.0,
+    fontSize: 5.9,
     rowHeight: 4.9,
   });
 
@@ -1424,13 +1501,13 @@ function renderPageMod8GovernanceAndCids(
       ['   • Refinamento Fisiopatológico (Mesmo Capítulo CID)', `${dg.sameChapterRefinementCount} (${dg.sameChapterRefinementPct}%)`],
       ['   • Mudança de Sistema / Capítulo Clínico', `${dg.crossChapterDiscordanceCount} (${dg.crossChapterDiscordancePct}%)`],
       ['Retenção na Passagem de Plantão (Laudo pronto pré-07h ou pré-19h)', `${scb.totalShiftChangeRetainedCount} pac. (${scb.pctOfAllPostLaudoPatients}% dos pós-laudo)`],
-      ['   • Janela Manhã (04h30–06h59 -> pós 07h) vs. Noite (16h30–18h59 -> pós 19h)', `Manhã: ${scb.morningWindowReadyBefore7hCount} (Méd ${scb.morningWindowExtraWaitStats.mean}m) | Noite: ${scb.eveningWindowReadyBefore19hCount} (${scb.eveningWindowExtraWaitStats.mean}m)`],
+      ['   • Manhã (04h30–06h59 -> pós 07h) vs. Noite (16h30–18h59 -> pós 19h)', `Manhã: ${scb.morningWindowReadyBefore7hCount} (${scb.morningWindowExtraWaitStats.mean}m) | Noite: ${scb.eveningWindowReadyBefore19hCount} (${scb.eveningWindowExtraWaitStats.mean}m)`],
       ['Retorno Precoce <= 48h e Taxa de Internação no Retorno', `${rv.return48hCount} (${rv.return48hPct}%) -> ${rv.return48hAdmittedCount} int. (${rv.return48hAdmissionRate}%)`],
       ['Retorno Precoce <= 72h e Taxa de Internação no Retorno', `${rv.return72hCount} (${rv.return72hPct}%) -> ${rv.return72hAdmittedCount} int. (${rv.return72hAdmissionRate}%)`],
     ],
     headFillColor: [13, 148, 136],
     alternateRowFillColor: [240, 253, 250],
-    fontSize: 6.0,
+    fontSize: 5.9,
     rowHeight: 5.1,
   });
 }
@@ -1443,10 +1520,11 @@ function renderPageMod9Methodology(
   data?: EmergencyAnalyticsData
 ) {
   const dq = data?.vsm.dataQualityAudit;
+  const mb = data?.vsm.monthlyOverall.massBalance;
 
   drawHeaderBanner(
     doc,
-    'ANEXO TÉCNICO — METODOLOGIA ANALÍTICA, RASTREABILIDADE DE FÓRMULAS E AUDITORIA DA BASE',
+    'ANEXO TÉCNICO — EQUAÇÃO DE CONSERVAÇÃO DE MASSA, METODOLOGIA E AUDITORIA DA BASE',
     'Memorial de Cálculo Determinístico (CATE 3333 + CATE 3493 + CHAA 3704), Reconstrução de Timestamps e Conformidade LGPD Stateless',
     periodLabel,
     pageNum,
@@ -1454,75 +1532,79 @@ function renderPageMod9Methodology(
   );
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7.5);
+  doc.setFontSize(7.4);
   doc.setTextColor(15, 23, 42);
   doc.text(
-    '1. AUDITORIA DE COMPLETUDE DA BASE BRUTA (TASY) E SANEAMENTO ESTATÍSTICO NESTA COMPETÊNCIA',
+    '1. PROVA REAL DE CONSERVAÇÃO DE MASSA, COMPLETUDE DO PRONTUÁRIO (TASY) E SANEAMENTO ESTATÍSTICO',
     10,
-    22.5
+    22.0
   );
 
-  drawVectorTable(doc, {
-    startY: 24,
+  const nextY = drawVectorTable(doc, {
+    startY: 23.5,
     marginLeft: 10,
     tableWidth: 277,
-    colWidths: [64, 45, 168],
+    colWidths: [58, 46, 173],
     leftAlignCols: [0, 1, 2],
+    multiline: true,
     head: [
       'Variável / Regra de Integridade Auditada',
       'Status Auditado na Base',
-      'Regra Matemática Aplicada e Garantia de Transparência Executiva',
+      'Regra Matemática Aplicada e Garantia de Transparência Executiva (Texto Integral s/ Cortes)',
     ],
     body: [
       [
-        'População Filtrada vs. Base Global Bruta',
-        data ? `N = ${data.totalAttendances} de ${data.totalGlobalAttendances}` : 'Consolidado Multimensal',
-        data
-          ? `Escopo ativo: ${data.activeScopeLabel}. Deduplicação automática 1:1 pelo ID único [Atendimento] ao mesclar arquivos segmentados.`
-          : 'Fusão determinística 1:1 por Atendimento sem duplicação de fichas.',
+        'Equação de Conservação de Massa (100% Fechada)',
+        mb ? `Porta: ${mb.totalFichasPorta} === Soma: ${mb.auditSumCheck}` : '100% Fechado',
+        mb
+          ? `Soma Exata: (1) Evasão Pré: ${mb.b1PreMedEvasionCount} + (2) Alta 1ºAt: ${mb.b2DirectDischarge1stAttendCount} + (3) Alta Só Med: ${mb.b3DischargeAfterMedOnlyCount} + (4) Alta Exames: ${mb.b4DischargeAfterExamsCount} + (5) Internados: ${mb.b5AdmittedTotalCount} + (6) Evasão Pós: ${mb.b6OtherPostAttendEvasionsCount} + (7) Especiais/Corte: ${mb.b7TotalInconsistenciesAndSpecialCount} [7A. Ficha Adm s/ Consulta: ${mb.b7aAdminNoConsultCount} | 7B. Sem Desfecho no Corte: ${mb.b7bPendingNoOutcomeAtCutoffCount} | 7C. Transf/Óbito: ${mb.b7cTransferOrDeathCount}].`
+          : 'Partição estritamente disjunta e exaustiva de todas as fichas abertas na porta.',
       ],
       [
-        'Completude Porta-Médico e 1ª Consulta',
-        dq ? `Porta: ${dq.doorToDocCompletenessPct}% | Cons: ${dq.consultTimeCompletenessPct}%` : 'Auditado 100%',
-        'Extrai [Esp. Totem x Médico] (fallback para [Tempo Esp. Atend. Ficha x Médico]) e [Atend. Médico].',
+        'Distinção [Medico Anamnese] vs [Médico 1º Atend]',
+        mb ? `${mb.b7aAdminNoConsultCount} fichas adm. isoladas` : 'Isolamento Ativo',
+        'No Tasy, [Médico 1º Atend] grava o Coordenador do Setor na abertura da ficha, enquanto [Medico Anamnese] grava o plantonista que examinou o paciente. Fichas administrativas sem consulta médica e com LOS=0 (ex: EXAME MEDICO GERAL) são isoladas em 7A.',
+      ],
+      [
+        'Fechamento Aditivo do Boarding (Físico vs Espera)',
+        data
+          ? `${data.vsm.boardingByBedType.global.physicalConfirmedCount} Fís. | ${data.vsm.boardingByBedType.global.virtualWaitOnlyCount} Espera`
+          : 'Coortes Separadas',
+        'Na coorte com subida física para UI/UTI, Média(T1) + Média(T2) === Média(Boarding Total Físico). Nos pacientes alocados em "Leito de Espera UTI Adulto" no CATE 3493, o Tasy encerra o tempo na criação do leito virtual (T2 = 0). Separar as coortes elimina a distorção onde T1 + T2 parecia maior que o Total.',
       ],
       [
         'Blindagem contra Falso Zero em "Espera Laudo"',
         dq ? `${dq.labReportNativeColPct}% nativo | ${dq.labReportReconstructedFromTsCount} reconstr.` : 'Reconstrução Ativa',
-        'Quando [Espera Laudo Laboratório] vem vazia no CATE 3333, calcula [Dt Laudo Lab] - ([Entrada] + [Porta-Médico] + [1ª Consulta] + [Espera Coleta]).',
+        'Quando a coluna [Espera Laudo Laboratório] vem vazia no CATE 3333, o motor calcula [Dt Laudo Lab] - ([Entrada] + [Porta-Médico] + [1ª Consulta] + [Espera Coleta]), refletindo o tempo real de processamento diagnóstico.',
       ],
       [
-        'Expurgo de Negativos e Teto de Outliers (Capping)',
-        dq ? `${dq.negativeTimesPurgedCount} neg. | ${dq.cappedOutliersCount} capped` : 'Saneamento Ativo',
-        'Tempos < 0 min (baixas retroativas) ou > teto operacional (fichas esquecidas abertas) são anulados apenas na micro-etapa, mantendo o volume total.',
-      ],
-      [
-        'Cruzamento Determinístico 3493 & 3704 e LGPD',
-        dq ? `3493: ${dq.cate3493MatchRateOnAdmissionsPct}% | 3704: ${dq.chaa3704MatchRateOnAdmissionsPct}%` : 'Stateless RAM',
-        'Left Join exato por [Nr atendimento]. Nomes, endereços, e-mails e datas de nascimento são descartados imediatamente na leitura em RAM.',
+        'Expurgo de Negativos, Capping e LGPD Stateless',
+        dq ? `${dq.negativeTimesPurgedCount} neg. | ${dq.cappedOutliersCount} capped` : 'Stateless RAM',
+        'Tempos < 0 min ou > teto operacional são anulados apenas na micro-etapa sem excluir o paciente do volume global. Nomes, endereços, e-mails e datas de nascimento são descartados imediatamente na leitura em RAM.',
       ],
     ],
     headFillColor: [15, 23, 42],
-    fontSize: 6.0,
-    rowHeight: 4.8,
-    headHeight: 5.2,
+    fontSize: 5.8,
+    rowHeight: 5.2,
+    headHeight: 5.0,
   });
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7.5);
+  doc.setFontSize(7.4);
   doc.setTextColor(15, 23, 42);
   doc.text(
     '2. DICIONÁRIO DE FÓRMULAS MATEMÁTICAS E MÁQUINA DE ESTADOS DO CENSO E VSM LEAN HEALTHCARE',
     10,
-    57.5
+    nextY + 4.2
   );
 
   drawVectorTable(doc, {
-    startY: 59,
+    startY: nextY + 5.6,
     marginLeft: 10,
     tableWidth: 277,
-    colWidths: [50, 92, 52, 83],
+    colWidths: [48, 92, 52, 85],
     leftAlignCols: [0, 1, 2, 3],
+    multiline: true,
     head: [
       'Indicador / Nó do VSM',
       'Fórmula Matemática / Regra Lógica Exata',
@@ -1532,45 +1614,33 @@ function renderPageMod9Methodology(
     body: [
       [
         'Ciclo Operacional 07h -> 06h59 D+1',
-        'Se Hora(Entrada) < 07h00, pertence à Data Operacional do plantão iniciado às 07h de D-1',
+        'Se Hora(Entrada) < 07h00, pertence à Data Operacional do plantão iniciado às 07h00 de D-1.',
         'Coluna [Entrada] (CATE 3333)',
         'Garante que a madrugada (00h–06h) seja contabilizada na mesma linha do plantão noturno que a iniciou.',
       ],
       [
         'Censo Simultâneo (Sonda :30)',
-        'Sonda em t=DiaOp+Hora+30m. Ramo A fica 100% em Porta até sair; B1 vai p/ FastReav; B2 p/ Exames; Int p/ Boarding',
+        'Sonda em t=DiaOp+Hora+30m. Ramo A fica 100% em Porta até sair; B1 vai p/ FastReav; B2 p/ Exames; Int p/ Boarding.',
         'Timestamps Entrada, Consulta, Desfecho e Unid',
         'Elimina vazamento de Alta Direta p/ Exames e mede Média, ±DP, Mediana e [Mín–Máx] nas 4 frentes.',
       ],
       [
-        'Ramo A vs. B1 (Fast) vs. B2 (Exames)',
-        'Ramo A: S/ Med e S/ Exames | B1: HasMed=True & S/ Lab/Img | B2: HasLab/RX/TC/USG=True',
-        'Colunas de Medicação, Lab, RX, TC e USG',
-        'Separa quem sai direto do consultório de quem precisa apenas de medicação rápida ou de laudos.',
-      ],
-      [
         'Fila Pós-Laudo e Passagem Plantão',
-        'Pós-Laudo = [Data Desfecho] - Max([Dt Laudo Lab/TC/USG]). Passagem = Laudo pronto pré-07h/19h c/ Handoff',
+        'Pós-Laudo = [Data Desfecho] - Max([Dt Laudo Lab/TC/USG]). Passagem = Laudo pronto pré-07h ou pré-19h c/ Handoff.',
         '[Data Desfecho], [Dt Laudo Lab/TC/Usg]',
         'Quantifica o tempo ocioso após laudo pronto e quantos casos prontos são empurrados na troca de turno.',
       ],
       [
-        'Boarding UI vs. UTI e Cirúrgico',
-        'T1 (Plano)=[Dt ent aguard->Data Internação] | T2 (Físico)=[Data Internação->Dt ent unid] | Cirúrgico=(Cc="S" ou Cir/Orto)',
-        'CATE 3333 + CATE 3493 ([Ds setor unid], [Cc])',
-        'Isola o gargalo de Enfermaria (UI) vs. UTI e o impacto dos pacientes cirúrgicos nas macas bloqueadas.',
-      ],
-      [
-        'Eficiência Lean (PCE Global e Rotas)',
-        'PCE = VA / (VA + NVA) * 100, calculado p/ o Giro Global e isoladamente p/ Ramo A, Ramo B1 e Ramo B2',
-        'Tempos de cuidado ativo (VA) vs. filas/laudos (NVA)',
-        'Demonstra o percentual de tempo em cuidado assistencial efetivo frente às esperas sistêmicas.',
+        'Macas Físicas Bloqueadas 24h/dia',
+        'Macas_Bloqueadas = Soma(Minutos_Boarding / 60) / (Dias_Período * 24), calculado p/ UI, UTI, Cirúrgico e Clínico.',
+        '[Dif aguardando/Ent. Unid] e [Espera Internação]',
+        'Traduz as horas-maca perdidas em número exato de macas físicas da emergência sequestradas 24h/dia.',
       ],
     ],
     headFillColor: [30, 58, 138],
-    fontSize: 6.0,
-    rowHeight: 5.0,
-    headHeight: 5.2,
+    fontSize: 5.8,
+    rowHeight: 5.2,
+    headHeight: 5.0,
   });
 }
 
@@ -1684,7 +1754,6 @@ function drawCanvasTable(
   const ratioSum = colRatios.reduce((a, b) => a + b, 0);
   const colWidths = colRatios.map((r) => (r / ratioSum) * tableW);
 
-  // Header
   ctx.fillStyle = headBg;
   ctx.fillRect(startX, startY, tableW, rowH + 6);
 
@@ -1727,6 +1796,7 @@ export function generateSinglePngBoard(
 ): void {
   if (typeof document === 'undefined') return;
   const s = customSlice || data.vsm.monthlyOverall;
+  const mb = s.massBalance;
   const vsm = data.vsm;
   const bbt = vsm.boardingByBedType;
 
@@ -1741,8 +1811,8 @@ export function generateSinglePngBoard(
   if (boardKey === 'png_vsm_flow') {
     drawCanvasHeader(
       ctx,
-      'MAPA DA JORNADA DO PACIENTE & VALUE STREAM MAPPING (VSM - LEAN HEALTHCARE)',
-      `Competência: ${data.periodLabel}  •  Escopo: ${data.activeScopeLabel}  •  Recorte: ${s.label} (N = ${s.totalInput})`
+      'MAPA DA JORNADA DO PACIENTE & VSM LEAN (EQUAÇÃO DE MASSA 100% FECHADA)',
+      `Competência: ${data.periodLabel}  •  Escopo: ${data.activeScopeLabel}  •  Porta (${mb.totalFichasPorta}) = Soma Exata dos Desfechos (${mb.auditSumCheck})`
     );
 
     const drawBox = (
@@ -1767,81 +1837,53 @@ export function generateSinglePngBoard(
 
       ctx.fillStyle = hdrColor;
       ctx.beginPath();
-      ctx.roundRect(x, y, w, 48, [14, 14, 0, 0]);
+      ctx.roundRect(x, y, w, 46, [14, 14, 0, 0]);
       ctx.fill();
 
       ctx.fillStyle = '#ffffff';
-      ctx.font = 'bold 20px Inter, Segoe UI, Arial, sans-serif';
+      ctx.font = 'bold 19px Inter, Segoe UI, Arial, sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(title, x + w / 2, y + 31);
+      ctx.fillText(title, x + w / 2, y + 30);
 
       lines.forEach((ln, idx) => {
-        ctx.font = idx === 0 ? 'bold 22px Inter, Segoe UI, Arial, sans-serif' : '18px Inter, Segoe UI, Arial, sans-serif';
+        ctx.font = idx === 0 ? 'bold 21px Inter, Segoe UI, Arial, sans-serif' : '18px Inter, Segoe UI, Arial, sans-serif';
         ctx.fillStyle = idx === 0 ? '#0f172a' : '#334155';
-        ctx.fillText(ln, x + w / 2, y + 82 + idx * 33);
+        ctx.fillText(ln, x + w / 2, y + 80 + idx * 32);
       });
 
       if (footer) {
         ctx.font = 'bold 18px Inter, Segoe UI, Arial, sans-serif';
         ctx.fillStyle = hdrColor;
-        ctx.fillText(footer, x + w / 2, y + h - 18);
+        ctx.fillText(footer, x + w / 2, y + h - 16);
       }
       ctx.textAlign = 'left';
     };
 
-    const drawArrowCanvas = (x1: number, y1: number, x2: number, y2: number, label: string, color: string) => {
-      ctx.strokeStyle = color;
-      ctx.fillStyle = color;
-      ctx.lineWidth = 4;
-      ctx.beginPath();
-      ctx.moveTo(x1, y1);
-      ctx.lineTo(x2, y2);
-      ctx.stroke();
-
-      const angle = Math.atan2(y2 - y1, x2 - x1);
-      const head = 16;
-      ctx.beginPath();
-      ctx.moveTo(x2, y2);
-      ctx.lineTo(x2 - head * Math.cos(angle - Math.PI / 6), y2 - head * Math.sin(angle - Math.PI / 6));
-      ctx.lineTo(x2 - head * Math.cos(angle + Math.PI / 6), y2 - head * Math.sin(angle + Math.PI / 6));
-      ctx.closePath();
-      ctx.fill();
-
-      if (label) {
-        ctx.font = 'bold 18px Inter, Segoe UI, Arial, sans-serif';
-        ctx.textAlign = 'center';
-        ctx.fillText(label, (x1 + x2) / 2, (y1 + y2) / 2 - 12);
-        ctx.textAlign = 'left';
-      }
-    };
-
     drawBox(
       40,
-      270,
+      260,
       380,
       240,
       '1. INPUT: TOTEM & RECEPÇÃO',
       [
-        `N = ${s.totalInput} (100% Porta)`,
+        `N = ${mb.totalFichasPorta} (100% Porta)`,
         `Fila Totem->Guichê: Méd ${s.waitTotemToRecepStats.mean}m (Med ${s.waitTotemToRecepStats.median}m)`,
         `Cadastro Ficha: Méd ${s.recepRegistrationStats.mean}m (Med ${s.recepRegistrationStats.median}m)`,
       ],
-      `Evasão Pré-Médica: ${s.preMedEvasionCount} (${s.preMedEvasionPct}%)`,
+      `Evasão Pré: ${mb.b1PreMedEvasionCount} | Ficha Adm: ${mb.b7aAdminNoConsultCount}`,
       '#0f172a',
       '#ffffff',
       '#64748b'
     );
 
-    drawArrowCanvas(425, 390, 515, 390, `Fila: ${s.waitRecepToDocStats.mean}m`, '#dc2626');
-
     drawBox(
       520,
-      270,
+      260,
       410,
       240,
       '2. 1º ATENDIMENTO (GATEKEEPER)',
       [
-        `N = ${s.attendedByDoctorCount} (${s.attendedByDoctorPct}% Atendidos)`,
+        `N = ${s.attendedByDoctorCount} (${s.attendedByDoctorPct}% Avaliados)`,
         `Porta-Médico: Méd ${s.doorToDocTotalStats.mean}m | P90 ${s.doorToDocTotalStats.p90}m`,
         `1ª Consulta: Méd ${s.firstConsultDurationStats.mean}m (Med ${s.firstConsultDurationStats.median}m)`,
       ],
@@ -1851,18 +1893,14 @@ export function generateSinglePngBoard(
       '#3b82f6'
     );
 
-    drawArrowCanvas(935, 330, 1055, 235, `${s.directDischargePct}% Alta 1ºAt`, '#16a34a');
-    drawArrowCanvas(935, 390, 1055, 470, `${s.fastReavMedOnlyPct}% Só Med`, '#d97706');
-    drawArrowCanvas(935, 450, 1055, 735, `${s.diagnosticExamsLoopPct}% Exames`, '#b45309');
-
     drawBox(
-      1060,
+      1050,
       140,
-      580,
+      590,
       205,
-      'RAMO A: ALTA DIRETA NO 1º ATENDIMENTO (SINGLE-TOUCH)',
+      '2. ALTA DIRETA APÓS 1º ATENDIMENTO (RAMO A)',
       [
-        `N = ${s.directDischargeCount} (${s.directDischargePct}% do PS) — Sem Exames/Med`,
+        `N = ${mb.b2DirectDischarge1stAttendCount} (${mb.b2DirectDischarge1stAttendPct}% da Porta) — Sem Med/Exames`,
         `Permanência Total: Méd ${s.directDischargeLosStats.mean}m (±${s.directDischargeLosStats.stdDev}m)`,
         `Mediana: ${s.directDischargeLosStats.median}m | P90: ${s.directDischargeLosStats.p90}m`,
       ],
@@ -1873,15 +1911,15 @@ export function generateSinglePngBoard(
     );
 
     drawBox(
-      1060,
+      1050,
       370,
-      580,
+      590,
       215,
-      'RAMO B1: FAST REAV / GIRO TERAPÊUTICO (SÓ MEDICAÇÃO)',
+      '3. GIRO SÓ MEDICAÇÃO / FAST REAV (RAMO B1)',
       [
-        `N = ${s.fastReavMedOnlyCount} (${s.fastReavMedOnlyPct}% do PS) — Sem Lab/Imagem`,
+        `Entram: ${s.fastReavMedOnlyCount} (${s.fastReavMedOnlyPct}%) -> Alta Só Med: ${mb.b3DischargeAfterMedOnlyCount} (${mb.b3DischargeAfterMedOnlyPct}%)`,
         `Espera Início Med: ${s.waitMedStartStats.mean}m | Infusão ADM: ${s.medInfusionDurationStats.mean}m`,
-        `Permanência Total: Méd ${s.fastReavMedOnlyLosStats.mean}m (Med ${s.fastReavMedOnlyLosStats.median}m)`,
+        `Permanência Alta Só Med: Méd ${s.fastReavMedOnlyLosStats.mean}m (Med ${s.fastReavMedOnlyLosStats.median}m)`,
       ],
       `PCE Fast Reav: ${s.pceRamoB1FastReavPct}% | Total Medicados: ${s.medicatedPct}%`,
       '#d97706',
@@ -1890,59 +1928,70 @@ export function generateSinglePngBoard(
     );
 
     drawBox(
-      1060,
+      1050,
       610,
-      580,
+      590,
       255,
-      'RAMO B2: GIRO DIAGNÓSTICO (LAB / TC / RX / USG)',
+      '4. GIRO DE EXAMES DIAGNÓSTICOS (RAMO B2)',
       [
-        `N = ${s.diagnosticExamsLoopCount} (${s.diagnosticExamsLoopPct}% do PS em Exames)`,
+        `Entram: ${s.diagnosticExamsLoopCount} (${s.diagnosticExamsLoopPct}%) -> Alta Exames: ${mb.b4DischargeAfterExamsCount} (${mb.b4DischargeAfterExamsPct}%)`,
         `Lab: ${s.labCount} (${s.labPct}%) [Coleta ${s.waitLabCollectStats.mean}m + Laudo ${s.waitLabReportStats.mean}m]`,
         `TC: ${s.tcCount} (${s.tcPct}%) [Ciclo ${s.waitTcTotalStats.mean}m] | RX: ${s.rxCount} (${s.rxPct}%) | USG: ${s.usgCount}`,
       ],
-      `PCE Exames: ${s.pceRamoB2DiagExamsPct}% | LOS: Méd ${s.diagnosticExamsLoopLosStats.mean}m (Med ${s.diagnosticExamsLoopLosStats.median}m)`,
+      `PCE Exames: ${s.pceRamoB2DiagExamsPct}% | LOS Alta Ex: Méd ${s.diagnosticExamsLoopLosStats.mean}m (Med ${s.diagnosticExamsLoopLosStats.median}m)`,
       '#b45309',
       '#fef3c7',
       '#d97706'
     );
 
-    drawArrowCanvas(1645, 480, 1765, 310, `Pós-Laudo: ${s.postReportReavalWaitStats.mean}m`, '#0369a1');
-    drawArrowCanvas(1645, 735, 1765, 650, `${s.admittedTotalPct}% Internam`, '#be123c');
-
     drawBox(
-      1770,
+      1760,
       140,
-      590,
-      310,
-      'OUTPUT 1: ALTA PÓS-PROPEDÊUTICA & EFEITO HANDOFF',
+      600,
+      230,
+      'OUTPUT 1: ALTAS PÓS-MEDICAÇÃO / EXAMES (3 + 4)',
       [
-        `N = ${s.postPropDischargeCount} (${s.postPropDischargePct}% do PS) + ${s.postConsultEvasionCount} Evasões`,
+        `N = ${s.postPropDischargeCount} (${s.postPropDischargePct}%: ${mb.b3DischargeAfterMedOnlyCount} Med + ${mb.b4DischargeAfterExamsCount} Ex)`,
         `Permanência: Méd ${s.postPropDischargeLosStats.mean}m (Med ${s.postPropDischargeLosStats.median}m | P90 ${s.postPropDischargeLosStats.p90}m)`,
-        `Fila Pós-Laudo p/ Reavaliação: Méd ${s.postReportReavalWaitStats.mean}m (Med ${s.postReportReavalWaitStats.median}m)`,
-        `Troca de Médico (Handoff em ${s.handoffDoctorPct}% dos casos):`,
+        `Fila Pós-Laudo: Méd ${s.postReportReavalWaitStats.mean}m (Med ${s.postReportReavalWaitStats.median}m)`,
       ],
-      `Mesmo Médico: Med ${s.sameDoctorLosStats.median}m  vs.  Com Handoff: Med ${s.handoffDoctorLosStats.median}m`,
+      `Handoff (${s.handoffDoctorPct}%): Mediana ${s.sameDoctorLosStats.median}m -> ${s.handoffDoctorLosStats.median}m`,
       '#0369a1',
       '#f0f9ff',
       '#38bdf8'
     );
 
     drawBox(
-      1770,
-      490,
-      590,
-      375,
-      'OUTPUT 2: BOARDING DIFERENCIADO (UI vs UTI / CIRÚRGICO)',
+      1760,
+      390,
+      600,
+      260,
+      'OUTPUT 2: INTERNAÇÕES & BOARDING FÍSICO (5)',
       [
-        `N = ${s.admittedTotalCount} (${s.admittedTotalPct}%) -> UI: ${s.admittedUiCount} | UTI: ${s.admittedUtiCount} | Cir: ${s.admittedSurgicalCount}`,
-        `UI (Enfermaria): T1 ${s.uiT1AguardoToVirtualStats.mean}m + T2 ${s.uiT2VirtualToPhysicalStats.mean}m = Total ${s.uiBoardingStats.mean}m (Med ${s.uiBoardingStats.median}m)`,
-        `UTI: T1 ${s.utiT1AguardoToVirtualStats.mean}m + T2 ${s.utiT2VirtualToPhysicalStats.mean}m = Total ${s.utiBoardingStats.mean}m (Med ${s.utiBoardingStats.median}m)`,
-        `Cirúrgico: Méd ${s.surgicalBoardingStats.mean}m vs Clínico: Méd ${s.clinicalBoardingStats.mean}m`,
+        `N = ${mb.b5AdmittedTotalCount} (${mb.b5AdmittedTotalPct}%) -> UI:${s.admittedUiCount} | UTI:${s.admittedUtiCount} | Out:${s.admittedOtherBedCount}`,
+        `UI (Físico): T1 ${s.uiT1AguardoToVirtualStats.mean}m + T2 ${s.uiT2VirtualToPhysicalStats.mean}m = ${s.uiBoardingStats.mean}m`,
+        `UTI Físico: T1 ${s.utiT1AguardoToVirtualStats.mean}m + T2 ${s.utiT2VirtualToPhysicalStats.mean}m = ${s.utiPhysicalBoardingStats.mean}m (Geral ${s.utiBoardingStats.mean}m)`,
       ],
-      `Macas Bloqueadas 24h: ${vsm.equivalentBlockedBeds24h} (${vsm.wastedBedHoursInBoarding}h) | CID Mudou: ${vsm.diagnosticGovernance.reclassifiedPct}%`,
+      `Cirúrgico: ${s.surgicalBoardingStats.mean}m vs Clínico: ${s.clinicalBoardingStats.mean}m | Macas 24h: ${vsm.equivalentBlockedBeds24h}`,
       '#be123c',
       '#fff1f2',
       '#f43f5e'
+    );
+
+    drawBox(
+      1760,
+      670,
+      600,
+      195,
+      'OUTPUT 3: EVASÕES & CORTE DA PLANILHA (1 + 6 + 7)',
+      [
+        `Total Residual = ${mb.b1PreMedEvasionCount + mb.b6OtherPostAttendEvasionsCount + mb.b7TotalInconsistenciesAndSpecialCount} fichas (Fecha 100% de N = ${mb.totalFichasPorta})`,
+        `Evasões: ${mb.b1PreMedEvasionCount} Pré-Médica + ${mb.b6OtherPostAttendEvasionsCount} Pós-Atendimento | Transf/Óbito: ${mb.b7cTransferOrDeathCount}`,
+      ],
+      `Sem Desfecho no Corte: ${mb.b7bPendingNoOutcomeAtCutoffCount} | Ficha Adm s/ Consulta: ${mb.b7aAdminNoConsultCount}`,
+      '#334155',
+      '#f8fafc',
+      '#94a3b8'
     );
 
     ctx.fillStyle = '#ffffff';
@@ -2042,9 +2091,18 @@ export function generateSinglePngBoard(
   } else if (boardKey === 'png_boarding_ui_uti_surg') {
     drawCanvasHeader(
       ctx,
-      'RAIO-X DO BOARDING HOSPITALAR: ENFERMARIA (UI) vs. UTI E PERFIL CIRÚRGICO vs. CLÍNICO',
+      'RAIO-X DO BOARDING HOSPITALAR: FECHAMENTO EXATO (T1+T2=TOTAL FÍSICO) E UI vs. UTI / CIRÚRGICO',
       `Competência: ${data.periodLabel}  •  Escopo: ${data.activeScopeLabel}  •  ${vsm.wastedBedHoursInBoarding}h retidas = ${vsm.equivalentBlockedBeds24h} macas bloqueadas 24h/dia`
     );
+
+    const profs = [
+      bbt.global,
+      bbt.ui,
+      bbt.uti,
+      ...(bbt.otherBed.admittedCount > 0 ? [bbt.otherBed] : []),
+      bbt.surgical,
+      bbt.clinical,
+    ];
 
     drawCanvasTable(
       ctx,
@@ -2054,61 +2112,65 @@ export function generateSinglePngBoard(
       [
         'Recorte / Perfil de Internação',
         'Pacientes (N / %)',
-        'UI / UTI (Cirúrgicos)',
-        'Etapa 1: Plano / Leito Virtual',
-        'Etapa 2: Virtual -> Subida Física',
-        'BOARDING TOTAL (Méd±DP | Med [Mín-Máx])',
+        'Físico vs. Espera',
+        'Etapa 1 Geral (Virtual)',
+        'Etapa 2 (Subida Física)',
+        'TOTAL FÍSICO (= T1 Fís + T2 Fís)',
+        'TOTAL GERAL (Todos)',
         'Macas Bloqueadas 24h/d',
       ],
-      [bbt.global, bbt.ui, bbt.uti, bbt.surgical, bbt.clinical].map((p) => [
+      profs.map((p) => [
         p.label,
         `${p.admittedCount} (${p.pctOfAdmissions}%)`,
-        `${p.uiCount} UI / ${p.utiCount} UTI (${p.surgicalCount} Cir)`,
-        `${fmtStatShort(p.t1AguardoToVirtualStats)} [P90:${p.t1AguardoToVirtualStats.p90}m]`,
-        `${fmtStatShort(p.t2VirtualToPhysicalStats)} [P90:${p.t2VirtualToPhysicalStats.p90}m]`,
-        fmtStatWithRange(p.totalBoardingStats, 'm'),
+        `${p.physicalConfirmedCount} Fís / ${p.virtualWaitOnlyCount} Esp`,
+        fmtStatShort(p.t1AguardoToVirtualStats),
+        p.physicalConfirmedCount > 0 ? fmtStatShort(p.t2VirtualToPhysicalStats) : '—',
+        p.physicalConfirmedCount > 0
+          ? `${p.t1PhysicalCohortStats.mean}m + ${p.t2VirtualToPhysicalStats.mean}m = ${p.physicalTotalBoardingStats.mean}m`
+          : '—',
+        `${p.totalBoardingStats.mean}m (Med ${p.totalBoardingStats.median}m)`,
         `${p.equivalentBlockedBeds24h} macas (${p.wastedBedHours}h)`,
       ]),
-      [22, 10, 12, 16, 16, 18, 12],
+      [20, 9, 10, 14, 14, 18, 12, 11],
       '#be123c',
-      52
+      48
     );
 
     drawCanvasTable(
       ctx,
       40,
-      480,
+      510,
       2320,
       [
-        'Operadora / Convênio (Top 15)',
+        'Operadora / Convênio (Top 14)',
         'Intern. (N / %)',
-        'UI / UTI (Cir)',
-        'Etapa 1 Geral (Virtual)',
-        'Etapa 2 Geral (Físico)',
-        'Boarding ENFERMARIA (UI) Total',
-        'Boarding UTI Total',
+        'UI / UTI (Fís/Esp)',
+        'Etapa 1 Geral',
+        'Etapa 2 Geral',
+        'ENFERMARIA (UI): T1 + T2 = Total UI',
+        'UTI: T1 | T2 | Físico vs. Geral',
         'Cirúrgico vs. Clínico',
       ],
-      vsm.boardingByConvenio.slice(0, 15).map((c) => [
+      vsm.boardingByConvenio.slice(0, 14).map((c) => [
         c.convenio,
         `${c.admittedCount} (${c.pctOfAdmissions}%)`,
-        `${c.uiCount}UI/${c.utiCount}UTI (${c.ccCount}C)`,
+        `${c.uiCount}UI/${c.utiCount}UTI (${c.physicalConfirmedCount}F/${c.virtualWaitOnlyCount}E)`,
         fmtStatShort(c.t1VirtualApprovalStats),
         fmtStatShort(c.t2PhysicalUploadStats),
-        c.uiCount > 0 ? `${c.uiTotalBoardingStats.mean}m (Med ${c.uiTotalBoardingStats.median}m | P90 ${c.uiTotalBoardingStats.p90}m)` : '—',
-        c.utiCount > 0 ? `${c.utiTotalBoardingStats.mean}m (Med ${c.utiTotalBoardingStats.median}m | P90 ${c.utiTotalBoardingStats.p90}m)` : '—',
+        c.uiCount > 0 ? `${c.uiT1VirtualStats.mean}m + ${c.uiT2PhysicalStats.mean}m = ${c.uiTotalBoardingStats.mean}m (Med ${c.uiTotalBoardingStats.median}m)` : '—',
+        c.utiCount > 0 ? `T1:${c.utiT1VirtualStats.mean}m | T2:${c.utiT2PhysicalStats.mean}m | Fís:${c.utiPhysicalTotalStats.mean}m | Ger:${c.utiTotalBoardingStats.mean}m` : '—',
         `Cir: ${c.surgicalTotalBoardingStats.count > 0 ? `${c.surgicalTotalBoardingStats.mean}m` : '—'} | Clín: ${
           c.clinicalTotalBoardingStats.count > 0 ? `${c.clinicalTotalBoardingStats.mean}m` : '—'
         }`,
       ]),
-      [18, 10, 11, 14, 14, 16, 16, 14],
+      [16, 9, 11, 13, 13, 18, 18, 12],
       '#0f172a',
-      52
+      50
     );
   } else if (boardKey === 'png_doctors_and_cids') {
     drawCanvasHeader(
       ctx,
-      'GOVERNANÇA CLÍNICA: CONDUTAS MÉDICAS (1º vs. ÚLTIMO ATENDIMENTO) & ROTAS POR CID',
+      'GOVERNANÇA CLÍNICA: CONDUTAS MÉDICAS (1º vs. ÚLTIMO ATENDIMENTO) & ROTAS POR CID (100% FECHADAS)',
       `Competência: ${data.periodLabel}  •  Escopo: ${data.activeScopeLabel}  •  Auditoria de Equipe e Pertinência Propedêutica`
     );
 
@@ -2121,9 +2183,10 @@ export function generateSinglePngBoard(
         'Médico (Top 12 Volume)',
         '1º Atend (D/N)',
         '% Alta Direta 1ºAt',
-        '% Fast Reav (Só Med)',
+        '% Alta Só Med (Fast)',
         '% Lab',
         '% TC',
+        'Rec/Atest',
         '% Intern.',
         'LOS Mediano',
         'Últ. Atend (Fech)',
@@ -2137,13 +2200,14 @@ export function generateSinglePngBoard(
         `${d.fastReavMedOnlyPct}% (${d.fastReavMedOnlyCount})`,
         `${d.labOrderedPct}%`,
         `${d.tcOrderedPct}%`,
+        `${d.receitaPct.toFixed(0)}%/${d.atestadoPct.toFixed(0)}%`,
         `${d.convertedToAdmissionPct}%`,
         `${d.firstAttendMedianLosMin}m`,
         `${d.lastAttendCount}`,
         `${d.closedHandoffPatientsCount} (${d.handoffAbsorptionPct}%)`,
         d.netReavalBalance > 0 ? `+${d.netReavalBalance}` : `${d.netReavalBalance}`,
       ]),
-      [20, 10, 11, 11, 7, 7, 8, 8, 9, 12, 8],
+      [19, 10, 10, 10, 7, 7, 8, 7, 8, 8, 11, 8],
       '#0f172a',
       46
     );
@@ -2157,10 +2221,11 @@ export function generateSinglePngBoard(
         'Diagnóstico Principal (Top 10 CIDs)',
         'Cluster Sindrômico',
         'Volume (% PS)',
-        'Rota 1: Alta Direta 1ºAt',
-        'Rota 2: Fast Reav Só Med',
-        'Rota 3: Giro Exames c/ Alta',
+        'Rota 1: Alta 1ºAt',
+        'Rota 2: Alta Só Med',
+        'Rota 3: Alta Exames',
         'Rota 4: Internação',
+        'Rota 5: Ev/Pend',
         'LOS Médio / Mediano',
       ],
       vsm.cidThroughputMatrix.slice(0, 10).map((r) => [
@@ -2171,9 +2236,10 @@ export function generateSinglePngBoard(
         `${r.fastReavMedCount} (${r.fastReavMedPct}%)`,
         `${r.diagnosticGiroCount} (${r.diagnosticGiroPct}%)`,
         `${r.admittedCount} (${r.admittedPct}%)`,
-        `${r.meanLos}m / Med ${r.medianLos}m`,
+        `${r.otherOutcomesCount} (${r.otherOutcomesPct}%)`,
+        r.meanLos > 0 ? `${r.meanLos}m / Med ${r.medianLos}m` : 'Ficha Adm',
       ]),
-      [24, 18, 10, 12, 12, 12, 10, 12],
+      [22, 16, 9, 11, 11, 11, 9, 9, 11],
       '#1e3a8a',
       48
     );
@@ -2240,14 +2306,14 @@ export function generateComparisonPdf(months: EmergencyAnalyticsData[]): void {
       ['Porta-Médico: Média (±DP) | Mediana (P90)', ...sorted.map((m) => fmtStatShort(m.doorToDoctor.overall))],
       ['% Dentro da Meta Porta-Médico (<= 20 min)', ...sorted.map((m) => `${m.withinSlaDoorToDocRate}%`)],
       ['Ramo A: Alta Direta no 1º Atendimento (%)', ...sorted.map((m) => `${m.vsm.monthlyOverall.directDischargePct}% (${m.vsm.monthlyOverall.directDischargeCount})`)],
-      ['Sub-Ramo B1: Fast Reav — Apenas Medicação (%)', ...sorted.map((m) => `${m.vsm.monthlyOverall.fastReavMedOnlyPct}% (${m.vsm.monthlyOverall.fastReavMedOnlyCount})`)],
-      ['Sub-Ramo B2: Giro Diagnóstico — Lab/Imagem (%)', ...sorted.map((m) => `${m.vsm.monthlyOverall.diagnosticExamsLoopPct}% (${m.vsm.monthlyOverall.diagnosticExamsLoopCount})`)],
+      ['Sub-Ramo B1: Alta Após Medicação — Fast Reav (%)', ...sorted.map((m) => `${m.vsm.monthlyOverall.fastReavDischargedPct}% (${m.vsm.monthlyOverall.fastReavDischargedCount})`)],
+      ['Sub-Ramo B2: Alta Após Exames Diagnósticos (%)', ...sorted.map((m) => `${m.vsm.monthlyOverall.diagnosticExamsDischargedPct}% (${m.vsm.monthlyOverall.diagnosticExamsDischargedCount})`)],
       ['Espera Consolidada de Laudo (Sem Falso Zero)', ...sorted.map((m) => fmtStatShort(m.vsm.monthlyOverall.waitLabReportStats))],
       ['Fila Invisível Pós-Laudo p/ Reavaliação', ...sorted.map((m) => fmtStatShort(m.vsm.monthlyOverall.postReportReavalWaitStats))],
       ['Taxa de Handoff Interno (Troca de Médico)', ...sorted.map((m) => `${m.vsm.monthlyOverall.handoffDoctorPct}%`)],
       ['Taxa de Conversão em Internação (%)', ...sorted.map((m) => `${m.conversionRate}% (${m.totalAdmissions})`)],
-      ['Boarding Total ENFERMARIA (UI)', ...sorted.map((m) => fmtStatShort(m.vsm.monthlyOverall.uiBoardingStats))],
-      ['Boarding Total UTI', ...sorted.map((m) => fmtStatShort(m.vsm.monthlyOverall.utiBoardingStats))],
+      ['Boarding Total ENFERMARIA (UI: T1+T2=Total)', ...sorted.map((m) => fmtStatShort(m.vsm.monthlyOverall.uiBoardingStats))],
+      ['Boarding UTI (Físico T1+T2 vs. Geral c/ Espera)', ...sorted.map((m) => `Fís: ${m.vsm.monthlyOverall.utiPhysicalBoardingStats.mean}m | Ger: ${m.vsm.monthlyOverall.utiBoardingStats.mean}m`)],
       ['Boarding Total PERFIL CIRÚRGICO vs. CLÍNICO', ...sorted.map((m) => `Cir: ${m.vsm.monthlyOverall.surgicalBoardingStats.mean}m | Clín: ${m.vsm.monthlyOverall.clinicalBoardingStats.mean}m`)],
       ['Macas Físicas Bloqueadas 24h/dia em Boarding', ...sorted.map((m) => `${m.vsm.equivalentBlockedBeds24h} macas/d (${m.vsm.wastedBedHoursInBoarding}h)`)],
       ['Eficiência Lean Global (PCE %)', ...sorted.map((m) => `${m.vsm.monthlyOverall.pceEfficiencyPct}%`)],
