@@ -35,6 +35,7 @@ import ScheduleAndMapViewsOrig from './ScheduleAndMapViews';
 import StaffAndFinanceViews from './StaffAndFinanceViews';
 import GovernanceAndModals from './GovernanceAndModals';
 import EmergencyAnalyticsView from './EmergencyAnalyticsView';
+import { computeDetailedPayrollRows } from '@/lib/finance/payroll-engine';
 
 const ScheduleAndMapViews = ScheduleAndMapViewsOrig as any;
 
@@ -90,7 +91,6 @@ export default function MedScaleProApp() {
   const [courses, setCourses] = useState<any[]>(initialCourses);
   const [auditTrail, setAuditTrail] = useState<any[]>([]);
 
-  // Valor estático seguro para o prerender do Next.js 16; atualizado imediatamente no useEffect para a competência vigente
   const [competenceMonth, setCompetenceMonth] = useState<string>('2026-11');
   const [payrollClosed, setPayrollClosed] = useState<boolean>(false);
   const [manualPayrollAdjustments, setManualPayrollAdjustments] = useState<
@@ -110,7 +110,6 @@ export default function MedScaleProApp() {
     'connecting'
   );
 
-  // Estados do Ícone + Pop-up Flutuante de Sugestões no Login do Médico
   const [isSuggestionPopupOpen, setIsSuggestionPopupOpen] = useState(false);
   const [suggestionTitle, setSuggestionTitle] = useState('');
   const [suggestionContent, setSuggestionContent] = useState('');
@@ -226,7 +225,6 @@ export default function MedScaleProApp() {
       console.error('Erro ao ler LocalStorage:', e);
     }
 
-    // Define a competência corrente (ex: 26/10 a 25/11) assim que monta no cliente
     setCompetenceMonth(resolveCurrentCompetenceMonthString());
     setIsHydrated(true);
 
@@ -281,7 +279,6 @@ export default function MedScaleProApp() {
 
       if (!isMounted) return;
 
-      // Canal com identificador único por montagem para evitar conflito no React StrictMode
       const uniqueChannelName = `medscale_live_sync_${Date.now()}_${Math.random()
         .toString(36)
         .slice(2, 7)}`;
@@ -497,7 +494,6 @@ export default function MedScaleProApp() {
     [competenceMonth]
   );
 
-  // Conta solicitações de troca com atualização para o médico logado
   const doctorSwapUpdatesCount = useMemo(() => {
     if (!effectiveCurrentUser?.id) return 0;
     const myId = Number(effectiveCurrentUser.id);
@@ -545,232 +541,28 @@ export default function MedScaleProApp() {
     recordAction(`Adicional/Bonificação alterado na folha do médico ID ${doctorId}`);
   };
 
-  const payrollReport = useMemo(() => {
-    const { startStr, endStr } = competenceWindow;
-    const shiftsInWindow = shifts.filter(s => s.date >= startStr && s.date <= endStr);
-    const passagensInWindow = swaps.filter(
-      sw =>
-        sw.status === 'Aprovado' &&
-        sw.movementType === 'Passagem' &&
-        sw.shiftDate >= startStr &&
-        sw.shiftDate <= endStr
-    );
-
-    const calculateShiftAdditionalsAmount = (
-      addIds: string[],
-      hours: number,
-      shiftBaseRef: number
-    ) => {
-      let total = 0;
-      const details: { id: string; name: string; amount: number }[] = [];
-      (addIds || []).forEach(id => {
-        const addObj = (config.shiftAdditionals || []).find((a: any) => a.id === id);
-        if (!addObj || addObj.incidence === 'monthly') return;
-        let val = 0;
-        if (addObj.calcMode === 'percent') {
-          val = (shiftBaseRef * Number(addObj.percentValue || 0)) / 100;
-        } else {
-          val = (hours / 12) * Number(addObj.value12h || 0);
-        }
-        total += val;
-        details.push({ id: addObj.id, name: addObj.name, amount: val });
-      });
-      return { total, details };
-    };
-
-    return sortedDoctors
-      .filter(d => d.status === 'Ativo')
-      .map(doc => {
-        const docShifts = shiftsInWindow
-          .filter(s => Number(s.doctorId) === Number(doc.id) && !s.isManualUnregisteredDoctor)
-          .sort((a, b) => a.date.localeCompare(b.date));
-
-        const accRoles = doc.accumulatedRoles || [];
-        const isFixedContract = doc.contractType === 'Fixo Mensal';
-
-        let baseFixedMonthly = 0;
-        const allAllowedFns: string[] = Array.from(
-          new Set(
-            [
-              doc.role,
-              ...(doc.allowedFunctions || []),
-              ...accRoles.map((r: any) => r.roleName)
-            ].filter(Boolean)
-          )
-        );
-
-        allAllowedFns.forEach(fnName => {
-          const fnRateCfg = config.functionRates?.[fnName];
-          const adminRateCfg = config.adminFunctionRates?.[fnName];
-
-          if (fnRateCfg && fnRateCfg.requiresSchedule === false) {
-            baseFixedMonthly += Number(fnRateCfg.mensalFixo || fnRateCfg.monthlyFixedValue || 0);
-          } else if (adminRateCfg) {
-            baseFixedMonthly += Number(adminRateCfg.mensalFixo || 0);
-          } else if (fnRateCfg && isFixedContract && fnName === doc.role) {
-            const lvlBonusMensal =
-              config.levelBonuses12h?.[doc.remunerationLevel || 1]?.mensalBonus || 0;
-            baseFixedMonthly += Number(fnRateCfg.mensalFixo || 0) + lvlBonusMensal;
-          }
-        });
-
-        let totalHoursWorked = 0;
-        let fixedHoursWorked = 0;
-        let extraHoursWorked = 0;
-        let fixedShiftsCount = 0;
-        let extraShiftsCount = 0;
-        let extraShiftsAmount = 0;
-        let totalShiftAdditionalsOnly = 0;
-        let totalMonthlyAdditionalsOnly = 0;
-        const dailyBreakdown: any[] = [];
-
-        docShifts.forEach(sh => {
-          const hours = calculateDurationHours(sh.startTime, sh.endTime);
-          totalHoursWorked += hours;
-          const weekday = getWeekdayName(sh.date);
-          const isWeekend = weekday === 'Sábado' || weekday === 'Domingo';
-          const levelUsed = doc.remunerationLevel || 1;
-          const lvlBonus12h = config.levelBonuses12h?.[levelUsed]?.bonus12h || 0;
-
-          const rules = getCategoryRulesList(sh.category);
-          const selectedRule =
-            rules.find((rl: any) => rl.id === sh.ruleId) ||
-            (isWeekend ? rules.find((rl: any) => rl.id.includes('fds')) : null) ||
-            rules.find((rl: any) => rl.billingMode === 'por_12h') ||
-            rules[0];
-
-          const override = shiftCustomOverrides[sh.id];
-          const isExtraShift =
-            sh.billingType !== 'Fixo' ||
-            !isFixedContract ||
-            Boolean(sh.customRate12h) ||
-            Boolean(override);
-
-          if (isExtraShift) {
-            extraHoursWorked += hours;
-            extraShiftsCount += 1;
-          } else {
-            fixedHoursWorked += hours;
-            fixedShiftsCount += 1;
-          }
-
-          let base12hApplied = Number(selectedRule?.value || 1400) + lvlBonus12h;
-          if (sh.customRate12h !== undefined && sh.customRate12h !== '') {
-            base12hApplied = Number(sh.customRate12h);
-          }
-          if (override?.customRate12h !== undefined) {
-            base12hApplied = Number(override.customRate12h);
-          }
-
-          const proportionalBaseRef = (hours / 12) * base12hApplied;
-          let shiftBaseVal = 0;
-          if (isExtraShift) {
-            shiftBaseVal =
-              override?.customFixedTotal !== undefined
-                ? Number(override.customFixedTotal)
-                : proportionalBaseRef;
-          }
-
-          extraShiftsAmount += shiftBaseVal;
-
-          const addCalc = calculateShiftAdditionalsAmount(
-            sh.additionals || [],
-            hours,
-            proportionalBaseRef
-          );
-          totalShiftAdditionalsOnly += addCalc.total;
-
-          dailyBreakdown.push({
-            shiftId: sh.id,
-            date: sh.date,
-            weekday,
-            startTime: sh.startTime,
-            endTime: sh.endTime,
-            hours,
-            type: sh.type,
-            category: sh.category,
-            isExtraShift,
-            additionals: sh.additionals || [],
-            additionalsDetails: addCalc.details,
-            billingType: isExtraShift ? 'Extra / Avulso' : 'Fixo',
-            shiftBaseVal,
-            additionalsVal: addCalc.total
-          });
-        });
-
-        const monthlyAddCatalog = (config.shiftAdditionals || []).filter(
-          (a: any) => a.incidence === 'monthly'
-        );
-        const docMonthlyIds: string[] = doc.monthlyAdditionals || [];
-
-        monthlyAddCatalog.forEach((mAdd: any) => {
-          if (docMonthlyIds.includes(mAdd.id)) {
-            const baseForPercent = baseFixedMonthly + extraShiftsAmount;
-            const val =
-              mAdd.calcMode === 'percent'
-                ? (baseForPercent * Number(mAdd.percentValue || 0)) / 100
-                : Number(mAdd.value12h || 0);
-            totalMonthlyAdditionalsOnly += val;
-          }
-        });
-
-        if (Number(doc.fixedMonthlyAdditional || 0) > 0) {
-          totalMonthlyAdditionalsOnly += Number(doc.fixedMonthlyAdditional);
-        }
-
-        let totalDiscounts = 0;
-        passagensInWindow.forEach(sw => {
-          if (Number(sw.requestingDoctorId) === Number(doc.id) && sw.applyPayrollDiscount) {
-            totalDiscounts += 1400;
-          }
-        });
-
-        const manualAdjs = manualPayrollAdjustments[doc.id] || [];
-        const manualAdjustmentsTotal = manualAdjs.reduce(
-          (acc, item) => acc + Number(item.amount || 0),
-          0
-        );
-
-        const totalAdditionalsAmount = totalShiftAdditionalsOnly + totalMonthlyAdditionalsOnly;
-        const netTotal =
-          baseFixedMonthly +
-          extraShiftsAmount +
-          totalAdditionalsAmount +
-          manualAdjustmentsTotal -
-          totalDiscounts;
-
-        return {
-          ...doc,
-          doctor: doc,
-          shiftsCount: docShifts.length,
-          totalHours: totalHoursWorked,
-          totalHoursWorked,
-          weeklyAvgTotalHours: (totalHoursWorked / 4.33).toFixed(1),
-          fixedHoursWorked,
-          fixedShiftsCount,
-          extraHoursWorked,
-          extraShiftsCount,
-          baseFixedMonthly,
-          extraShiftsAmount,
-          shiftAdditionalsTotal: totalShiftAdditionalsOnly,
-          monthlyAdditionalsTotal: totalMonthlyAdditionalsOnly,
-          totalShiftAdditionalsOnly,
-          totalMonthlyAdditionalsOnly,
-          totalAdditionalsAmount,
-          manualAdjustmentsTotal,
-          totalDiscounts,
-          netTotal,
-          dailyBreakdown
-        };
-      });
+ const payrollReport = useMemo(() => {
+    return computeDetailedPayrollRows({
+      config,
+      doctors: sortedDoctors,
+      activeDoctors: sortedDoctors.filter(d => d.status === 'Ativo'),
+      shifts,
+      swaps,
+      competenceMonth,
+      effectiveWindow: competenceWindow,
+      doctorConferenceData,
+      dynamicCategories,
+      filterFunction: 'Todas'
+    });
   }, [
+    config,
     sortedDoctors,
     shifts,
     swaps,
-    config,
+    competenceMonth,
     competenceWindow,
-    shiftCustomOverrides,
-    manualPayrollAdjustments
+    doctorConferenceData,
+    dynamicCategories
   ]);
 
   const handleCloudSync = async () => {
@@ -871,6 +663,11 @@ export default function MedScaleProApp() {
       <aside className="w-full lg:w-64 bg-slate-900 text-white flex flex-col shrink-0">
         <div className="p-4 flex items-center justify-between border-b border-slate-800">
           <div>
+            <div className="flex justify-center mb-2">
+              <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-600 to-slate-900 flex items-center justify-center shadow-md border border-blue-400/30">
+                <span className="text-white text-lg font-black">+</span>
+              </div>
+            </div>
             <span className="text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 bg-blue-600 rounded text-white">
               {config.sectorUnitName}
             </span>

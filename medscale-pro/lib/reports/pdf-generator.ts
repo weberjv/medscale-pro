@@ -2333,3 +2333,240 @@ export const exportEmergencyPdf = generateEmergencyPdf;
 export const downloadEmergencyPdf = generateEmergencyPdf;
 export const exportComparisonPdf = generateComparisonPdf;
 export const exportVsmPngImage = generateVsmPngImage;
+
+// ============================================================================
+// AUXILIAR DE FORMATAÇÃO DE DATA BR
+// ============================================================================
+
+function formatBrDate(dateStr?: string): string {
+  if (!dateStr) return '—';
+  const parts = String(dateStr).split('-');
+  if (parts.length !== 3) return dateStr;
+  return `${parts[2]}/${parts[1]}/${parts[0]}`;
+}
+
+// ============================================================================
+// GERADOR VETORIAL DE FICHA MÉDICA / DOSSIÊ DO CORPO CLÍNICO (PASSO 1.5 COMPLETO)
+// ============================================================================
+
+export function generateDoctorDossierPdf(doc: any, config?: any, cateAnalyticsData?: EmergencyAnalyticsData): void {
+  if (typeof window === 'undefined' || !doc) return;
+
+  const pdf = new jsPDF('portrait', 'mm', 'a4');
+  const todayStr = new Date().toISOString().split('T')[0];
+  const unitName = config?.sectorUnitName || 'Emergência Adulta - HGD';
+  const appName = config?.appName || 'MedScale Pro';
+
+  // Localiza métricas do CATE específicas deste médico, se disponíveis
+  const doctorConduct = cateAnalyticsData?.vsm?.doctorConductMatrix?.find(
+    (d: any) => String(d.name).trim().toLowerCase() === String(doc.name).trim().toLowerCase()
+  ) || doc.cateMetrics || {};
+
+  // Cabeçalho institucional na página 1
+  pdf.setFillColor(15, 23, 42);
+  pdf.rect(0, 0, 210, 22, 'F');
+  pdf.setFillColor(37, 99, 235);
+  pdf.rect(0, 21, 210, 1, 'F');
+
+  pdf.setTextColor(255, 255, 255);
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(11);
+  pdf.text(`${appName.toUpperCase()} — DOSSIÊ EXECUTIVO DO CORPO CLÍNICO`, 10, 9);
+
+  pdf.setFont('helvetica', 'normal');
+  pdf.setFontSize(7.5);
+  pdf.setTextColor(148, 163, 184);
+  pdf.text(`Unidade: ${unitName} • Emitido em: ${formatBrDate(todayStr)}`, 10, 16);
+
+  let curY = 28;
+
+  // Secção 1: Dados Cadastrais e PJ
+  pdf.setFillColor(15, 23, 42);
+  pdf.roundedRect(10, curY, 190, 6, 1, 1, 'F');
+  pdf.setTextColor(255, 255, 255);
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(8);
+  pdf.text('1. DADOS CADASTRAIS, ESPECIALIDADE E VÍNCULO PESSOA JURÍDICA (PJ)', 13, curY + 4);
+  curY += 7;
+
+  const personalData = [
+    ['Nome Completo:', doc.name || '—', 'CRM / UF:', doc.crm || '—'],
+    ['CPF:', doc.cpf || '—', 'RQE:', doc.rqe || 'Não informado'],
+    ['Especialidade:', doc.specialty || 'Clínica Médica', 'Senioridade:', `Nível ${doc.remunerationLevel || 1}`],
+    ['E-mail:', doc.email || '—', 'Telefone / WhatsApp:', doc.phone || '—'],
+    ['Razão Social PJ:', doc.razaoSocial || '—', 'CNPJ:', doc.cnpj || '—'],
+    ['Modalidade Vínculo:', doc.contractType || 'Fixo Mensal', 'Status Cadastro:', doc.status || 'Ativo']
+  ];
+
+  drawVectorTable(pdf, {
+    startY: curY,
+    marginLeft: 10,
+    tableWidth: 190,
+    colWidths: [32, 63, 32, 63],
+    head: ['Campo Cadastral', 'Registo Principal', 'Campo Complementar', 'Detalhe / Vínculo'],
+    body: personalData,
+    headFillColor: [30, 58, 138],
+    fontSize: 7,
+    rowHeight: 5,
+    headHeight: 5.5,
+    defaultHalign: 'left',
+    leftAlignCols: [0, 1, 2, 3]
+  });
+
+  curY += 38;
+
+  // Secção 2: Produtividade Assistencial & Indicadores CATE
+  pdf.setFillColor(15, 23, 42);
+  pdf.roundedRect(10, curY, 190, 6, 1, 1, 'F');
+  pdf.setTextColor(255, 255, 255);
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(8);
+  pdf.text('2. PRODUTIVIDADE ASSISTENCIAL & INDICADORES DE CONDUTA (INTELIGÊNCIA CATE)', 13, curY + 4);
+  curY += 7;
+
+  const totalAtendimentos = doctorConduct.firstAttendCount ?? doc.totalAttendances ?? 0;
+  const atendPorHora = doctorConduct.patientsPerHour ?? doc.patientsPerHour ?? '—';
+  const tempoMedioAtend = doctorConduct.firstAttendMeanLosMin ?? doc.meanAttendanceTime ?? '—';
+  const tempoMedianoAtend = doctorConduct.firstAttendMedianLosMin ?? doc.medianAttendanceTime ?? '—';
+  const taxaInternacao = doctorConduct.convertedToAdmissionPct ?? doc.admissionRate ?? '0';
+  const taxaExamesLab = doctorConduct.labOrderedPct ?? doc.labRequestRate ?? '0';
+  const taxaExamesTc = doctorConduct.tcOrderedPct ?? doc.tcRequestRate ?? '0';
+  const taxaAlta1Atend = doctorConduct.directDischargePct ?? doc.firstAttendDischargeRate ?? '0';
+
+  const productivityData = [
+    ['Volume Total Atendimentos:', `${totalAtendimentos} pac.`, 'Atendimentos por Hora:', `${atendPorHora} pac/h`],
+    ['Tempo de Atend. (Média):', `${tempoMedioAtend} min`, 'Tempo de Atend. (Mediana):', `${tempoMedianoAtend} min`],
+    ['Taxa de Internação:', `${taxaInternacao}%`, 'Taxa de Alta (1º Atend.):', `${taxaAlta1Atend}%`],
+    ['Solicitação de Exames (Lab):', `${taxaExamesLab}%`, 'Solicitação de Exames (TC):', `${taxaExamesTc}%`]
+  ];
+
+  drawVectorTable(pdf, {
+    startY: curY,
+    marginLeft: 10,
+    tableWidth: 190,
+    colWidths: [45, 50, 45, 50],
+    head: ['Métrica de Produtividade', 'Resultado / Volume', 'Indicador Operacional', 'Taxa / Média'],
+    body: productivityData,
+    headFillColor: [13, 148, 136],
+    fontSize: 7,
+    rowHeight: 5,
+    headHeight: 5.5,
+    defaultHalign: 'left',
+    leftAlignCols: [0, 1, 2, 3]
+  });
+
+  curY += 30;
+
+  if (curY > 210) {
+    pdf.addPage();
+    curY = 20;
+  }
+
+  // Secção 3: Histórico de Trabalho
+  pdf.setFillColor(15, 23, 42);
+  pdf.roundedRect(10, curY, 190, 6, 1, 1, 'F');
+  pdf.setTextColor(255, 255, 255);
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(8);
+  pdf.text('3. HISTÓRICO DE TRABALHO E MARCOS PROFISSIONAIS', 13, curY + 4);
+  curY += 7;
+
+  const historyList = Array.isArray(doc.workHistory) ? doc.workHistory : [];
+  const historyBody = historyList.length > 0 
+    ? historyList.map((wh: any) => [wh.type, `${formatBrDate(wh.date)}${wh.endDate ? ` a ${formatBrDate(wh.endDate)}` : ''}`, wh.details || '—'])
+    : [['Nenhum registo histórico', '—', '—']];
+
+  drawVectorTable(pdf, {
+    startY: curY,
+    marginLeft: 10,
+    tableWidth: 190,
+    colWidths: [50, 45, 95],
+    head: ['Evento / Marco', 'Período', 'Detalhamento / Observações'],
+    body: historyBody,
+    headFillColor: [71, 85, 105],
+    fontSize: 7,
+    rowHeight: 5,
+    headHeight: 5.5,
+    defaultHalign: 'left',
+    leftAlignCols: [0, 1, 2]
+  });
+
+  curY += historyBody.length * 5 + 10;
+
+  if (curY > 210) {
+    pdf.addPage();
+    curY = 20;
+  }
+
+  // Secção 4: Histórico de Trocas, Permutas e Passagens
+  pdf.setFillColor(15, 23, 42);
+  pdf.roundedRect(10, curY, 190, 6, 1, 1, 'F');
+  pdf.setTextColor(255, 255, 255);
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(8);
+  pdf.text('4. AUDITORIA DE TROCAS, PERMUTAS E PASSAGENS DE PLANTÃO', 13, curY + 4);
+  curY += 7;
+
+  const swapsList = Array.isArray(doc.swapsAudit) ? doc.swapsAudit : [];
+  const swapsBody = swapsList.length > 0
+    ? swapsList.map((sw: any) => [
+        formatBrDate(sw.date || sw.shiftDate),
+        `${sw.type || 'Passagem'} (${sw.status || 'Aprovado'})`,
+        sw.substituteDetail || sw.permutedShiftInfo || '—'
+      ])
+    : [['Nenhuma troca ou permuta registada', '—', '—']];
+
+  drawVectorTable(pdf, {
+    startY: curY,
+    marginLeft: 10,
+    tableWidth: 190,
+    colWidths: [35, 65, 90],
+    head: ['Data do Turno', 'Modalidade / Status', 'Detalhes da Substituição / Permuta'],
+    body: swapsBody,
+    headFillColor: [217, 119, 6],
+    fontSize: 7,
+    rowHeight: 5,
+    headHeight: 5.5,
+    defaultHalign: 'left',
+    leftAlignCols: [0, 1, 2]
+  });
+
+  curY += swapsBody.length * 5 + 10;
+
+  if (curY > 210) {
+    pdf.addPage();
+    curY = 20;
+  }
+
+  // Secção 5: Ocorrências Individuais Registadas
+  pdf.setFillColor(15, 23, 42);
+  pdf.roundedRect(10, curY, 190, 6, 1, 1, 'F');
+  pdf.setTextColor(255, 255, 255);
+  pdf.setFont('helvetica', 'bold');
+  pdf.setFontSize(8);
+  pdf.text('5. OCORRÊNCIAS E APONTAMENTOS INDIVIDUAIS', 13, curY + 4);
+  curY += 7;
+
+  const occList = Array.isArray(doc.individualOccurrences) ? doc.individualOccurrences : [];
+  const occBody = occList.length > 0
+    ? occList.map((oc: any) => [formatBrDate(oc.date), `${oc.severity} — ${oc.title || ''}`, oc.description || '—'])
+    : [['Nenhuma ocorrência registada', '—', '—']];
+
+  drawVectorTable(pdf, {
+    startY: curY,
+    marginLeft: 10,
+    tableWidth: 190,
+    colWidths: [30, 65, 95],
+    head: ['Data', 'Classificação / Título', 'Descrição da Ocorrência'],
+    body: occBody,
+    headFillColor: [185, 28, 28],
+    fontSize: 7,
+    rowHeight: 5,
+    headHeight: 5.5,
+    defaultHalign: 'left',
+    leftAlignCols: [0, 1, 2]
+  });
+
+  const safeDocName = String(doc.name || 'Medico').replace(/[^a-zA-Z0-9_-]/g, '_');
+  pdf.save(`Dossie_Medico_${safeDocName}_${todayStr}.pdf`);
+}

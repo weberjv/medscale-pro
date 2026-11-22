@@ -1,5 +1,6 @@
 'use client';
 
+import { generateDoctorDossierPdf } from '@/lib/reports/pdf-generator';
 import React, { useState, useEffect, useMemo } from 'react';
 import {
   Users, Sliders, Plus, Trash2, Edit3, CheckCircle,
@@ -311,14 +312,16 @@ export default function StaffAndFinanceViews(props: any) {
     requiresSchedule: true
   });
 
-  // Estado para o Catálogo Avançado de Adicionais & Bonificações
+ // Estado para o Catálogo Avançado de Adicionais & Bonificações
   const [newAdditionalForm, setNewAdditionalForm] = useState({
     name: '',
     incidence: 'shift' as 'shift' | 'monthly',
     calcMode: 'fixed' as 'fixed' | 'percent',
     applicationTarget: 'final_payroll' as
       | 'final_payroll'
+      | 'fixed_base_only'
       | 'specific_function'
+      | 'specific_function_fixed'
       | 'shift_base',
     targetFunctionNames: [allFunctionNames[0] || 'Plantonista'] as string[],
     value12h: 250,
@@ -588,251 +591,13 @@ export default function StaffAndFinanceViews(props: any) {
   };
 
   const handleDownloadIndividualDoctorDossier = (doc: any) => {
-    if (typeof window === 'undefined' || !doc) return;
-    const todayStr = new Date().toISOString().split('T')[0];
-    const docId = Number(doc.id);
-    const docCourses = safeCourses.filter((c: any) => Number(c?.doctorId) === docId);
-    const docVacations = safeVacations.filter((v: any) => Number(v?.doctorId) === docId);
-    const workHistoryList: any[] = Array.isArray(doc.workHistory) ? doc.workHistory : [];
-    const indOccurrencesList: any[] = Array.isArray(doc.individualOccurrences)
-      ? doc.individualOccurrences
-      : [];
-    const docSwapsAuditList = getDoctorSwapsAuditList(docId);
-
-    const workHistoryHtml =
-      workHistoryList.length === 0
-        ? `<tr><td colspan="3" style="padding:8px;color:#64748b;text-align:center;">Nenhum marco de histórico de trabalho registado.</td></tr>`
-        : workHistoryList
-            .map(
-              wh => `
-              <tr>
-                <td style="padding:6px 8px;border:1px solid #cbd5e1;font-weight:bold;">${wh.type}</td>
-                <td style="padding:6px 8px;border:1px solid #cbd5e1;">
-                  ${formatBrDate(wh.date)}${wh.endDate ? ` a ${formatBrDate(wh.endDate)}` : ''}
-                </td>
-                <td style="padding:6px 8px;border:1px solid #cbd5e1;">${wh.details || '—'}</td>
-              </tr>
-            `
-            )
-            .join('');
-
-    const swapsAuditHtml =
-      docSwapsAuditList.length === 0
-        ? `<tr><td colspan="4" style="padding:8px;color:#64748b;text-align:center;">Nenhuma troca, permuta ou passagem registada para este plantonista.</td></tr>`
-        : docSwapsAuditList
-            .map(
-              sw => `
-              <tr>
-                <td style="padding:6px 8px;border:1px solid #cbd5e1;font-weight:bold;">
-                  ${formatBrDate(sw.date)} (${sw.startTime}-${sw.endTime})
-                </td>
-                <td style="padding:6px 8px;border:1px solid #cbd5e1;font-weight:bold;">
-                  ${sw.type} • ${sw.category} (${sw.status})
-                </td>
-                <td style="padding:6px 8px;border:1px solid #cbd5e1;">
-                  <strong>Solicitante:</strong> ${sw.requesterName}
-                </td>
-                <td style="padding:6px 8px;border:1px solid #cbd5e1;">
-                  <strong>Substituto/Permutante:</strong> ${sw.substituteDetail}
-                  ${sw.permutedInfo ? `<br/><em>Permuta: ${sw.permutedInfo}</em>` : ''}
-                  ${sw.managerComment ? `<br/><strong>Obs. Gestor:</strong> ${sw.managerComment}` : ''}
-                </td>
-              </tr>
-            `
-            )
-            .join('');
-
-    const vacationsHtml =
-      docVacations.length === 0
-        ? `<tr><td colspan="3" style="padding:8px;color:#64748b;text-align:center;">Nenhum registo de férias ou licença no sistema.</td></tr>`
-        : docVacations
-            .map(v => {
-              const subs = Array.isArray(v.substitutions) ? v.substitutions : [];
-              const subsText =
-                subs.length > 0
-                  ? ` | Substituído por: ` +
-                    subs
-                      .map((s: any) => `${s.substituteDoctorName} (${s.dateInfo})`)
-                      .join(', ')
-                  : '';
-              return `
-                <tr>
-                  <td style="padding:6px 8px;border:1px solid #cbd5e1;font-weight:bold;">${v.requestType || 'Férias'} (${v.status || 'Aprovado'})</td>
-                  <td style="padding:6px 8px;border:1px solid #cbd5e1;">${formatBrDate(v.startDate)} a ${formatBrDate(v.endDate)}</td>
-                  <td style="padding:6px 8px;border:1px solid #cbd5e1;">${v.reason || '—'}${subsText}</td>
-                </tr>
-              `;
-            })
-            .join('');
-
-    const coursesHtml =
-      docCourses.length === 0
-        ? `<tr><td colspan="3" style="padding:8px;color:#64748b;text-align:center;">Nenhum curso ou certificado registado.</td></tr>`
-        : docCourses
-            .map(c => {
-              const exp = String(c.expirationDate || c.validUntil || '');
-              const isExp = exp && exp < todayStr;
-              return `
-                <tr>
-                  <td style="padding:6px 8px;border:1px solid #cbd5e1;font-weight:bold;">${c.courseName || c.name}</td>
-                  <td style="padding:6px 8px;border:1px solid #cbd5e1;color:${isExp ? '#991b1b' : '#166534'};font-weight:bold;">
-                    ${isExp ? 'DESATUALIZADO (VENCIDO)' : 'ATUALIZADO (EM DIA)'}
-                  </td>
-                  <td style="padding:6px 8px;border:1px solid #cbd5e1;">Vencimento: ${formatBrDate(exp)}</td>
-                </tr>
-              `;
-            })
-            .join('');
-
-    const indOccHtml =
-      indOccurrencesList.length === 0
-        ? `<tr><td colspan="3" style="padding:8px;color:#64748b;text-align:center;">Nenhuma ocorrência individual registada para este plantonista.</td></tr>`
-        : indOccurrencesList
-            .map(
-              oc => `
-              <tr>
-                <td style="padding:6px 8px;border:1px solid #cbd5e1;font-weight:bold;">${formatBrDate(oc.date)}</td>
-                <td style="padding:6px 8px;border:1px solid #cbd5e1;font-weight:bold;">${oc.severity} — ${oc.title || ''}</td>
-                <td style="padding:6px 8px;border:1px solid #cbd5e1;">${oc.description}</td>
-              </tr>
-            `
-            )
-            .join('');
-
-    const html = `
-      <!DOCTYPE html>
-      <html lang="pt-BR">
-      <head>
-        <meta charset="UTF-8" />
-        <title>Dossie Individual - ${doc.name}</title>
-        <style>
-          @page { size: A4 portrait; margin: 10mm; }
-          body { font-family: Arial, Helvetica, sans-serif; color: #0f172a; font-size: 10.5px; margin: 0; padding: 0; }
-          h1, h2, h3 { margin: 0; }
-          table { width: 100%; border-collapse: collapse; margin-top: 5px; margin-bottom: 12px; }
-          .section-title { background: #0f172a; color: #ffffff; padding: 5px 10px; font-weight: bold; font-size: 10.5px; text-transform: uppercase; border-radius: 4px; margin-top: 8px; }
-          .grid-table td { padding: 5px 8px; border: 1px solid #cbd5e1; }
-        </style>
-      </head>
-      <body>
-        <div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #0f172a;padding-bottom:8px;margin-bottom:10px;">
-          <div>
-            <h1 style="font-size:15px;text-transform:uppercase;">${config?.appName || 'MedScale Pro'} — ${config?.sectorUnitName || 'Emergência Adulta - HGD'}</h1>
-            <p style="margin:2px 0 0 0;color:#475569;font-size:10.5px;">Dossiê Individual do Plantonista: Cadastro, Histórico, Trocas/Permutas, Cursos & Ocorrências</p>
-          </div>
-          <div style="text-align:right;font-size:10px;color:#475569;">
-            Emitido em: <strong>${formatBrDate(todayStr)}</strong>
-          </div>
-        </div>
-
-        <div class="section-title">1. Dados Cadastrais, Especialidade e Vínculo PJ</div>
-        <table class="grid-table">
-          <tr>
-            <td><strong>Nome Completo:</strong> ${doc.name || '—'}</td>
-            <td><strong>CRM / RQE:</strong> ${doc.crm || '—'} ${doc.rqe ? `• RQE ${doc.rqe}` : ''}</td>
-            <td><strong>Nível Senioridade:</strong> Nível ${doc.remunerationLevel || 1}</td>
-          </tr>
-          <tr>
-            <td><strong>CPF:</strong> ${doc.cpf || '—'}</td>
-            <td><strong>Data de Nascimento:</strong> ${formatBrDate(doc.birthDate)}</td>
-            <td><strong>Especialidade:</strong> ${doc.specialty || 'Clínica Médica'}</td>
-          </tr>
-          <tr>
-            <td><strong>E-mail:</strong> ${doc.email || '—'}</td>
-            <td><strong>Telefone / WhatsApp:</strong> ${doc.phone || '—'}</td>
-            <td><strong>Função / Modalidade:</strong> ${doc.role || 'Plantonista'} (${doc.contractType || 'Fixo Mensal'})</td>
-          </tr>
-          <tr>
-            <td colspan="2"><strong>Razão Social PJ:</strong> ${doc.razaoSocial || '—'}</td>
-            <td><strong>CNPJ:</strong> ${doc.cnpj || '—'}</td>
-          </tr>
-        </table>
-
-        <div class="section-title">2. Histórico de Trabalho</div>
-        <table>
-          <thead>
-            <tr style="background:#f1f5f9;">
-              <th style="padding:5px 8px;border:1px solid #cbd5e1;text-align:left;width:28%;">Evento / Marco</th>
-              <th style="padding:5px 8px;border:1px solid #cbd5e1;text-align:left;width:22%;">Data / Período</th>
-              <th style="padding:5px 8px;border:1px solid #cbd5e1;text-align:left;">Detalhamento</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${workHistoryHtml}
-          </tbody>
-        </table>
-
-        <div class="section-title">3. Histórico de Trocas, Permutas e Passagens Realizadas</div>
-        <table>
-          <thead>
-            <tr style="background:#f1f5f9;">
-              <th style="padding:5px 8px;border:1px solid #cbd5e1;text-align:left;width:20%;">Data / Turno</th>
-              <th style="padding:5px 8px;border:1px solid #cbd5e1;text-align:left;width:24%;">Modalidade / Função</th>
-              <th style="padding:5px 8px;border:1px solid #cbd5e1;text-align:left;width:26%;">Quem Solicitou (Titular)</th>
-              <th style="padding:5px 8px;border:1px solid #cbd5e1;text-align:left;">Quem Substituiu / Permutou</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${swapsAuditHtml}
-          </tbody>
-        </table>
-
-        <div class="section-title">4. Registos de Férias e Licenças no Sistema</div>
-        <table>
-          <thead>
-            <tr style="background:#f1f5f9;">
-              <th style="padding:5px 8px;border:1px solid #cbd5e1;text-align:left;width:28%;">Tipo / Status</th>
-              <th style="padding:5px 8px;border:1px solid #cbd5e1;text-align:left;width:22%;">Período</th>
-              <th style="padding:5px 8px;border:1px solid #cbd5e1;text-align:left;">Observações & Substitutos</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${vacationsHtml}
-          </tbody>
-        </table>
-
-        <div class="section-title">5. Certificações e Cursos</div>
-        <table>
-          <thead>
-            <tr style="background:#f1f5f9;">
-              <th style="padding:5px 8px;border:1px solid #cbd5e1;text-align:left;width:28%;">Curso</th>
-              <th style="padding:5px 8px;border:1px solid #cbd5e1;text-align:left;width:30%;">Situação</th>
-              <th style="padding:5px 8px;border:1px solid #cbd5e1;text-align:left;">Validade</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${coursesHtml}
-          </tbody>
-        </table>
-
-        <div class="section-title">6. Ocorrências Individuais Registadas</div>
-        <table>
-          <thead>
-            <tr style="background:#f1f5f9;">
-              <th style="padding:5px 8px;border:1px solid #cbd5e1;text-align:left;width:18%;">Data</th>
-              <th style="padding:5px 8px;border:1px solid #cbd5e1;text-align:left;width:32%;">Classificação / Título</th>
-              <th style="padding:5px 8px;border:1px solid #cbd5e1;text-align:left;">Descrição</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${indOccHtml}
-          </tbody>
-        </table>
-
-        <script>
-          window.onload = function() { window.print(); };
-        </script>
-      </body>
-      </html>
-    `;
-
-    const win = window.open('', '_blank');
-    if (win) {
-      win.document.open();
-      win.document.write(html);
-      win.document.close();
-    }
-    safeRecordAction(`Documento individual (Dossiê PDF) emitido para ${doc.name}`);
+    // Enriquece o objeto do médico com o histórico de trocas processado antes de chamar o gerador
+    const docWithSwaps = {
+      ...doc,
+      swapsAudit: getDoctorSwapsAuditList(Number(doc.id))
+    };
+    generateDoctorDossierPdf(docWithSwaps, config);
+    safeRecordAction(`Dossiê executivo completo (com CATE e Trocas) emitido para ${doc.name}`);
   };
 
   const handleApprovePendingDoctor = (doc: any) => {
@@ -2610,11 +2375,13 @@ export default function StaffAndFinanceViews(props: any) {
       calcMode: newAdditionalForm.calcMode,
       applicationTarget: newAdditionalForm.applicationTarget,
       targetFunctionNames:
-        newAdditionalForm.applicationTarget === 'specific_function'
+        newAdditionalForm.applicationTarget === 'specific_function' ||
+        newAdditionalForm.applicationTarget === 'specific_function_fixed'
           ? newAdditionalForm.targetFunctionNames
           : [],
       targetFunctionName:
-        newAdditionalForm.applicationTarget === 'specific_function'
+        newAdditionalForm.applicationTarget === 'specific_function' ||
+        newAdditionalForm.applicationTarget === 'specific_function_fixed'
           ? newAdditionalForm.targetFunctionNames[0] || ''
           : '',
       value12h: Number(newAdditionalForm.value12h || 0),
@@ -3713,11 +3480,15 @@ export default function StaffAndFinanceViews(props: any) {
                 : [allFunctionNames[0] || 'Plantonista'];
 
             const targetLabel =
-              add.applicationTarget === 'specific_function'
-                ? `Incide sobre: ${targetFns.join(', ')}`
+              add.applicationTarget === 'fixed_base_only'
+                ? 'Apenas Base Fixa Contratual (s/ Extras)'
+                : add.applicationTarget === 'specific_function_fixed'
+                ? `Apenas Base Fixa: ${targetFns.join(', ')}`
+                : add.applicationTarget === 'specific_function'
+                ? `Função (Fixa+Extra): ${targetFns.join(', ')}`
                 : add.applicationTarget === 'final_payroll'
-                ? 'Sobre o Valor Final da Folha PJ'
-                : 'Sobre a Base do Plantão (Ref. 12h)';
+                ? 'Valor Final da Folha PJ (Fixa+Extra)'
+                : 'Base de 1 Plantão (1/4 Cota Mensal)';
 
             return (
               <div
@@ -3820,14 +3591,27 @@ export default function StaffAndFinanceViews(props: any) {
                           }
                           className="w-full border rounded-lg px-2 py-1 bg-white font-bold"
                         >
-                          <option value="final_payroll">Valor Final da Folha</option>
-                          <option value="specific_function">Função(ões) Específica(s)</option>
-                          <option value="shift_base">Base do Plantão (12h)</option>
+                          <option value="fixed_base_only">
+                            Apenas Base Fixa Contratual (s/ Extras)
+                          </option>
+                          <option value="specific_function_fixed">
+                            Base Fixa de Função(ões) Específica(s)
+                          </option>
+                          <option value="final_payroll">
+                            Valor Final da Folha (Fixa + Extras)
+                          </option>
+                          <option value="specific_function">
+                            Função(ões) Específica(s) (Fixa + Extras)
+                          </option>
+                          <option value="shift_base">
+                            Base de 1 Plantão (1/4 Cota)
+                          </option>
                         </select>
                       </div>
                     </div>
 
-                    {add.applicationTarget === 'specific_function' && (
+                   {(add.applicationTarget === 'specific_function' ||
+                      add.applicationTarget === 'specific_function_fixed') && (
                       <div className="p-2.5 rounded-xl bg-white border border-indigo-200 space-y-1.5">
                         <span className="block text-[10px] font-extrabold text-indigo-900 uppercase">
                           Selecione sobre qual(is) função(ões) este adicional incide:
@@ -3966,25 +3750,34 @@ export default function StaffAndFinanceViews(props: any) {
                       ...newAdditionalForm,
                       applicationTarget: e.target.value as
                         | 'final_payroll'
+                        | 'fixed_base_only'
                         | 'specific_function'
+                        | 'specific_function_fixed'
                         | 'shift_base'
                     })
                   }
                   className="w-full border rounded-xl px-3 py-2 bg-white font-extrabold text-indigo-950"
                 >
+                  <option value="fixed_base_only">
+                    Apenas sobre a Base Fixa Contratual (Ignora Extras por CH)
+                  </option>
+                  <option value="specific_function_fixed">
+                    Apenas sobre a Base Fixa de Função(ões) Específica(s)
+                  </option>
                   <option value="final_payroll">
-                    Aplicar sobre o Valor Final da Folha
+                    Sobre o Valor Final da Folha (Fixa + Extras)
                   </option>
                   <option value="specific_function">
-                    Aplicar sobre Uma ou Mais Funções Específicas
+                    Sobre Função(ões) Específica(s) (Fixa + Extras)
                   </option>
                   <option value="shift_base">
-                    Aplicar sobre o Plantão Individual (Base 12h)
+                    Sobre 1 Plantão Individual (1/4 da Cota Mensal)
                   </option>
                 </select>
               </div>
 
-              {newAdditionalForm.applicationTarget === 'specific_function' ? (
+              {newAdditionalForm.applicationTarget === 'specific_function' ||
+              newAdditionalForm.applicationTarget === 'specific_function_fixed' ? (
                 <div className="sm:col-span-2 p-3 rounded-xl bg-white border border-indigo-200 space-y-1.5">
                   <label className="block font-extrabold text-indigo-950 text-[11px]">
                     Marque uma ou mais funções sobre as quais este adicional incidirá:

@@ -307,10 +307,12 @@ export default function AuthScreen(props: any) {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-slate-900 to-blue-950 flex flex-col justify-center items-center p-4 text-slate-800">
       <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-slate-200 overflow-hidden">
-        {/* Cabeçalho Visual Original */}
+       {/* Cabeçalho Visual Institucional com Emblema */}
         <div className="bg-slate-900 text-white p-6 text-center">
-          <div className="w-12 h-12 rounded-2xl bg-blue-600 flex items-center justify-center mx-auto mb-3 shadow-lg">
-            <Shield size={24} className="text-white" />
+          <div className="flex justify-center mb-3">
+            <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-600 to-slate-900 flex items-center justify-center shadow-lg border border-blue-400/30">
+              <span className="text-white text-2xl font-black">+</span>
+            </div>
           </div>
           <span className="inline-block px-2.5 py-0.5 rounded bg-blue-600/30 text-blue-300 text-[10px] font-extrabold uppercase tracking-wider mb-1">
             {config?.sectorUnitName || 'Emergência Adulta - HGD'}

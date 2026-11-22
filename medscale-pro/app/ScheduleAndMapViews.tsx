@@ -2937,10 +2937,16 @@ export default function ScheduleAndMapViews(props: any) {
             </p>
           </div>
 
-          <div className="bg-emerald-500 text-white px-5 py-3.5 rounded-2xl text-center shrink-0">
-            <span className="block text-[10px] font-extrabold uppercase">NPS Unidade</span>
-            <strong className="text-2xl font-black">{config?.unitNpsScore ?? 88}</strong>
-          </div>
+          {(() => {
+            const npsVal = Number(config?.unitNpsScore ?? 88);
+            const colorClass = npsVal >= 80 ? 'bg-emerald-500 text-white' : npsVal >= 60 ? 'bg-amber-400 text-slate-950' : npsVal >= 50 ? 'bg-orange-500 text-white' : 'bg-red-600 text-white';
+            return (
+              <div className={`${colorClass} px-5 py-3.5 rounded-2xl text-center shrink-0 shadow-sm transition-colors`}>
+                <span className="block text-[10px] font-extrabold uppercase tracking-wider">NPS Unidade</span>
+                <strong className="text-2xl font-black">{npsVal}</strong>
+              </div>
+            );
+          })()}
         </div>
 
         {isAdmin && (
@@ -2961,17 +2967,20 @@ export default function ScheduleAndMapViews(props: any) {
             </div>
 
             <div
-              onClick={() => safeNavigate('schedule')}
-              className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all cursor-pointer"
+              onClick={() => safeNavigate('open_shifts')}
+              className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all cursor-pointer flex flex-col justify-between"
             >
-              <span className="text-[11px] font-extrabold uppercase text-blue-600">
-                Mapa Assistencial 24h
-              </span>
-              <div className="text-2xl font-black text-blue-600 mt-1">
-                {safeShifts.filter(s => isShiftCovered(s)).length} plantões
+              <div>
+                <span className="text-[11px] font-extrabold uppercase text-amber-600">
+                  Plantões Pendentes (7d)
+                </span>
+                <div className="text-2xl font-black text-slate-900 mt-1">
+                  {safeOpenShifts.filter((sh: any) => !sh.doctorId && new Date(sh.date) >= new Date()).length}{' '}
+                  <span className="text-sm font-bold text-slate-600">turnos</span>
+                </div>
               </div>
-              <span className="text-xs font-bold text-blue-700 underline mt-2 inline-block">
-                Escala Padrão, Semanal & Heatmap
+              <span className="text-xs font-bold text-blue-600 underline mt-3 inline-block">
+                Vagas em aberto na escala →
               </span>
             </div>
 
@@ -2991,14 +3000,14 @@ export default function ScheduleAndMapViews(props: any) {
             </div>
 
             <div
-              onClick={() => safeNavigate('payroll')}
+             onClick={() => safeNavigate('payroll')}
               className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all cursor-pointer"
             >
               <span className="text-[11px] font-extrabold uppercase text-emerald-700">
                 Folha PJ ({competenceMonth})
               </span>
               <div className="text-2xl font-black text-emerald-700 mt-1">
-                R$ {totalPayrollNet.toLocaleString('pt-BR', { minimumFractionDigits: 2 })}
+                R$ {(Array.isArray(payrollReport) ? payrollReport.reduce((acc: number, item: any) => acc + Number(item?.netTotal || 0), 0) : 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
               </div>
               <span className="text-xs font-bold text-emerald-800 underline mt-2 inline-block">
                 Conferência 26 a 25 e Auditoria
