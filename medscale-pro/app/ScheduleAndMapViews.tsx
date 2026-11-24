@@ -7,7 +7,7 @@ import {
   Sparkles, BarChart3, UserPlus, ArrowUp, ArrowDown,
   Edit3, X, Save, Palette, ChevronLeft, ChevronRight,
   Umbrella, RefreshCw, BookmarkCheck, Wand2, CalendarDays,
-  BellRing, CalendarCheck, MapPin, Megaphone
+  BellRing, CalendarCheck, MapPin, Megaphone, Crown
 } from 'lucide-react';
 import { FUNCTION_COLOR_PALETTE } from './StaffAndFinanceViews';
 import SwapsManagementView, {
@@ -41,7 +41,6 @@ export default function ScheduleAndMapViews(props: any) {
     recordAction
   } = props || {};
 
-  // Wrappers seguros
   const safeSetConfig = (updater: any) => {
     if (typeof setConfig === 'function') setConfig(updater);
   };
@@ -65,7 +64,7 @@ export default function ScheduleAndMapViews(props: any) {
   };
 
   // ============================================================================
-  // 1. TODOS OS HOOKS (useMemo, useState, useEffect) NO TOPO ABSOLUTO DO COMPONENTE
+  // 1. TODOS OS HOOKS NO TOPO ABSOLUTO
   // ============================================================================
   const safeDoctors = useMemo(() => {
     const raw = Array.isArray(doctors) ? [...doctors] : [];
@@ -107,7 +106,6 @@ export default function ScheduleAndMapViews(props: any) {
     ? config.shiftAdditionals.filter((a: any) => a?.incidence !== 'monthly')
     : [];
 
-  // Estados de Navegação e Filtros
   const [selectedDate, setSelectedDate] = useState<string>('2026-10-30');
   const [doctorCalendarMonth, setDoctorCalendarMonth] = useState<string>('2026-10');
   const [displayMode, setDisplayMode] = useState<'both' | 'weekly' | 'heatmap'>('both');
@@ -119,14 +117,12 @@ export default function ScheduleAndMapViews(props: any) {
   const [heatmapDownloadScope, setHeatmapDownloadScope] = useState<'day' | 'week'>('day');
   const [cloneFeedbackMsg, setCloneFeedbackMsg] = useState<string>('');
 
-  // Pop-up Global de Confirmação "Solicitação enviada!"
   const [requestSentPopup, setRequestSentPopup] = useState<{
     open: boolean;
     title: string;
     subtitle: string;
   }>({ open: false, title: '', subtitle: '' });
 
-  // Estados de Alocação e Edição de Plantão
   const [newShiftForm, setNewShiftForm] = useState({
     allocationMode: 'registered' as 'registered' | 'manual' | 'planned_open',
     doctorId: safeActiveDoctors[0]?.id || 1,
@@ -138,12 +134,15 @@ export default function ScheduleAndMapViews(props: any) {
     endTime: '19:00',
     category: allFunctionNames[0] || 'Plantonista',
     shiftType: 'Fixo' as 'Fixo' | 'Coringa/Extra' | 'Escala Periódica',
+    isNightLeader: false,
+    coordinationShiftValue: '' as string | number,
     repeatWeeklyInMonth: false,
     repeatWeeksCount: 4
   });
 
   const [editingShiftObj, setEditingShiftObj] = useState<any | null>(null);
   const [editShiftForm, setEditShiftForm] = useState({
+    editScope: 'single' as 'single' | 'from_here_onward',
     allocationMode: 'registered' as 'registered' | 'manual' | 'planned_open',
     doctorId: 1,
     manualDoctorName: '',
@@ -154,10 +153,11 @@ export default function ScheduleAndMapViews(props: any) {
     endTime: '19:00',
     category: allFunctionNames[0] || 'Plantonista',
     shiftType: 'Fixo' as 'Fixo' | 'Coringa/Extra' | 'Escala Periódica',
+    isNightLeader: false,
+    coordinationShiftValue: '' as string | number,
     additionals: [] as string[]
   });
 
-  // Estados do Modal Rápido de Troca / Passagem / Permuta / Dispensa
   const [quickSwapShiftObj, setQuickSwapShiftObj] = useState<any | null>(null);
   const [quickSwapForm, setQuickSwapForm] = useState({
     type: 'Passagem de Plantão' as
@@ -188,7 +188,6 @@ export default function ScheduleAndMapViews(props: any) {
     { id: string; startTime: string; endTime: string; targetDoctorId: number }[]
   >([]);
 
-  // Estados de Plantões em Aberto e Disponibilidade (posicionados no topo antes de qualquer return)
   const [newOpenShiftForm, setNewOpenShiftForm] = useState({
     date: '2026-10-30',
     category: allFunctionNames[0] || 'Plantonista',
@@ -204,7 +203,6 @@ export default function ScheduleAndMapViews(props: any) {
     notes: ''
   });
 
-  // Posiciona automaticamente na data do dia presente ao abrir no cliente
   useEffect(() => {
     const todayIso = new Date().toISOString().split('T')[0];
     setSelectedDate(todayIso);
@@ -215,7 +213,7 @@ export default function ScheduleAndMapViews(props: any) {
   }, [currentView]);
 
   // ============================================================================
-  // 2. FUNÇÕES AUXILIARES DE RESOLUÇÃO DE MÉDICOS, CORES E HORÁRIOS
+  // 2. FUNÇÕES AUXILIARES
   // ============================================================================
   const triggerRequestSentPopup = (title: string, subtitle: string) => {
     setRequestSentPopup({ open: true, title, subtitle });
@@ -227,6 +225,16 @@ export default function ScheduleAndMapViews(props: any) {
       if (found) return found;
     }
     return safeDoctors.find((d: any) => Number(d?.id) === Number(id)) || null;
+  };
+
+  const isNightShiftTime = (startTime?: string) => {
+    const st = String(startTime || '');
+    return st >= '19:00' || st < '07:00';
+  };
+
+  const isEmergencySpecialtyDoctor = (doc: any) => {
+    const spec = String(doc?.specialty || '').toLowerCase();
+    return spec.includes('emerg') || spec.includes('urg');
   };
 
   const isShiftCovered = (s: any): boolean => {
@@ -288,9 +296,7 @@ export default function ScheduleAndMapViews(props: any) {
     const rawCat = String(s?.category || '').trim();
     const doc = docObj || resolveShiftDoctorInfo(s);
 
-    if (rawCat && functionRatesObj[rawCat]) {
-      return rawCat;
-    }
+    if (rawCat && functionRatesObj[rawCat]) return rawCat;
 
     if (rawCat) {
       const exactKeyCI = allFunctionNames.find(
@@ -335,7 +341,6 @@ export default function ScheduleAndMapViews(props: any) {
 
   const getFunctionColorInfo = (fnNameInput?: string) => {
     const rawName = String(fnNameInput || '').trim();
-
     let matchedKey = '';
     if (rawName && functionRatesObj[rawName]) {
       matchedKey = rawName;
@@ -674,8 +679,16 @@ export default function ScheduleAndMapViews(props: any) {
     const isPlanned = Boolean(shiftItem.isPlannedOpenExtra);
     const isMan = Boolean(shiftItem.isManualUnregisteredDoctor);
     const resolvedFn = resolveExactFunctionName(shiftItem);
+    const currDocObj = resolveDoctor(shiftItem.doctorId);
+
+    const suggestedLeader =
+      shiftItem.isNightLeader !== undefined
+        ? Boolean(shiftItem.isNightLeader)
+        : isNightShiftTime(shiftItem.startTime) && isEmergencySpecialtyDoctor(currDocObj);
+
     setEditingShiftObj(shiftItem);
     setEditShiftForm({
+      editScope: 'single',
       allocationMode: isPlanned ? 'registered' : isMan ? 'manual' : 'registered',
       doctorId: Number(shiftItem.doctorId || safeActiveDoctors[0]?.id || 1),
       manualDoctorName: shiftItem.manualDoctorName || '',
@@ -688,6 +701,12 @@ export default function ScheduleAndMapViews(props: any) {
       shiftType: (shiftItem.shiftType ||
         shiftItem.modality ||
         (isPlanned ? 'Coringa/Extra' : 'Fixo')) as any,
+      isNightLeader: suggestedLeader,
+      coordinationShiftValue:
+        shiftItem.coordinationShiftValue !== undefined &&
+        shiftItem.coordinationShiftValue !== null
+          ? shiftItem.coordinationShiftValue
+          : '',
       additionals: Array.isArray(shiftItem.additionals) ? shiftItem.additionals : []
     });
   };
@@ -704,10 +723,40 @@ export default function ScheduleAndMapViews(props: any) {
     }
 
     const hrs = calcDurationHours(editShiftForm.startTime, editShiftForm.endTime);
+    const hasCoordValue =
+      editShiftForm.coordinationShiftValue !== '' &&
+      editShiftForm.coordinationShiftValue !== null &&
+      !isNaN(Number(editShiftForm.coordinationShiftValue));
+    const parsedCoordValue = hasCoordValue
+      ? Number(editShiftForm.coordinationShiftValue)
+      : undefined;
+
+    const origDateObj = new Date(`${editingShiftObj.date}T12:00:00`);
+    const origWeekday = isNaN(origDateObj.getTime()) ? -1 : origDateObj.getDay();
+    const isOnward = editShiftForm.editScope === 'from_here_onward';
+
+    let propagatedCount = 0;
 
     safeSetShifts((prev: any[]) =>
       (Array.isArray(prev) ? prev : []).map((s: any) => {
-        if (String(s?.id) !== String(editingShiftObj.id)) return s;
+        const isTargetSingle = String(s?.id) === String(editingShiftObj.id);
+        const sDateObj = new Date(`${s?.date || ''}T12:00:00`);
+        const sWeekday = isNaN(sDateObj.getTime()) ? -2 : sDateObj.getDay();
+
+        const isFutureEquivalent =
+          isOnward &&
+          !isTargetSingle &&
+          String(s?.date || '') >= String(editingShiftObj.date || '') &&
+          !s?.isDispensedVacant &&
+          !s?.isPlannedOpenExtra &&
+          sWeekday === origWeekday &&
+          Number(s?.doctorId) === Number(editingShiftObj.doctorId);
+
+        if (!isTargetSingle && !isFutureEquivalent) return s;
+        if (isFutureEquivalent) propagatedCount += 1;
+
+        const targetShiftDate = isTargetSingle ? editShiftForm.date : s.date;
+
         if (isPlanned) {
           return {
             ...s,
@@ -716,13 +765,15 @@ export default function ScheduleAndMapViews(props: any) {
             isDispensedVacant: false,
             isManualUnregisteredDoctor: false,
             manualDoctorName: '',
-            date: editShiftForm.date,
+            date: targetShiftDate,
             startTime: editShiftForm.startTime,
             endTime: editShiftForm.endTime,
             hours: hrs,
             category: editShiftForm.category,
             shiftType: 'Coringa/Extra',
             modality: 'Coringa/Extra',
+            isNightLeader: Boolean(editShiftForm.isNightLeader),
+            coordinationShiftValue: parsedCoordValue,
             additionals: editShiftForm.additionals
           };
         }
@@ -736,13 +787,15 @@ export default function ScheduleAndMapViews(props: any) {
             manualDoctorName: editShiftForm.manualDoctorName.trim(),
             manualDoctorCrm: editShiftForm.manualDoctorCrm.trim() || 'Alocação Manual',
             manualDoctorLevel: Number(editShiftForm.manualDoctorLevel || 1),
-            date: editShiftForm.date,
+            date: targetShiftDate,
             startTime: editShiftForm.startTime,
             endTime: editShiftForm.endTime,
             hours: hrs,
             category: editShiftForm.category,
             shiftType: 'Coringa/Extra',
             modality: 'Coringa/Extra',
+            isNightLeader: Boolean(editShiftForm.isNightLeader),
+            coordinationShiftValue: parsedCoordValue,
             additionals: editShiftForm.additionals
           };
         }
@@ -753,13 +806,15 @@ export default function ScheduleAndMapViews(props: any) {
           isDispensedVacant: false,
           isManualUnregisteredDoctor: false,
           manualDoctorName: '',
-          date: editShiftForm.date,
+          date: targetShiftDate,
           startTime: editShiftForm.startTime,
           endTime: editShiftForm.endTime,
           hours: hrs,
           category: editShiftForm.category,
           shiftType: editShiftForm.shiftType,
           modality: editShiftForm.shiftType,
+          isNightLeader: Boolean(editShiftForm.isNightLeader),
+          coordinationShiftValue: parsedCoordValue,
           additionals: editShiftForm.additionals
         };
       })
@@ -771,14 +826,17 @@ export default function ScheduleAndMapViews(props: any) {
       ? editShiftForm.manualDoctorName.trim()
       : resolveDoctor(editShiftForm.doctorId)?.name || 'Médico';
     safeRecordAction(
-      `Plantão atualizado pelo gestor: ${docLabel} (${editShiftForm.startTime}-${editShiftForm.endTime} • ${editShiftForm.category}) em ${formatBrDate(
-        editShiftForm.date
-      )}`
+      isOnward
+        ? `Plantão atualizado (${docLabel}, ${hrs}h) a partir de ${formatBrDate(
+            editingShiftObj.date
+          )} e propagado para ${propagatedCount} ocorrência(s) futura(s).`
+        : `Plantão atualizado pelo gestor (pontual): ${docLabel} (${editShiftForm.startTime}-${editShiftForm.endTime} • ${editShiftForm.category}) em ${formatBrDate(
+            editShiftForm.date
+          )}`
     );
     setEditingShiftObj(null);
   };
 
-  // ORDENAMENTO DE PLANTÕES NO DIA (SETAS ▲ e ▼)
   const handleMoveShiftOrderInDay = (
     dateStr: string,
     shiftId: any,
@@ -820,7 +878,11 @@ export default function ScheduleAndMapViews(props: any) {
     );
   };
 
-  const handleDeleteShift = (shiftId: any, e?: React.MouseEvent) => {
+  const handleDeleteShift = (
+    shiftId: any,
+    e?: React.MouseEvent,
+    deleteScope: 'single' | 'from_here_onward' = 'single'
+  ) => {
     if (e) {
       e.preventDefault();
       e.stopPropagation();
@@ -830,21 +892,60 @@ export default function ScheduleAndMapViews(props: any) {
     const targetShift = safeShifts.find((s: any) => String(s?.id) === String(shiftId));
     const docInfo = targetShift ? resolveShiftDoctorInfo(targetShift) : null;
 
+    if (!targetShift) {
+      safeSetShifts((prev: any[]) =>
+        (Array.isArray(prev) ? prev : []).filter(
+          (s: any) => String(s?.id) !== String(shiftId)
+        )
+      );
+      return;
+    }
+
+    const origDateObj = new Date(`${targetShift.date}T12:00:00`);
+    const origWeekday = isNaN(origDateObj.getTime()) ? -1 : origDateObj.getDay();
+    let removedCount = 0;
+
     safeSetShifts((prev: any[]) =>
-      (Array.isArray(prev) ? prev : []).filter(
-        (s: any) => String(s?.id) !== String(shiftId)
-      )
+      (Array.isArray(prev) ? prev : []).filter((s: any) => {
+        const isSameShift = String(s?.id) === String(shiftId);
+        if (isSameShift) {
+          removedCount += 1;
+          return false;
+        }
+
+        if (deleteScope === 'from_here_onward') {
+          const sDateObj = new Date(`${s?.date || ''}T12:00:00`);
+          const sWeekday = isNaN(sDateObj.getTime()) ? -2 : sDateObj.getDay();
+          const isFutureEquivalent =
+            String(s?.date || '') >= String(targetShift.date || '') &&
+            !s?.isDispensedVacant &&
+            !s?.isPlannedOpenExtra &&
+            sWeekday === origWeekday &&
+            Number(s?.doctorId) === Number(targetShift.doctorId);
+
+          if (isFutureEquivalent) {
+            removedCount += 1;
+            return false;
+          }
+        }
+
+        return true;
+      })
     );
 
     safeRecordAction(
-      `Plantão removido da escala pelo gestor: ${docInfo?.name || `#${shiftId}`} (${
-        targetShift?.date ? formatBrDate(targetShift.date) : ''
-      })`
+      deleteScope === 'from_here_onward'
+        ? `Plantão removido (${docInfo?.name || `#${shiftId}`}) a partir de ${formatBrDate(
+            targetShift.date
+          )} (${removedCount} ocorrência(s) removida(s) valendo para frente).`
+        : `Plantão removido da escala pelo gestor: ${docInfo?.name || `#${shiftId}`} (${
+            targetShift?.date ? formatBrDate(targetShift.date) : ''
+          })`
     );
   };
 
   // ============================================================================
-  // MOTOR DE "ESCALA PADRÃO" E CLONAGEM COM SUBSTITUIÇÃO LIMPA DA SEMANA-ALVO
+  // ESCALA PADRÃO & CLONAGEM
   // ============================================================================
   const savedStandardTemplate: any[] = Array.isArray(config?.standardWeeklyScheduleTemplate)
     ? config.standardWeeklyScheduleTemplate
@@ -897,6 +998,8 @@ export default function ScheduleAndMapViews(props: any) {
           ),
           category: resolveExactFunctionName(baseShift),
           shiftType: regime,
+          isNightLeader: Boolean(baseShift.isNightLeader),
+          coordinationShiftValue: baseShift.coordinationShiftValue,
           isPlannedOpenExtra: isPlannedOpen,
           doctorId: isPlannedOpen ? null : baseShift.doctorId || null,
           isManualUnregisteredDoctor: isPlannedOpen
@@ -927,14 +1030,19 @@ export default function ScheduleAndMapViews(props: any) {
   const resolveDoctorOrVacationSubstituteForDate = (
     titularDocId: any,
     targetDateStr: string
-  ): { effectiveDoctorId: any; substitutedFromVacation: boolean } => {
+  ): {
+    effectiveDoctorId: any;
+    substitutedFromVacation: boolean;
+    vacationId?: any;
+    substituteBillingMode?: string;
+  } => {
     if (!titularDocId) {
       return { effectiveDoctorId: null, substitutedFromVacation: false };
     }
     const activeVac = safeVacations.find(
       (v: any) =>
         Number(v?.doctorId) === Number(titularDocId) &&
-        v?.status !== 'Recusado' &&
+        v?.status === 'Aprovado' &&
         String(v?.startDate || '') <= targetDateStr &&
         String(v?.endDate || '') >= targetDateStr
     );
@@ -949,7 +1057,10 @@ export default function ScheduleAndMapViews(props: any) {
     if (subs.length > 0 && subs[0]?.substituteDoctorId) {
       return {
         effectiveDoctorId: Number(subs[0].substituteDoctorId),
-        substitutedFromVacation: true
+        substitutedFromVacation: true,
+        vacationId: activeVac.id,
+        substituteBillingMode:
+          subs[0].substituteBillingMode || activeVac.substituteBillingMode || 'payroll_extra'
       };
     }
 
@@ -1017,9 +1128,17 @@ export default function ScheduleAndMapViews(props: any) {
           category: slot.category,
           shiftType: slot.shiftType || 'Fixo',
           modality: slot.shiftType || 'Fixo',
+          isNightLeader: Boolean(slot.isNightLeader),
+          coordinationShiftValue: slot.coordinationShiftValue,
           isPlannedOpenExtra: Boolean(slot.isPlannedOpenExtra),
           doctorId: slot.isPlannedOpenExtra ? null : vacCheck.effectiveDoctorId,
           isFromSwap: vacCheck.substitutedFromVacation,
+          isFromVacation: vacCheck.substitutedFromVacation,
+          vacationId: vacCheck.vacationId,
+          vacationOriginalDoctorId: vacCheck.substitutedFromVacation
+            ? Number(slot.doctorId)
+            : undefined,
+          substituteBillingMode: vacCheck.substituteBillingMode,
           isManualUnregisteredDoctor: Boolean(slot.isManualUnregisteredDoctor),
           manualDoctorName: slot.manualDoctorName || '',
           manualDoctorLevel: Number(slot.manualDoctorLevel || 1),
@@ -1194,8 +1313,7 @@ export default function ScheduleAndMapViews(props: any) {
   };
 
   // ============================================================================
-  // MATRIZ HEATMAP 24H ORIGINAL (07H ÀS 06H + PASSAGEM 07H DO DIA SEGUINTE)
-  // & META IDEAL EDITÁVEL POR FAIXA HORÁRIA PELO GESTOR
+  // HEATMAP 24H & PDFS
   // ============================================================================
   const heatmapHours = [
     7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18,
@@ -1299,9 +1417,6 @@ export default function ScheduleAndMapViews(props: any) {
       });
   };
 
-  // ============================================================================
-  // GERADOR PDF 1: HEATMAP VISUAL ASSISTENCIAL 24H (DO DIA OU DOS 7 DIAS)
-  // ============================================================================
   const handleDownloadHeatmapPDF = (scopeOverride?: 'day' | 'week') => {
     if (typeof window === 'undefined') return;
     const scope = scopeOverride || heatmapDownloadScope;
@@ -1359,6 +1474,7 @@ export default function ScheduleAndMapViews(props: any) {
                   const fnName = resolveExactFunctionName(s, doc);
                   const colorInfo = getFunctionColorInfo(fnName);
                   const hasSwap = isShiftInvolvedInApprovedSwap(s);
+                  const leaderTag = s?.isNightLeader ? ' 👑' : '';
 
                   const cells = heatmapHours
                     .map((_, cIdx) => {
@@ -1378,10 +1494,10 @@ export default function ScheduleAndMapViews(props: any) {
                       </td>
                       <td style="padding:2.5px 5px;border:1px solid #cbd5e1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:155px;background:${colorInfo.softBgHex} !important;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;">
                         <div style="font-weight:800;font-size:7.8px;color:#0f172a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.15;">
-                          ${doc?.name || 'Médico'} ${hasSwap ? '🔄' : ''}
+                          ${doc?.name || 'Médico'}${leaderTag} ${hasSwap ? '🔄' : ''}
                         </div>
                         <div style="font-weight:800;color:${colorInfo.hex};font-size:6.8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.1;">
-                          ${fnName}
+                          ${fnName}${s?.isNightLeader ? ' • Líder Noturno' : ''}
                         </div>
                       </td>
                       ${cells}
@@ -1518,9 +1634,6 @@ export default function ScheduleAndMapViews(props: any) {
     }
   };
 
-  // ============================================================================
-  // GERADOR PDF 2: ESCALA OFICIAL (DO DIA, SEMANAL 1 PÁG. OU COMPLETA 8 PÁGINAS)
-  // ============================================================================
   const handleDownloadScalePDF = (modeOverride?: '8pages' | 'day' | '1page') => {
     if (typeof window === 'undefined') return;
     const mode = modeOverride || scaleDownloadScope;
@@ -1570,12 +1683,13 @@ export default function ScheduleAndMapViews(props: any) {
                   const fnName = resolveExactFunctionName(s, doc);
                   const colorInfo = getFunctionColorInfo(fnName);
                   const hasSwap = isShiftInvolvedInApprovedSwap(s);
+                  const leaderTag = s?.isNightLeader ? ' 👑' : '';
 
                   return `
                     <div style="padding:2.5px 4px;margin-bottom:2.5px;border:1px solid ${colorInfo.borderHex};border-left:4.5px solid ${colorInfo.hex};background:${colorInfo.softBgHex} !important;color:${colorInfo.textHex};border-radius:3px;font-size:7.8px;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;">
                       <strong style="color:${colorInfo.hex};">${s.startTime || '07:00'}-${s.endTime || '19:00'}</strong> - ${
                     doc?.name || 'Médico'
-                  } ${hasSwap ? '🔄' : ''}
+                  }${leaderTag} ${hasSwap ? '🔄' : ''}
                     </div>
                   `;
                 })
@@ -1621,6 +1735,7 @@ export default function ScheduleAndMapViews(props: any) {
                   const exactFunctionName = resolveExactFunctionName(s, doc);
                   const colorInfo = getFunctionColorInfo(exactFunctionName);
                   const hasSwap = isShiftInvolvedInApprovedSwap(s);
+                  const isLeader = Boolean(s?.isNightLeader);
 
                   const isNightShift = String(s?.startTime || '') >= '19:00';
                   let dividerRow = '';
@@ -1642,7 +1757,11 @@ export default function ScheduleAndMapViews(props: any) {
                         ${s.startTime || '07:00'} às ${s.endTime || '19:00'}
                       </td>
                       <td style="padding:5.5px 10px;border:1px solid #cbd5e1;font-weight:800;color:#0f172a;">
-                        ${doc?.name || 'Médico'}
+                        ${doc?.name || 'Médico'} ${
+                    isLeader
+                      ? `<span style="margin-left:6px;padding:1px 6px;border-radius:4px;background:#fef3c7;color:#92400e;font-size:9px;font-weight:900;">👑 Líder Noturno</span>`
+                      : ''
+                  }
                       </td>
                       <td style="padding:5.5px 10px;border:1px solid #cbd5e1;font-weight:800;width:270px;">
                         <span style="display:inline-block;padding:2.5px 8px;border-radius:4px;background:${colorInfo.hex} !important;color:#ffffff;font-size:9.5px;-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important;">
@@ -1821,9 +1940,6 @@ export default function ScheduleAndMapViews(props: any) {
     }
   };
 
-  // ============================================================================
-  // ALOCAR NOVO PLANTÃO COM OS 3 REGIMES + VAGA EXTRA PLANEJADA
-  // ============================================================================
   const handleAddShiftWithRecurrence = (e: React.FormEvent) => {
     e.preventDefault();
     if (!isAdmin) return;
@@ -1839,6 +1955,14 @@ export default function ScheduleAndMapViews(props: any) {
     const totalOccurrences = newShiftForm.repeatWeeklyInMonth
       ? Math.max(1, Math.min(5, Number(newShiftForm.repeatWeeksCount || 4)))
       : 1;
+
+    const hasCoordValue =
+      newShiftForm.coordinationShiftValue !== '' &&
+      newShiftForm.coordinationShiftValue !== null &&
+      !isNaN(Number(newShiftForm.coordinationShiftValue));
+    const parsedCoordValue = hasCoordValue
+      ? Number(newShiftForm.coordinationShiftValue)
+      : undefined;
 
     const createdShifts: any[] = [];
     for (let i = 0; i < totalOccurrences; i++) {
@@ -1860,6 +1984,8 @@ export default function ScheduleAndMapViews(props: any) {
           category: newShiftForm.category,
           shiftType: 'Coringa/Extra',
           modality: 'Coringa/Extra',
+          isNightLeader: Boolean(newShiftForm.isNightLeader),
+          coordinationShiftValue: parsedCoordValue,
           displayOrder: existingCountOnDate + i,
           additionals: []
         });
@@ -1880,6 +2006,8 @@ export default function ScheduleAndMapViews(props: any) {
           category: newShiftForm.category,
           shiftType: 'Coringa/Extra',
           modality: 'Coringa/Extra',
+          isNightLeader: Boolean(newShiftForm.isNightLeader),
+          coordinationShiftValue: parsedCoordValue,
           displayOrder: existingCountOnDate + i,
           additionals: []
         });
@@ -1897,6 +2025,8 @@ export default function ScheduleAndMapViews(props: any) {
           category: newShiftForm.category,
           shiftType: newShiftForm.shiftType,
           modality: newShiftForm.shiftType,
+          isNightLeader: Boolean(newShiftForm.isNightLeader),
+          coordinationShiftValue: parsedCoordValue,
           displayOrder: existingCountOnDate + i,
           additionals: []
         });
@@ -1936,10 +2066,6 @@ export default function ScheduleAndMapViews(props: any) {
     }
   };
 
-  // ============================================================================
-  // 3. SE A ABA ATIVA FOR 'SWAPS', DELEGA PARA O COMPONENTE COMPARTIMENTALIZADO
-  // (AGORA APÓS TODOS OS HOOKS TEREM SIDO LIDOS, ELIMINANDO O ERRO #300)
-  // ============================================================================
   if (currentView === 'swaps') {
     return (
       <>
@@ -1998,9 +2124,6 @@ export default function ScheduleAndMapViews(props: any) {
     );
   }
 
-  // ============================================================================
-  // 4. VIEW: PLANTÕES EM ABERTO & BANCO DE DISPONIBILIDADE (OPEN_SHIFTS)
-  // ============================================================================
   if (currentView === 'open_shifts') {
     const handleAddOpenShift = (e: React.FormEvent) => {
       e.preventDefault();
@@ -2386,7 +2509,6 @@ export default function ScheduleAndMapViews(props: any) {
       )
     : [];
 
-  // Modal Rápido de Troca / Passagem / Permuta / Dispensa
   const renderQuickSwapModal = () => {
     if (!quickSwapShiftObj) return null;
     return (
@@ -2797,9 +2919,6 @@ export default function ScheduleAndMapViews(props: any) {
     );
   };
 
-  // ============================================================================
-  // 5. VIEW: MEU PAINEL / DASHBOARD
-  // ============================================================================
   if (currentView === 'dashboard') {
     const pendingSwapsCount = safeSwaps.filter(
       (s: any) =>
@@ -2807,10 +2926,6 @@ export default function ScheduleAndMapViews(props: any) {
         s?.status === 'Em Revisão Solicitada' ||
         s?.status === 'Revisão Solicitada pelo Gestor'
     ).length;
-    const totalPayrollNet = safePayroll.reduce(
-      (acc: number, item: any) => acc + Number(item?.netTotal || 0),
-      0
-    );
 
     const myUpcomingShifts = sortShiftsByManagerOrArrival(
       safeShifts.filter(
@@ -3000,7 +3115,7 @@ export default function ScheduleAndMapViews(props: any) {
             </div>
 
             <div
-             onClick={() => safeNavigate('payroll')}
+              onClick={() => safeNavigate('payroll')}
               className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm hover:shadow-md transition-all cursor-pointer"
             >
               <span className="text-[11px] font-extrabold uppercase text-emerald-700">
@@ -3016,7 +3131,6 @@ export default function ScheduleAndMapViews(props: any) {
           </div>
         )}
 
-        {/* SECÇÃO DE CURSOS AGENDADOS NO PAINEL DO MÉDICO */}
         {!isAdmin && myScheduledCourses.length > 0 && (
           <div className="bg-indigo-950 text-white p-5 rounded-2xl border border-indigo-700 shadow-sm space-y-3 text-xs">
             <div className="flex items-center justify-between gap-2">
@@ -3055,7 +3169,6 @@ export default function ScheduleAndMapViews(props: any) {
           </div>
         )}
 
-        {/* PAINEL DO MÉDICO: CALENDÁRIO MENSAL DOS PLANTÕES ALOCADOS + BOTÃO DE SOLICITAR TROCA */}
         {!isAdmin && (
           <div className="bg-white p-5 sm:p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4 text-xs">
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-3">
@@ -3353,7 +3466,6 @@ export default function ScheduleAndMapViews(props: any) {
 
   return (
     <div className="space-y-6 text-slate-800">
-      {/* Barra Superior de Controlo e Exportação PDF (Dia e 7 Dias para Escala e Heatmap) */}
       <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           <div>
@@ -3378,15 +3490,9 @@ export default function ScheduleAndMapViews(props: any) {
                 }
                 className="bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 font-extrabold text-slate-900 text-xs mr-1.5"
               >
-                <option value="8pages">
-                  Escala 7 Dias + Semanal (8 Págs.)
-                </option>
-                <option value="day">
-                  Escala do Dia ({formatShortBrDate(selectedDate)})
-                </option>
-                <option value="1page">
-                  Apenas Grade Semanal (1 Pág.)
-                </option>
+                <option value="8pages">Escala 7 Dias + Semanal (8 Págs.)</option>
+                <option value="day">Escala do Dia ({formatShortBrDate(selectedDate)})</option>
+                <option value="1page">Apenas Grade Semanal (1 Pág.)</option>
               </select>
               <button
                 type="button"
@@ -3422,7 +3528,6 @@ export default function ScheduleAndMapViews(props: any) {
           </div>
         </div>
 
-        {/* NAVEGADOR POR MESES + SEMANAS + ESCALA PADRÃO + SUPER CLONAGEM */}
         <div className="p-3.5 rounded-2xl bg-slate-900 text-white space-y-3 text-xs">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-1.5 bg-slate-800/90 p-1.5 rounded-xl border border-slate-700">
@@ -3554,7 +3659,6 @@ export default function ScheduleAndMapViews(props: any) {
           </div>
         )}
 
-        {/* Legenda Rápida de Cores por Função */}
         <div className="p-2.5 rounded-xl bg-slate-50 border border-slate-200 flex flex-wrap items-center gap-3 text-[11px]">
           <span className="font-extrabold text-slate-700 flex items-center gap-1">
             <Palette size={14} className="text-blue-600" /> Cores das Funções:
@@ -3576,7 +3680,6 @@ export default function ScheduleAndMapViews(props: any) {
           })}
         </div>
 
-        {/* BARRA DE FILTROS */}
         <div className="pt-2 border-t border-slate-100 flex flex-col xl:flex-row xl:items-center justify-between gap-3 text-xs">
           <div className="flex flex-wrap items-center gap-2">
             <select
@@ -3678,7 +3781,6 @@ export default function ScheduleAndMapViews(props: any) {
         </div>
       </div>
 
-      {/* Formulário do Gestor para Alocar Plantão */}
       {isAdmin && (
         <form
           onSubmit={handleAddShiftWithRecurrence}
@@ -3898,9 +4000,7 @@ export default function ScheduleAndMapViews(props: any) {
                   }
                   className="w-4 h-4 accent-blue-600"
                 />
-                <span>
-                  🔁 Repetir semanalmente a cada 7 dias (Recorrência no mês)
-                </span>
+                <span>🔁 Repetir semanalmente a cada 7 dias (Recorrência no mês)</span>
               </label>
 
               {newShiftForm.repeatWeeklyInMonth && (
@@ -3921,6 +4021,22 @@ export default function ScheduleAndMapViews(props: any) {
                   </select>
                 </div>
               )}
+
+              <label className="inline-flex items-center gap-1.5 font-extrabold text-amber-950 bg-amber-50 px-3 py-1.5 rounded-xl border border-amber-300 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={Boolean(newShiftForm.isNightLeader)}
+                  onChange={e =>
+                    setNewShiftForm({
+                      ...newShiftForm,
+                      isNightLeader: e.target.checked
+                    })
+                  }
+                  className="w-4 h-4 accent-amber-600"
+                />
+                <Crown size={13} className="text-amber-600" />
+                <span>Líder de Plantão Noturno (Chefia)</span>
+              </label>
             </div>
 
             <button
@@ -3934,7 +4050,7 @@ export default function ScheduleAndMapViews(props: any) {
       )}
 
       {/* ==========================================================================
-          BLOCO 1: GRADE DA ESCALA SEMANAL ORIGINAL (SEG-DOM) COM ORDENAMENTO ▲/▼
+          BLOCO 1: GRADE DA ESCALA SEMANAL (SEG-DOM) COM CARDS MAIS LARGOS
          ========================================================================== */}
       {(displayMode === 'both' || displayMode === 'weekly') && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
@@ -3991,7 +4107,7 @@ export default function ScheduleAndMapViews(props: any) {
             </div>
           </div>
 
-          <div className="grid grid-cols-7 min-w-[1060px] divide-x divide-slate-200 text-xs">
+          <div className="grid grid-cols-7 min-w-[1360px] divide-x divide-slate-200 text-xs">
             {weekDays.map(wd => {
               const dayList = sortShiftsByManagerOrArrival(
                 filteredShifts.filter(
@@ -4005,13 +4121,13 @@ export default function ScheduleAndMapViews(props: any) {
                   <button
                     type="button"
                     onClick={() => setSelectedDate(wd.date)}
-                    className={`p-3 text-center border-b transition-colors ${
+                    className={`p-2.5 text-center border-b transition-colors ${
                       isSelectedDay
                         ? 'bg-blue-600 text-white'
                         : 'bg-slate-900 text-white hover:bg-slate-800'
                     }`}
                   >
-                    <span className="block font-black uppercase text-[11px]">
+                    <span className="font-black uppercase text-[11px] mr-1.5">
                       {wd.short}
                     </span>
                     <span className="text-[11px] opacity-90">
@@ -4019,7 +4135,7 @@ export default function ScheduleAndMapViews(props: any) {
                     </span>
                   </button>
 
-                  <div className="p-2 space-y-2 flex-1 bg-slate-50/40">
+                  <div className="p-2 space-y-1.5 flex-1 bg-slate-50/40">
                     {dayList.length === 0 ? (
                       <div className="text-center py-6 text-slate-400 text-[11px] italic">
                         Sem plantões
@@ -4031,6 +4147,7 @@ export default function ScheduleAndMapViews(props: any) {
                         const colorInfo = getFunctionColorInfo(fnName);
                         const hasSwap = isShiftInvolvedInApprovedSwap(s);
                         const isPlannedOpen = Boolean(s.isPlannedOpenExtra);
+                        const isLeader = Boolean(s.isNightLeader);
                         const canRequestSwapOnCard =
                           !isPlannedOpen &&
                           (isAdmin || Number(s?.doctorId) === Number(currentUser?.id));
@@ -4042,32 +4159,33 @@ export default function ScheduleAndMapViews(props: any) {
                               isPlannedOpen
                                 ? {
                                     borderColor: '#9333ea',
-                                    borderLeft: `5px dashed #9333ea`,
+                                    borderLeft: `4px dashed #9333ea`,
                                     backgroundColor: '#faf5ff'
                                   }
                                 : {
                                     borderColor: colorInfo.borderHex,
-                                    borderLeft: `5px solid ${colorInfo.hex}`,
+                                    borderLeft: `4px solid ${colorInfo.hex}`,
                                     backgroundColor: colorInfo.softBgHex
                                   }
                             }
-                            className={`p-2.5 rounded-xl border shadow-xs space-y-1.5 transition-all ${
+                            className={`px-2.5 py-2 rounded-lg border shadow-2xs space-y-1 transition-all ${
                               isPlannedOpen ? 'border-dashed' : ''
                             }`}
                           >
-                            <div className="flex items-center justify-between gap-1">
+                            {/* Linha 1: Horário + Ações compactas na mesma linha */}
+                            <div className="flex items-center justify-between gap-1.5">
                               <span
                                 style={{
                                   backgroundColor: isPlannedOpen
                                     ? '#7e22ce'
                                     : colorInfo.hex
                                 }}
-                                className="px-1.5 py-0.5 rounded text-white font-black text-[10px]"
+                                className="px-1.5 py-0.5 rounded text-white font-black text-[10px] shrink-0"
                               >
                                 {s.startTime}-{s.endTime}
                               </span>
 
-                              <div className="flex items-center gap-0.5 bg-white/95 px-1 py-0.5 rounded-md border border-slate-200">
+                              <div className="flex items-center gap-0.5 bg-white/95 px-1 py-0.5 rounded border border-slate-200 shrink-0">
                                 {isAdmin && (
                                   <>
                                     <button
@@ -4081,9 +4199,9 @@ export default function ScheduleAndMapViews(props: any) {
                                           ? 'text-slate-300 cursor-not-allowed'
                                           : 'text-slate-700 hover:bg-slate-200'
                                       }`}
-                                      title="Subir posição na escala do dia"
+                                      title="Subir posição"
                                     >
-                                      <ArrowUp size={11} />
+                                      <ArrowUp size={10} />
                                     </button>
                                     <button
                                       type="button"
@@ -4096,9 +4214,9 @@ export default function ScheduleAndMapViews(props: any) {
                                           ? 'text-slate-300 cursor-not-allowed'
                                           : 'text-slate-700 hover:bg-slate-200'
                                       }`}
-                                      title="Descer posição na escala do dia"
+                                      title="Descer posição"
                                     >
-                                      <ArrowDown size={11} />
+                                      <ArrowDown size={10} />
                                     </button>
                                   </>
                                 )}
@@ -4108,9 +4226,9 @@ export default function ScheduleAndMapViews(props: any) {
                                     type="button"
                                     onClick={e => handleOpenQuickSwapFromCard(s, e)}
                                     className="p-0.5 text-amber-700 hover:bg-amber-100 rounded"
-                                    title="Solicitar / Registar Troca, Permuta, Passagem ou Dispensa"
+                                    title="Troca / Permuta / Passagem / Dispensa"
                                   >
-                                    <ArrowLeftRight size={11} />
+                                    <ArrowLeftRight size={10} />
                                   </button>
                                 )}
 
@@ -4122,7 +4240,7 @@ export default function ScheduleAndMapViews(props: any) {
                                       className="p-0.5 text-blue-700 hover:bg-blue-100 rounded"
                                       title="Editar turno"
                                     >
-                                      <Edit3 size={11} />
+                                      <Edit3 size={10} />
                                     </button>
                                     <button
                                       type="button"
@@ -4130,22 +4248,31 @@ export default function ScheduleAndMapViews(props: any) {
                                       className="p-0.5 text-red-500 hover:bg-red-100 rounded"
                                       title="Excluir turno"
                                     >
-                                      <Trash2 size={11} />
+                                      <Trash2 size={10} />
                                     </button>
                                   </>
                                 )}
                               </div>
                             </div>
 
-                            <strong
-                              className={`block font-extrabold leading-tight ${
-                                isPlannedOpen ? 'text-purple-900' : 'text-slate-900'
-                              }`}
-                            >
-                              {doc?.name || 'Médico'} {hasSwap ? '🔄' : ''}
-                            </strong>
+                            {/* Linha 2: Nome do médico com largura ampla */}
+                            <div className="flex items-center justify-between gap-1">
+                              <strong
+                                className={`font-extrabold text-[11px] leading-snug truncate ${
+                                  isPlannedOpen ? 'text-purple-900' : 'text-slate-900'
+                                }`}
+                                title={doc?.name || 'Médico'}
+                              >
+                                {doc?.name || 'Médico'}
+                              </strong>
+                              <span className="shrink-0 text-[10px]">
+                                {isLeader ? '👑' : ''}
+                                {hasSwap ? '🔄' : ''}
+                              </span>
+                            </div>
 
-                            <div className="flex items-center justify-between text-[10px] gap-1 pt-0.5">
+                            {/* Linha 3: Função e regime lado a lado */}
+                            <div className="flex items-center justify-between text-[9.5px] gap-1.5">
                               <span
                                 style={{ backgroundColor: colorInfo.hex }}
                                 className="px-1.5 py-0.5 rounded text-white font-extrabold truncate"
@@ -4153,7 +4280,7 @@ export default function ScheduleAndMapViews(props: any) {
                               >
                                 {fnName}
                               </span>
-                              <span className="font-bold text-slate-600 shrink-0">
+                              <span className="font-bold text-slate-600 truncate shrink-0">
                                 {doc.isManual
                                   ? 'Manual'
                                   : getRegimeShortBadge(s.shiftType, isPlannedOpen)}
@@ -4171,7 +4298,7 @@ export default function ScheduleAndMapViews(props: any) {
         </div>
       )}
 
-      {/* PAINEL DE VISUALIZAÇÃO NA ESCALA OFICIAL: TROCAS DA SEMANA & FÉRIAS DO MÊS */}
+      {/* TROCAS DA SEMANA & FÉRIAS DO MÊS */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 text-xs">
         <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-3">
           <div className="flex items-center justify-between border-b border-slate-100 pb-2">
@@ -4294,10 +4421,7 @@ export default function ScheduleAndMapViews(props: any) {
         </div>
       </div>
 
-      {/* ==========================================================================
-          BLOCO 2: MATRIZ HEATMAP VISUAL ASSISTENCIAL 24H ORIGINAL
-          (CICLO 07H ÀS 06H + PASSAGEM 07H DO DIA SEGUINTE + META IDEAL EDITÁVEL)
-         ========================================================================== */}
+      {/* BLOCO 2: MATRIZ HEATMAP 24H */}
       {(displayMode === 'both' || displayMode === 'heatmap' || currentView === 'heatmap') && (
         <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-x-auto">
           <div className="p-4 border-b border-slate-100 space-y-3">
@@ -4455,6 +4579,7 @@ export default function ScheduleAndMapViews(props: any) {
                   const fnName = resolveExactFunctionName(s, doc);
                   const colorInfo = getFunctionColorInfo(fnName);
                   const hasSwap = isShiftInvolvedInApprovedSwap(s);
+                  const isLeader = Boolean(s.isNightLeader);
 
                   return (
                     <tr key={s.id} className="hover:bg-slate-50">
@@ -4473,7 +4598,7 @@ export default function ScheduleAndMapViews(props: any) {
                         className="py-1.5 px-2.5 truncate"
                       >
                         <strong className="text-slate-900 block leading-tight text-[11px] truncate">
-                          {doc?.name || 'Médico'} {hasSwap ? '🔄' : ''}
+                          {doc?.name || 'Médico'} {isLeader ? '👑' : ''} {hasSwap ? '🔄' : ''}
                         </strong>
                         <span
                           style={{ color: colorInfo.hex }}
@@ -4633,7 +4758,7 @@ export default function ScheduleAndMapViews(props: any) {
         </div>
       )}
 
-      {/* MODAL DE EDIÇÃO DIRETA DE PLANTÃO JÁ ALOCADO (EXCLUSIVO GESTOR) */}
+      {/* MODAL DE EDIÇÃO DIRETA DE PLANTÃO (EXCLUSIVO GESTOR) */}
       {isAdmin && editingShiftObj && (
         <div className="fixed inset-0 z-50 bg-slate-950/70 backdrop-blur-xs flex items-center justify-center p-4">
           <div className="bg-white w-full max-w-xl rounded-3xl shadow-2xl border border-slate-200 overflow-hidden text-xs text-slate-800">
@@ -4643,7 +4768,7 @@ export default function ScheduleAndMapViews(props: any) {
                   Editar Plantão / Alocar Vaga na Escala
                 </h3>
                 <p className="text-[11px] text-slate-400">
-                  Altere o médico (A-Z), o horário, a função, o regime de remuneração ou os adicionais do turno.
+                  Escolha se a mudança é pontual ou valendo para frente, defina o Líder Noturno e ajuste os dados do turno.
                 </p>
               </div>
               <button
@@ -4656,6 +4781,78 @@ export default function ScheduleAndMapViews(props: any) {
             </div>
 
             <form onSubmit={handleSaveEditedShift} className="p-6 space-y-4 max-h-[82vh] overflow-y-auto">
+              {/* ESCOPO: PONTUAL VS. VALENDO PARA FRENTE */}
+              <div className="p-3 rounded-2xl bg-indigo-50 border-2 border-indigo-300 space-y-1.5">
+                <label className="block font-black text-indigo-950 text-[11px]">
+                  🔁 Escopo da Alteração (Pontual ou Valendo para Frente):
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setEditShiftForm({ ...editShiftForm, editScope: 'single' })}
+                    className={`py-2 px-3 rounded-xl font-extrabold text-[11px] border text-left transition-all ${
+                      editShiftForm.editScope === 'single'
+                        ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
+                        : 'bg-white text-slate-700 border-slate-300'
+                    }`}
+                  >
+                    📍 Pontual (Somente este plantão)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setEditShiftForm({ ...editShiftForm, editScope: 'from_here_onward' })
+                    }
+                    className={`py-2 px-3 rounded-xl font-extrabold text-[11px] border text-left transition-all ${
+                      editShiftForm.editScope === 'from_here_onward'
+                        ? 'bg-indigo-600 text-white border-indigo-700 shadow-xs'
+                        : 'bg-white text-slate-700 border-slate-300'
+                    }`}
+                  >
+                    ⏭️ Valendo para frente (Deste plantão em diante)
+                  </button>
+                </div>
+              </div>
+
+              {/* LÍDER DE PLANTÃO NOTURNO + VALOR DA COORDENAÇÃO */}
+              <div className="p-3 rounded-2xl bg-amber-50 border-2 border-amber-300 grid grid-cols-1 sm:grid-cols-2 gap-3 items-center">
+                <label className="inline-flex items-center gap-2 font-black text-amber-950 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(editShiftForm.isNightLeader)}
+                    onChange={e =>
+                      setEditShiftForm({
+                        ...editShiftForm,
+                        isNightLeader: e.target.checked
+                      })
+                    }
+                    className="w-4 h-4 accent-amber-600"
+                  />
+                  <Crown size={15} className="text-amber-600" />
+                  <span>👑 Líder de Plantão Noturno (Chefia)</span>
+                </label>
+
+                <div>
+                  <label className="block font-extrabold text-amber-950 mb-1 text-[10px]">
+                    ⭐ Valor Definido pela Coordenação / Atratividade (R$ — Opcional):
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min={0}
+                    placeholder="Ex: 2200 (Opcional)"
+                    value={editShiftForm.coordinationShiftValue}
+                    onChange={e =>
+                      setEditShiftForm({
+                        ...editShiftForm,
+                        coordinationShiftValue: e.target.value
+                      })
+                    }
+                    className="w-full border border-amber-400 rounded-xl px-2.5 py-1.5 bg-white font-black text-slate-900"
+                  />
+                </div>
+              </div>
+
               <div className="inline-flex rounded-xl bg-slate-100 p-1 font-extrabold text-[11px] w-full gap-1">
                 <button
                   type="button"
@@ -4892,12 +5089,15 @@ export default function ScheduleAndMapViews(props: any) {
                 <button
                   type="button"
                   onClick={e => {
-                    handleDeleteShift(editingShiftObj.id, e);
+                    handleDeleteShift(editingShiftObj.id, e, editShiftForm.editScope);
                     setEditingShiftObj(null);
                   }}
                   className="px-4 py-2 rounded-xl bg-red-50 hover:bg-red-100 text-red-700 font-extrabold flex items-center gap-1.5"
                 >
-                  <Trash2 size={14} /> Excluir Plantão
+                  <Trash2 size={14} />{' '}
+                  {editShiftForm.editScope === 'from_here_onward'
+                    ? 'Excluir Deste em Diante'
+                    : 'Excluir Plantão'}
                 </button>
 
                 <div className="flex items-center gap-2">

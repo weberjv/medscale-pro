@@ -7,6 +7,10 @@ import {
   Lock, Unlock, X, Calendar, Sparkles, CheckSquare, Tag,
   BarChart3, Megaphone, Save, Lightbulb, CalendarCheck, MapPin
 } from 'lucide-react';
+import {
+  applyVacationSubstitutionsOnShiftsHelper,
+  revertVacationSubstitutionsOnShiftsHelper
+} from './SwapsManagementView';
 
 export default function GovernanceAndModals(props: any) {
   const {
@@ -73,6 +77,7 @@ export default function GovernanceAndModals(props: any) {
     })
   );
   const safeActiveDoctors = safeDoctors.filter((d: any) => d?.status === 'Ativo');
+  const safeShifts = Array.isArray(shifts) ? shifts : [];
   const safeVacations = Array.isArray(vacations) ? vacations : [];
   const safeCourses = Array.isArray(courses) ? courses : [];
   const safeOccurrences = Array.isArray(occurrences) ? occurrences : [];
@@ -145,7 +150,15 @@ export default function GovernanceAndModals(props: any) {
   });
   const [vacErrorMsg, setVacErrorMsg] = useState<string>('');
   const [subDraftByVacId, setSubDraftByVacId] = useState<
-    Record<number, { dateInfo: string; substituteDoctorId: number; notes: string }>
+    Record<
+      number,
+      {
+        dateInfo: string;
+        substituteDoctorId: number;
+        substituteBillingMode: 'payroll_extra' | 'direct_settlement';
+        notes: string;
+      }
+    >
   >({});
   const [vacReviewInput, setVacReviewInput] = useState<Record<number, string>>({});
   const [openVacReviewId, setOpenVacReviewId] = useState<number | null>(null);
@@ -233,6 +246,10 @@ export default function GovernanceAndModals(props: any) {
       reason: vacForm.reason.trim() || `${vacForm.requestType} programada`,
       status: 'Pendente',
       substitutions: [],
+      titularPayMode: 'integral' as 'integral' | 'fraction',
+      titularFractionPercent: 50,
+      substituteBillingMode: 'payroll_extra' as 'payroll_extra' | 'direct_settlement',
+      managerFinancialComment: '',
       reviewNote: ''
     };
 
@@ -244,7 +261,6 @@ export default function GovernanceAndModals(props: any) {
       )} a ${formatBrDate(newVac.endDate)})`
     );
 
-    // Exibe o Pop-up de confirmação "Solicitação enviada"
     setRequestSentPopup({
       open: true,
       title: 'Solicitação enviada!',
@@ -254,6 +270,20 @@ export default function GovernanceAndModals(props: any) {
         newVac.endDate
       )}) foi registado e enviado para análise da coordenação.`
     });
+  };
+
+  const handleUpdateVacationFinancialRule = (vacId: number, patch: Record<string, any>) => {
+    if (!isAdmin) return;
+    safeSetVacations((prev: any[]) =>
+      (Array.isArray(prev) ? prev : []).map((v: any) => {
+        if (Number(v?.id) !== Number(vacId)) return v;
+        const updated = { ...v, ...patch };
+        if (updated.status === 'Aprovado') {
+          applyVacationSubstitutionsOnShiftsHelper(updated, safeShifts, safeSetShifts);
+        }
+        return updated;
+      })
+    );
   };
 
   const handleInitialApproveVacation = (vacId: number) => {
@@ -277,6 +307,7 @@ export default function GovernanceAndModals(props: any) {
     const draft = subDraftByVacId[vacId] || {
       dateInfo: '',
       substituteDoctorId: safeActiveDoctors[0]?.id || 1,
+      substituteBillingMode: 'payroll_extra' as 'payroll_extra' | 'direct_settlement',
       notes: ''
     };
     if (!draft.dateInfo.trim()) {
@@ -290,6 +321,7 @@ export default function GovernanceAndModals(props: any) {
       dateInfo: draft.dateInfo.trim(),
       substituteDoctorId: Number(draft.substituteDoctorId),
       substituteDoctorName: subDoc?.name || 'Médico Substituto',
+      substituteBillingMode: draft.substituteBillingMode || 'payroll_extra',
       notes: draft.notes.trim()
     };
 
@@ -297,10 +329,14 @@ export default function GovernanceAndModals(props: any) {
       (Array.isArray(prev) ? prev : []).map((v: any) => {
         if (Number(v?.id) !== Number(vacId)) return v;
         const currSubs = Array.isArray(v.substitutions) ? v.substitutions : [];
-        return {
+        const updatedVac = {
           ...v,
           substitutions: [...currSubs, newSubEntry]
         };
+        if (updatedVac.status === 'Aprovado') {
+          applyVacationSubstitutionsOnShiftsHelper(updatedVac, safeShifts, safeSetShifts);
+        }
+        return updatedVac;
       })
     );
 
@@ -309,6 +345,7 @@ export default function GovernanceAndModals(props: any) {
       [vacId]: {
         dateInfo: '',
         substituteDoctorId: safeActiveDoctors[0]?.id || 1,
+        substituteBillingMode: 'payroll_extra',
         notes: ''
       }
     }));
@@ -331,6 +368,18 @@ export default function GovernanceAndModals(props: any) {
 
   const handleFinalApproveVacation = (vacId: number) => {
     if (!isAdmin) return;
+    const targetVac = safeVacations.find((v: any) => Number(v?.id) === Number(vacId));
+    let affectedShifts = 0;
+
+    if (targetVac) {
+      const res = applyVacationSubstitutionsOnShiftsHelper(
+        targetVac,
+        safeShifts,
+        safeSetShifts
+      );
+      affectedShifts = res.affectedCount;
+    }
+
     safeSetVacations((prev: any[]) =>
       (Array.isArray(prev) ? prev : []).map((v: any) =>
         Number(v?.id) === Number(vacId)
@@ -341,11 +390,18 @@ export default function GovernanceAndModals(props: any) {
           : v
       )
     );
-    safeRecordAction(`Férias/Licença #${vacId} e respetivas substituições homologadas definitivamente!`);
+    safeRecordAction(
+      `Férias/Licença #${vacId} homologada definitivamente e aplicada na escala (${affectedShifts} plantão(ões) substituído(s) automaticamente)!`
+    );
   };
 
   const handleRejectVacation = (vacId: number) => {
     if (!isAdmin) return;
+    const targetVac = safeVacations.find((v: any) => Number(v?.id) === Number(vacId));
+    if (targetVac) {
+      revertVacationSubstitutionsOnShiftsHelper(targetVac, safeSetShifts);
+    }
+
     safeSetVacations((prev: any[]) =>
       (Array.isArray(prev) ? prev : []).map((v: any) =>
         Number(v?.id) === Number(vacId) ? { ...v, status: 'Recusado' } : v
@@ -356,6 +412,11 @@ export default function GovernanceAndModals(props: any) {
 
   const handleUndoOrReanalyzeVacation = (vacId: number) => {
     if (!isAdmin) return;
+    const targetVac = safeVacations.find((v: any) => Number(v?.id) === Number(vacId));
+    if (targetVac) {
+      revertVacationSubstitutionsOnShiftsHelper(targetVac, safeSetShifts);
+    }
+
     safeSetVacations((prev: any[]) =>
       (Array.isArray(prev) ? prev : []).map((v: any) =>
         Number(v?.id) === Number(vacId)
@@ -366,7 +427,9 @@ export default function GovernanceAndModals(props: any) {
           : v
       )
     );
-    safeRecordAction(`Férias/Licença #${vacId} revertida pelo gestor para Re-análise (Pendente)`);
+    safeRecordAction(
+      `Férias/Licença #${vacId} revertida pelo gestor para Re-análise (titular restaurado na escala)`
+    );
   };
 
   const handleRequestVacationReview = (vacId: number) => {
@@ -443,7 +506,6 @@ export default function GovernanceAndModals(props: any) {
     certificateNumber: ''
   });
 
-  // Novo Estado para Agendamento de Curso da Equipe (Gestor)
   const [scheduleCourseForm, setScheduleCourseForm] = useState({
     doctorId: safeActiveDoctors[0]?.id || 1,
     courseName: registeredCourseTypes[0]?.name || 'ACLS',
@@ -737,20 +799,6 @@ export default function GovernanceAndModals(props: any) {
     status: 'Ativo'
   });
 
-  const [modalWhDraft, setModalWhDraft] = useState({
-    type: 'Início de Função',
-    date: todayIsoStr,
-    endDate: '',
-    details: ''
-  });
-
-  const [modalOccDraft, setModalOccDraft] = useState({
-    date: todayIsoStr,
-    severity: 'Apontamento Operacional',
-    title: '',
-    description: ''
-  });
-
   useEffect(() => {
     if (isDoctorModalOpen) {
       if (editingDoctor) {
@@ -896,7 +944,7 @@ export default function GovernanceAndModals(props: any) {
 
   const renderActiveGovernanceView = () => {
     // --------------------------------------------------------------------------
-    // 1. ABA: FÉRIAS & LICENÇAS
+    // 1. ABA: FÉRIAS & LICENÇAS (COM APLICAÇÃO AUTOMÁTICA NA ESCALA + REGRA PJ)
     // --------------------------------------------------------------------------
     if (currentView === 'vacations') {
       const yearStr = String(matrixYear);
@@ -931,7 +979,7 @@ export default function GovernanceAndModals(props: any) {
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
                 {isAdmin
-                  ? 'Mapa Matriz Anual (Mês × Médicos em Férias/Licença), Bloqueio/Desbloqueio de Meses e Homologação em 2 Etapas com Substituições.'
+                  ? 'Ao homologar férias com substituições, o sistema aloca automaticamente os substitutos na escala e aplica a regra financeira (Integral ou Fração) na Folha PJ.'
                   : 'Solicite férias ou licenças, indique os colegas substitutos após a aprovação inicial e solicite revisão caso necessário.'}
               </p>
             </div>
@@ -1239,6 +1287,7 @@ export default function GovernanceAndModals(props: any) {
               const draft = subDraftByVacId[v.id] || {
                 dateInfo: '',
                 substituteDoctorId: safeActiveDoctors[0]?.id || 1,
+                substituteBillingMode: 'payroll_extra' as 'payroll_extra' | 'direct_settlement',
                 notes: ''
               };
 
@@ -1312,7 +1361,7 @@ export default function GovernanceAndModals(props: any) {
                           onClick={() => handleFinalApproveVacation(v.id)}
                           className="bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 rounded-xl font-bold flex items-center gap-1 shadow-sm"
                         >
-                          <CheckCircle size={14} /> 2. Homologar Substituições & Concluir
+                          <CheckCircle size={14} /> 2. Homologar & Aplicar na Escala
                         </button>
                       )}
 
@@ -1348,6 +1397,99 @@ export default function GovernanceAndModals(props: any) {
                     </div>
                   </div>
 
+                  {/* CONTROLES FINANCEIROS DA COORDENAÇÃO (INTEGRAL VS. FRAÇÃO + FORMA DE PAGAMENTO) */}
+                  {isAdmin && (
+                    <div className="p-3.5 rounded-xl bg-emerald-50/70 border border-emerald-200 space-y-2.5">
+                      <span className="block font-extrabold text-emerald-950 uppercase text-[10px]">
+                        💰 Regras Financeiras das Férias / Licença na Folha PJ (Critério da Coordenação):
+                      </span>
+
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div>
+                          <label className="block text-[10px] font-extrabold text-slate-700 mb-1">
+                            1. Remuneração de {doc?.name || 'Médico em Férias'}:
+                          </label>
+                          <div className="flex items-center gap-1.5">
+                            <select
+                              value={v.titularPayMode || 'integral'}
+                              onChange={e =>
+                                handleUpdateVacationFinancialRule(v.id, {
+                                  titularPayMode: e.target.value
+                                })
+                              }
+                              className="flex-1 border border-emerald-300 rounded-lg px-2 py-1.5 bg-white font-bold text-slate-900"
+                            >
+                              <option value="integral">
+                                ✓ Recebe Valor Integral (Abonado)
+                              </option>
+                              <option value="fraction">
+                                ⚖️ Recebe Fração (% da Cota Fixa)
+                              </option>
+                              <option value="none">
+                                ⚠️ Sem Remuneração no Período (Desconto 100%)
+                              </option>
+                            </select>
+
+                            {v.titularPayMode === 'fraction' && (
+                              <input
+                                type="number"
+                                min={0}
+                                max={100}
+                                value={v.titularFractionPercent ?? 50}
+                                onChange={e =>
+                                  handleUpdateVacationFinancialRule(v.id, {
+                                    titularFractionPercent: Number(e.target.value)
+                                  })
+                                }
+                                className="w-16 border border-emerald-400 rounded-lg px-1.5 py-1.5 bg-white font-black text-center"
+                                title="Percentual que o médico em férias recebe (%)"
+                              />
+                            )}
+                          </div>
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-extrabold text-slate-700 mb-1">
+                            2. Forma de Pagamento Padrão do Substituto:
+                          </label>
+                          <select
+                            value={v.substituteBillingMode || 'payroll_extra'}
+                            onChange={e =>
+                              handleUpdateVacationFinancialRule(v.id, {
+                                substituteBillingMode: e.target.value
+                              })
+                            }
+                            className="w-full border border-emerald-300 rounded-lg px-2 py-1.5 bg-white font-bold text-emerald-950"
+                          >
+                            <option value="payroll_extra">
+                              Pagar Substituto na Folha PJ (Como CH / Extra)
+                            </option>
+                            <option value="direct_settlement">
+                              Acerto Direto entre Médicos (Sem impacto na Folha)
+                            </option>
+                          </select>
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-extrabold text-slate-700 mb-1">
+                            3. Observação Financeira (Auditoria Folha PJ):
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="Ex: Férias abonadas / Fração 50% acordada..."
+                            value={v.managerFinancialComment || ''}
+                            onChange={e =>
+                              handleUpdateVacationFinancialRule(v.id, {
+                                managerFinancialComment: e.target.value
+                              })
+                            }
+                            className="w-full border border-slate-300 rounded-lg px-2.5 py-1.5 bg-white font-semibold"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="p-3.5 rounded-xl bg-slate-50 border border-slate-200 space-y-3">
                     <span className="font-extrabold text-slate-800 uppercase text-[10px] block">
                       🤝 Plano de Substituições / Cobertura dos Plantões no Período ({subsList.length})
@@ -1362,7 +1504,7 @@ export default function GovernanceAndModals(props: any) {
                         {subsList.map((sub: any) => (
                           <div
                             key={sub.id}
-                            className="p-2 rounded-lg bg-white border border-slate-200 flex items-center justify-between gap-2"
+                            className="p-2 rounded-lg bg-white border border-slate-200 flex items-center justify-between gap-2 flex-wrap"
                           >
                             <div>
                               <strong className="text-slate-900">{sub.dateInfo}:</strong>{' '}
@@ -1370,7 +1512,13 @@ export default function GovernanceAndModals(props: any) {
                               <span className="font-extrabold text-blue-800">
                                 {sub.substituteDoctorName}
                               </span>{' '}
-                              {sub.notes ? `(${sub.notes})` : ''}
+                              <span className="px-2 py-0.5 rounded bg-emerald-50 border border-emerald-200 text-emerald-900 font-bold text-[10px] ml-1">
+                                {(sub.substituteBillingMode || v.substituteBillingMode) ===
+                                'direct_settlement'
+                                  ? 'Acerto Direto'
+                                  : 'Folha PJ (CH/Extra)'}
+                              </span>
+                              {sub.notes ? ` • ${sub.notes}` : ''}
                             </div>
                             <button
                               type="button"
@@ -1384,10 +1532,10 @@ export default function GovernanceAndModals(props: any) {
                       </div>
                     )}
 
-                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-2 pt-1">
+                    <div className="grid grid-cols-1 sm:grid-cols-5 gap-2 pt-1">
                       <input
                         type="text"
-                        placeholder="Datas/Turnos (ex: Segundas 06/10 e 13/10)"
+                        placeholder="Datas/Turnos (ex: Segundas ou Todo período)"
                         value={draft.dateInfo}
                         onChange={e =>
                           setSubDraftByVacId(prev => ({
@@ -1412,6 +1560,24 @@ export default function GovernanceAndModals(props: any) {
                             Substituto: {d.name}
                           </option>
                         ))}
+                      </select>
+                      <select
+                        value={draft.substituteBillingMode}
+                        onChange={e =>
+                          setSubDraftByVacId(prev => ({
+                            ...prev,
+                            [v.id]: {
+                              ...draft,
+                              substituteBillingMode: e.target.value as
+                                | 'payroll_extra'
+                                | 'direct_settlement'
+                            }
+                          }))
+                        }
+                        className="border border-slate-300 rounded-lg px-2.5 py-1.5 bg-white font-bold text-emerald-950"
+                      >
+                        <option value="payroll_extra">Pagamento: Folha PJ (CH/Extra)</option>
+                        <option value="direct_settlement">Pagamento: Acerto Direto</option>
                       </select>
                       <input
                         type="text"
@@ -1530,7 +1696,6 @@ export default function GovernanceAndModals(props: any) {
             </p>
           </div>
 
-          {/* SECÇÃO DE DESTAQUE PARA O MÉDICO: "SEUS CURSOS AGENDADOS" */}
           {!isAdmin && (
             <div className="bg-indigo-950 text-white p-5 rounded-2xl border-2 border-indigo-500 shadow-md space-y-3 text-xs">
               <div className="flex items-center justify-between gap-2">
@@ -1586,7 +1751,6 @@ export default function GovernanceAndModals(props: any) {
             </div>
           )}
 
-          {/* PAINEL DO GESTOR: AGENDAR CURSOS DA EQUIPE */}
           {isAdmin && (
             <div className="bg-white p-5 rounded-2xl border-2 border-indigo-200 shadow-sm space-y-4 text-xs">
               <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 border-b border-slate-100 pb-3">
@@ -2008,7 +2172,6 @@ export default function GovernanceAndModals(props: any) {
                     </div>
 
                     <div className="p-4 space-y-2.5 text-xs flex-1">
-                      {/* Exibe também quem está com este curso agendado */}
                       {courseScheduledItems.map(sc => {
                         const doc = resolveDoctor(sc.doctorId);
                         return (

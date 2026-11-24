@@ -48,6 +48,38 @@ export function isWeekendDate(dateStr?: string): boolean {
   return day === 0 || day === 6;
 }
 
+// Cota mensal por contrato fixo: até 12h semanais = 1 cota; 12h a 24h semanais = 2 cotas; etc.
+export function getWeekendQuotaCountByHours(weeklyFixedWeekendHours: number): number {
+  const hrs = Number(weeklyFixedWeekendHours || 0);
+  if (hrs <= 0) return 0;
+  return Math.max(1, Math.ceil(hrs / 12));
+}
+
+function getExplicitShiftCoordinationValue(s: any): number | null {
+  const candidates = [
+    s?.coordinationShiftValue,
+    s?.customShiftValue,
+    s?.overrideShiftAmount,
+    s?.manualShiftValue,
+    s?.attractivenessValue
+  ];
+  for (const val of candidates) {
+    if (val !== undefined && val !== null && val !== '' && !isNaN(Number(val))) {
+      return Number(val);
+    }
+  }
+  return null;
+}
+
+function normalizePersonKeyName(name?: string): string {
+  return String(name || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
 export function getActiveLevelsForFunction(fnObj: any): number[] {
   if (Array.isArray(fnObj?.activeLevels) && fnObj.activeLevels.length > 0) {
     return [...fnObj.activeLevels].map(Number).sort((a, b) => a - b);
@@ -90,7 +122,7 @@ export function getFunctionEffectiveRates(
       fixedQuotaRefHours,
       hourlyRefHours,
       periodicRefHours,
-      fixed12hRef: fixedQuotaValue, // Valor do mês fechado para a cota semanal de referência
+      fixed12hRef: fixedQuotaValue,
       extraWeekday12hRef: extraWeekdayRef,
       extraWeekend12hRef: extraWeekendRef,
       monthlyAdminRef
@@ -125,7 +157,7 @@ export function getFunctionEffectiveRates(
     fixedQuotaRefHours,
     hourlyRefHours,
     periodicRefHours,
-    fixed12hRef: fixedQuotaValue, // Valor do mês fechado para a cota semanal de referência
+    fixed12hRef: fixedQuotaValue,
     extraWeekday12hRef: extraWeekdayRef,
     extraWeekend12hRef: extraWeekendRef,
     monthlyAdminRef
@@ -138,11 +170,250 @@ export interface ComputePayrollInput {
   activeDoctors?: any[];
   shifts: any[];
   swaps: any[];
+  vacations?: any[];
   competenceMonth: string;
   effectiveWindow: { startStr: string; endStr: string };
   doctorConferenceData?: Record<string, any>;
   dynamicCategories?: string[];
   filterFunction?: string;
+}
+
+function calculateRoleEntryLineTotal(
+  entry: any,
+  functionRatesObj: Record<string, any>,
+  allFunctionNames: string[],
+  docLevel: number
+): { lineTotal: number; subcomponentLabel: string; rates: any } {
+  const rates = getFunctionEffectiveRates(
+    functionRatesObj,
+    allFunctionNames,
+    entry.functionName,
+    docLevel
+  );
+
+  let rawTotal = 0;
+  let subcomponentLabel = '';
+
+  if (entry.billingMode === 'monthly_no_schedule') {
+    const hasOverride =
+      entry.customOverrideUnitValue !== undefined &&
+      entry.customOverrideUnitValue !== null &&
+      entry.customOverrideUnitValue !== '';
+    const unitVal = hasOverride ? Number(entry.customOverrideUnitValue) : rates.monthlyAdminRef;
+    rawTotal = Number(entry.units || 1) * unitVal;
+    subcomponentLabel = `${entry.functionName} (Cargo Mensal s/ Escala)`;
+  } else if (entry.billingMode === 'fixed_quota_monthly') {
+    const refQuotaHours = rates.fixedQuotaRefHours || 12;
+    const hasOverride =
+      entry.customOverrideUnitValue !== undefined &&
+      entry.customOverrideUnitValue !== null &&
+      entry.customOverrideUnitValue !== '';
+    const baseQuotaVal = hasOverride
+      ? Number(entry.customOverrideUnitValue)
+      : rates.fixed12hRef * (Number(entry.hoursPerUnit || refQuotaHours) / refQuotaHours);
+    rawTotal = Number(entry.units || 0) * baseQuotaVal;
+    subcomponentLabel = `${entry.functionName} (${entry.units || 0}x Cota Fixa ${
+      entry.hoursPerUnit || refQuotaHours
+    }h/sem)`;
+  } else if (entry.billingMode === 'periodic_included') {
+    rawTotal = 0;
+    subcomponentLabel = `${entry.functionName} (Escala Periódica Inclusa no Pacote: ${
+      entry.periodicHours || 0
+    }h)`;
+  } else {
+    const hasCustomTotal =
+      entry.customOverrideTotalValue !== undefined &&
+      entry.customOverrideTotalValue !== null &&
+      entry.customOverrideTotalValue !== '';
+    if (hasCustomTotal) {
+      rawTotal = Number(entry.customOverrideTotalValue);
+    } else {
+      const refHr = rates.hourlyRefHours || 12;
+      const wkVal = rates.extraWeekday12hRef * (Number(entry.weekdayHours || 0) / refHr);
+      const fdVal = rates.extraWeekend12hRef * (Number(entry.weekendHours || 0) / refHr);
+      rawTotal = wkVal + fdVal + Number(entry.coordinationExtraAmount || 0);
+    }
+    subcomponentLabel = `${entry.functionName} (Por CH: ${entry.weekdayHours || 0}h Sem + ${
+      entry.weekendHours || 0
+    }h FDS)`;
+  }
+
+  return {
+    lineTotal: round2(rawTotal),
+    subcomponentLabel,
+    rates
+  };
+}
+
+function isWeekendWeekendAdditionalTag(add: any): boolean {
+  const idStr = String(add?.id || '').toLowerCase();
+  const nameStr = String(add?.name || '').toLowerCase();
+  return (
+    add?.isWeekendFixedQuotaAdditional === true ||
+    add?.applicationTarget === 'weekend_fixed_quota' ||
+    idStr.includes('weekend') ||
+    idStr.includes('fds') ||
+    nameStr.includes('fim de semana') ||
+    nameStr.includes('final de semana')
+  );
+}
+
+function isThirteenthInstallmentTag(add: any): boolean {
+  const idStr = String(add?.id || '').toLowerCase();
+  const nameStr = String(add?.name || '').toLowerCase();
+  return (
+    add?.isThirteenthInstallment === true ||
+    add?.applicationTarget === 'thirteenth_1_12_fixed' ||
+    idStr.includes('13') ||
+    idStr.includes('decimo') ||
+    nameStr.includes('13') ||
+    nameStr.includes('décimo')
+  );
+}
+
+function isNightLeaderAdditionalTag(add: any): boolean {
+  const idStr = String(add?.id || '').toLowerCase();
+  const nameStr = String(add?.name || '').toLowerCase();
+  return (
+    add?.isNightLeaderAdditional === true ||
+    add?.applicationTarget === 'night_leader_shift' ||
+    idStr.includes('leader') ||
+    idStr.includes('chefia') ||
+    nameStr.includes('líder') ||
+    nameStr.includes('lider') ||
+    nameStr.includes('chefia')
+  );
+}
+
+function calculateAdditionalsBreakdown(params: {
+  allCatalogAdditionals: any[];
+  countsMap: Record<string, number>;
+  defaultFn: string;
+  docLevel: number;
+  functionRatesObj: Record<string, any>;
+  allFunctionNames: string[];
+  fixedBaseSubtotal: number;
+  fixedRemunerationByFunctionMap: Record<string, number>;
+  remunerationByFunctionMap: Record<string, number>;
+  functionsSubtotal: number;
+  isFixedScheduleDoctor: boolean;
+  weekendFixedQuotaCount: number;
+}) {
+  const {
+    allCatalogAdditionals,
+    countsMap,
+    defaultFn,
+    docLevel,
+    functionRatesObj,
+    allFunctionNames,
+    fixedBaseSubtotal,
+    fixedRemunerationByFunctionMap,
+    remunerationByFunctionMap,
+    functionsSubtotal,
+    isFixedScheduleDoctor,
+    weekendFixedQuotaCount
+  } = params;
+
+  let additionalsSubtotal = 0;
+
+  const items = allCatalogAdditionals.map((add: any) => {
+    const isWeekendQuotaAdd = isWeekendWeekendAdditionalTag(add);
+    const isThirteenthAdd = isThirteenthInstallmentTag(add);
+
+    let count = Number(countsMap[add.id] || 0);
+    if (isWeekendQuotaAdd && countsMap[add.id] === undefined) {
+      count = isFixedScheduleDoctor ? weekendFixedQuotaCount : 0;
+    }
+
+    const targetFns: string[] =
+      Array.isArray(add.targetFunctionNames) && add.targetFunctionNames.length > 0
+        ? add.targetFunctionNames
+        : add.targetFunctionName
+        ? [add.targetFunctionName]
+        : [defaultFn];
+
+    let singleCompetenceValue = 0;
+    let applicationTargetLabel = 'Base Plantão';
+
+    if (isWeekendQuotaAdd) {
+      singleCompetenceValue = Number(
+        add.weekendQuotaValue ?? add.value12h ?? add.fixedQuotaValue ?? 0
+      );
+      if (!isFixedScheduleDoctor || weekendFixedQuotaCount <= 0) {
+        count = 0;
+        applicationTargetLabel = 'Apenas Médicos Fixos de Escala (FDS Fixo)';
+      } else {
+        applicationTargetLabel = `Cota Mensal FDS (Fixo: ${weekendFixedQuotaCount} cota)`;
+      }
+    } else if (isThirteenthAdd) {
+      singleCompetenceValue = fixedBaseSubtotal / 12;
+      applicationTargetLabel = '13º Fracionado (1/12 Base Fixa)';
+      if (!isFixedScheduleDoctor || fixedBaseSubtotal <= 0) {
+        count = 0;
+      }
+    } else if (add.calcMode === 'percent') {
+      const pct = Number(add.percentValue || 0);
+      if (add.applicationTarget === 'fixed_base_only') {
+        singleCompetenceValue = (fixedBaseSubtotal * pct) / 100;
+        applicationTargetLabel = 'Base Fixa';
+      } else if (add.applicationTarget === 'specific_function_fixed') {
+        const sumFixedTargetFns = targetFns.reduce(
+          (acc, fn) => acc + Number(fixedRemunerationByFunctionMap[fn] || 0),
+          0
+        );
+        singleCompetenceValue = (sumFixedTargetFns * pct) / 100;
+        applicationTargetLabel = `Base Fixa: ${targetFns.join(', ')}`;
+      } else if (add.applicationTarget === 'specific_function') {
+        const sumTargetFns = targetFns.reduce(
+          (acc, fn) => acc + Number(remunerationByFunctionMap[fn] || 0),
+          0
+        );
+        const fallbackBase =
+          sumTargetFns > 0
+            ? sumTargetFns
+            : getFunctionEffectiveRates(
+                functionRatesObj,
+                allFunctionNames,
+                targetFns[0],
+                docLevel
+              ).fixed12hRef;
+        singleCompetenceValue = (fallbackBase * pct) / 100;
+        applicationTargetLabel = `Função (Fixa+Extra): ${targetFns.join(', ')}`;
+      } else if (add.applicationTarget === 'final_payroll') {
+        singleCompetenceValue = (functionsSubtotal * pct) / 100;
+        applicationTargetLabel = 'Folha Total (Fixa+Extra)';
+      } else {
+        const baseSingleShift =
+          getFunctionEffectiveRates(
+            functionRatesObj,
+            allFunctionNames,
+            defaultFn,
+            docLevel
+          ).fixed12hRef / 4;
+        singleCompetenceValue = (baseSingleShift * pct) / 100;
+        applicationTargetLabel = 'Base 1 Plantão';
+      }
+    } else {
+      singleCompetenceValue = Number(add.value12h || 0);
+      applicationTargetLabel = isNightLeaderAdditionalTag(add)
+        ? 'Líder de Plantão Noturno (Chefia)'
+        : 'Valor Fixo';
+    }
+
+    const totalAmount = round2(count * singleCompetenceValue);
+    additionalsSubtotal = round2(additionalsSubtotal + totalAmount);
+
+    return {
+      ...add,
+      targetFns,
+      count,
+      singleCompetenceValue: round2(singleCompetenceValue),
+      applicationTargetLabel,
+      totalAmount
+    };
+  });
+
+  return { items, additionalsSubtotal };
 }
 
 export function computeDetailedPayrollRows(input: ComputePayrollInput): any[] {
@@ -152,6 +423,7 @@ export function computeDetailedPayrollRows(input: ComputePayrollInput): any[] {
     activeDoctors = [],
     shifts = [],
     swaps = [],
+    vacations = [],
     competenceMonth = '2026-11',
     effectiveWindow = { startStr: '2026-10-26', endStr: '2026-11-25' },
     doctorConferenceData = {},
@@ -177,6 +449,7 @@ export function computeDetailedPayrollRows(input: ComputePayrollInput): any[] {
 
   const safeShifts = Array.isArray(shifts) ? shifts : [];
   const safeSwaps = Array.isArray(swaps) ? swaps : [];
+  const safeVacations = Array.isArray(vacations) ? vacations : [];
 
   const functionRatesObj = config?.functionRates || {};
   const allFunctionNames =
@@ -220,7 +493,29 @@ export function computeDetailedPayrollRows(input: ComputePayrollInput): any[] {
       (s: any) => s?.substituteBillingMode !== 'direct_settlement'
     );
 
-    // 1. Auditoria Analítica de Carga Horária (Fixa, Extra CH e Inclusa no Pacote)
+    const classifyShiftRegime = (s: any, fnName: string) => {
+      const rawType = s?.shiftType || s?.modality || '';
+      const isPeriodicIncluded =
+        rawType === 'Escala Periódica' ||
+        Boolean(functionRatesObj[fnName]?.enablePeriodicIncluded && rawType === 'Incluso');
+      const isFixed =
+        !isPeriodicIncluded &&
+        (rawType === 'Fixo' ||
+          (!isManualEntry && !rawType && docObj?.contractType === 'Fixo Mensal'));
+
+      if (isPeriodicIncluded) return 'periodic' as const;
+      if (isFixed) return 'fixed' as const;
+      return 'extra' as const;
+    };
+
+    const fixedShiftsInWindow = billableShifts.filter(
+      (s: any) => classifyShiftRegime(s, s?.category || s?.role || defaultFn) === 'fixed'
+    );
+
+    const isFixedScheduleDoctor =
+      !isManualEntry &&
+      (docObj?.contractType === 'Fixo Mensal' || fixedShiftsInWindow.length > 0);
+
     const auditByFunction: Record<
       string,
       {
@@ -249,6 +544,7 @@ export function computeDetailedPayrollRows(input: ComputePayrollInput): any[] {
     let totalFixedHoursAllFns = 0;
     let totalExtraHoursAllFns = 0;
     let totalPeriodicHoursAllFns = 0;
+    let totalWeekendHoursAllShifts = 0;
 
     const dailyWorkedScheduleList = [...entityWindowShifts]
       .sort((a, b) => {
@@ -259,16 +555,11 @@ export function computeDetailedPayrollRows(input: ComputePayrollInput): any[] {
       .map((s: any) => {
         const fnName = s?.category || s?.role || defaultFn;
         const hrs = getShiftHours(s);
-        const rawType = s?.shiftType || s?.modality || '';
+        const regimeCode = classifyShiftRegime(s, fnName);
 
-        const isPeriodicIncluded =
-          rawType === 'Escala Periódica' ||
-          Boolean(functionRatesObj[fnName]?.enablePeriodicIncluded && rawType === 'Incluso');
-
-        const isFixed =
-          !isManualEntry &&
-          !isPeriodicIncluded &&
-          (rawType === 'Fixo' || (!rawType && docObj?.contractType === 'Fixo Mensal'));
+        if (isWeekendDate(s.date)) {
+          totalWeekendHoursAllShifts = round2(totalWeekendHoursAllShifts + hrs);
+        }
 
         if (!auditByFunction[fnName]) {
           auditByFunction[fnName] = {
@@ -283,29 +574,30 @@ export function computeDetailedPayrollRows(input: ComputePayrollInput): any[] {
         }
 
         let regimeLabel = 'Por CH / Extra';
-        let regimeCode: 'fixed' | 'extra' | 'periodic' = 'extra';
-
-        if (isPeriodicIncluded) {
+        if (regimeCode === 'periodic') {
           auditByFunction[fnName].periodicShifts += 1;
-          auditByFunction[fnName].periodicHours += hrs;
-          totalPeriodicHoursAllFns += hrs;
+          auditByFunction[fnName].periodicHours = round2(
+            auditByFunction[fnName].periodicHours + hrs
+          );
+          totalPeriodicHoursAllFns = round2(totalPeriodicHoursAllFns + hrs);
           regimeLabel = 'Escala Periódica (Incluso na Cota)';
-          regimeCode = 'periodic';
-        } else if (isFixed) {
+        } else if (regimeCode === 'fixed') {
           auditByFunction[fnName].fixedShifts += 1;
-          auditByFunction[fnName].fixedHours += hrs;
-          totalFixedHoursAllFns += hrs;
+          auditByFunction[fnName].fixedHours = round2(
+            auditByFunction[fnName].fixedHours + hrs
+          );
+          totalFixedHoursAllFns = round2(totalFixedHoursAllFns + hrs);
           regimeLabel = 'Cota Fixa Mensal';
-          regimeCode = 'fixed';
         } else {
           auditByFunction[fnName].extraShifts += 1;
-          auditByFunction[fnName].extraHours += hrs;
-          totalExtraHoursAllFns += hrs;
+          auditByFunction[fnName].extraHours = round2(
+            auditByFunction[fnName].extraHours + hrs
+          );
+          totalExtraHoursAllFns = round2(totalExtraHoursAllFns + hrs);
           regimeLabel = 'Por CH / Extra';
-          regimeCode = 'extra';
         }
 
-        auditByFunction[fnName].totalHours += hrs;
+        auditByFunction[fnName].totalHours = round2(auditByFunction[fnName].totalHours + hrs);
 
         return {
           id: s.id,
@@ -317,12 +609,48 @@ export function computeDetailedPayrollRows(input: ComputePayrollInput): any[] {
           functionName: fnName,
           regime: regimeLabel,
           regimeCode,
+          isNightLeader: Boolean(s.isNightLeader),
           isFromSwap: Boolean(s.isFromSwap),
           directSettlement: s?.substituteBillingMode === 'direct_settlement'
         };
       });
 
-    // 2. Construção das Funções Exercidas na Competência
+    // Cota mensal de fim de semana: apenas contratos/plantões FIXOS (nunca extra/coringa)
+    const fixedWeekendShifts = fixedShiftsInWindow.filter((s: any) => isWeekendDate(s.date));
+    const totalFixedWeekendHours = round2(
+      fixedWeekendShifts.reduce((acc: number, s: any) => acc + getShiftHours(s), 0)
+    );
+    const distinctFixedWeekendWeekdays = new Set(
+      fixedWeekendShifts.map((s: any) => {
+        const d = new Date(`${s.date}T12:00:00`);
+        return isNaN(d.getTime()) ? s.date : d.getDay();
+      })
+    );
+    const fixedWeeksCount = Math.max(
+      1,
+      Math.round(
+        Math.max(1, fixedShiftsInWindow.length) /
+          Math.max(
+            1,
+            new Set(
+              fixedShiftsInWindow.map((s: any) => {
+                const d = new Date(`${s.date}T12:00:00`);
+                return isNaN(d.getTime()) ? s.date : d.getDay();
+              })
+            ).size
+          )
+      )
+    );
+    const weeklyFixedWeekendHours =
+      fixedWeekendShifts.length > 0 && distinctFixedWeekendWeekdays.size > 0
+        ? totalFixedWeekendHours / Math.min(5, fixedWeeksCount)
+        : 0;
+
+    const weekendFixedQuotaCount =
+      isFixedScheduleDoctor && weeklyFixedWeekendHours > 0
+        ? getWeekendQuotaCountByHours(weeklyFixedWeekendHours)
+        : 0;
+
     const autoRoleEntries: {
       id: string;
       functionName: string;
@@ -336,6 +664,7 @@ export function computeDetailedPayrollRows(input: ComputePayrollInput): any[] {
       weekdayHours: number;
       weekendHours: number;
       periodicHours: number;
+      coordinationExtraAmount?: number;
       customOverrideUnitValue?: number | null;
     }[] = [];
 
@@ -369,7 +698,7 @@ export function computeDetailedPayrollRows(input: ComputePayrollInput): any[] {
 
     const autoExtraByFnMap: Record<
       string,
-      { weekdayHours: number; weekendHours: number }
+      { weekdayHours: number; weekendHours: number; coordinationExtraAmount: number }
     > = {};
 
     const autoPeriodicByFnMap: Record<string, number> = {};
@@ -377,17 +706,11 @@ export function computeDetailedPayrollRows(input: ComputePayrollInput): any[] {
     billableShifts.forEach((s: any) => {
       const fnName = s?.category || s?.role || defaultFn;
       const hrs = getShiftHours(s);
-      const rawType = s?.shiftType || s?.modality || '';
+      const regimeCode = classifyShiftRegime(s, fnName);
 
-      const isPeriodicIncluded = rawType === 'Escala Periódica';
-      const isFixedShift =
-        !isManualEntry &&
-        !isPeriodicIncluded &&
-        (rawType === 'Fixo' || (!rawType && docObj?.contractType === 'Fixo Mensal'));
-
-      if (isPeriodicIncluded) {
-        autoPeriodicByFnMap[fnName] = (autoPeriodicByFnMap[fnName] || 0) + hrs;
-      } else if (isFixedShift) {
+      if (regimeCode === 'periodic') {
+        autoPeriodicByFnMap[fnName] = round2((autoPeriodicByFnMap[fnName] || 0) + hrs);
+      } else if (regimeCode === 'fixed') {
         const dObj = new Date(`${s.date}T12:00:00`);
         const dayOfWeek = isNaN(dObj.getTime()) ? 0 : dObj.getDay();
         const slotKey = `${fnName}__${dayOfWeek}__${s.startTime || '07:00'}__${hrs}`;
@@ -401,12 +724,26 @@ export function computeDetailedPayrollRows(input: ComputePayrollInput): any[] {
         autoWeeklyFixedSlotsMap[slotKey].occurrences += 1;
       } else {
         if (!autoExtraByFnMap[fnName]) {
-          autoExtraByFnMap[fnName] = { weekdayHours: 0, weekendHours: 0 };
+          autoExtraByFnMap[fnName] = {
+            weekdayHours: 0,
+            weekendHours: 0,
+            coordinationExtraAmount: 0
+          };
         }
-        if (isWeekendDate(s.date)) {
-          autoExtraByFnMap[fnName].weekendHours += hrs;
+
+        const explicitCoordVal = getExplicitShiftCoordinationValue(s);
+        if (explicitCoordVal !== null) {
+          autoExtraByFnMap[fnName].coordinationExtraAmount = round2(
+            autoExtraByFnMap[fnName].coordinationExtraAmount + explicitCoordVal
+          );
+        } else if (isWeekendDate(s.date)) {
+          autoExtraByFnMap[fnName].weekendHours = round2(
+            autoExtraByFnMap[fnName].weekendHours + hrs
+          );
         } else {
-          autoExtraByFnMap[fnName].weekdayHours += hrs;
+          autoExtraByFnMap[fnName].weekdayHours = round2(
+            autoExtraByFnMap[fnName].weekdayHours + hrs
+          );
         }
       }
     });
@@ -441,16 +778,17 @@ export function computeDetailedPayrollRows(input: ComputePayrollInput): any[] {
       });
     });
 
-    Object.entries(autoExtraByFnMap).forEach(([fnName, hrsObj], idx) => {
+    Object.entries(autoExtraByFnMap).forEach(([fnName, extraObj], idx) => {
       autoRoleEntries.push({
         id: `auto_extra_${idx}`,
         functionName: fnName,
         billingMode: 'hourly_extra',
         units: 1,
         hoursPerUnit: Number(functionRatesObj[fnName]?.hourlyRefHours || 12),
-        weekdayHours: hrsObj.weekdayHours,
-        weekendHours: hrsObj.weekendHours,
+        weekdayHours: extraObj.weekdayHours,
+        weekendHours: extraObj.weekendHours,
         periodicHours: 0,
+        coordinationExtraAmount: extraObj.coordinationExtraAmount,
         customOverrideUnitValue: null
       });
     });
@@ -469,14 +807,76 @@ export function computeDetailedPayrollRows(input: ComputePayrollInput): any[] {
       });
     });
 
+    const summarizeRoleList = (roleList: any[]) => {
+      const byFnTotal: Record<string, number> = {};
+      const byFnFixed: Record<string, number> = {};
+      let subTotal = 0;
+      let fixedSub = 0;
+      let extraSub = 0;
+
+      const evaluated = roleList.map((entry: any) => {
+        const { lineTotal, subcomponentLabel, rates } = calculateRoleEntryLineTotal(
+          entry,
+          functionRatesObj,
+          allFunctionNames,
+          docLevel
+        );
+
+        subTotal = round2(subTotal + lineTotal);
+        byFnTotal[entry.functionName] = round2(
+          (byFnTotal[entry.functionName] || 0) + lineTotal
+        );
+
+        if (
+          entry.billingMode === 'fixed_quota_monthly' ||
+          entry.billingMode === 'monthly_no_schedule'
+        ) {
+          fixedSub = round2(fixedSub + lineTotal);
+          byFnFixed[entry.functionName] = round2(
+            (byFnFixed[entry.functionName] || 0) + lineTotal
+          );
+        } else if (entry.billingMode === 'hourly_extra') {
+          extraSub = round2(extraSub + lineTotal);
+        }
+
+        const fnAudit = auditByFunction[entry.functionName] || {
+          fixedShifts: 0,
+          fixedHours: 0,
+          extraShifts: 0,
+          extraHours: 0,
+          periodicShifts: 0,
+          periodicHours: 0,
+          totalHours: 0
+        };
+
+        return {
+          ...entry,
+          rates,
+          lineTotal,
+          subcomponentLabel,
+          fulfilledFixedShifts: fnAudit.fixedShifts,
+          fulfilledFixedHours: fnAudit.fixedHours,
+          fulfilledExtraHours: fnAudit.extraHours,
+          fulfilledPeriodicHours: fnAudit.periodicHours
+        };
+      });
+
+      return {
+        evaluated,
+        functionsSubtotal: subTotal,
+        fixedBaseSubtotal: fixedSub,
+        extraBaseSubtotal: extraSub,
+        remunerationByFunctionMap: byFnTotal,
+        fixedRemunerationByFunctionMap: byFnFixed
+      };
+    };
+
+    const autoRoleSummary = summarizeRoleList(autoRoleEntries);
     const hasCustomRoleEntries = Array.isArray(customDoc.roleEntries);
     const activeRoleEntries = hasCustomRoleEntries ? customDoc.roleEntries : autoRoleEntries;
-
-    const remunerationByFunctionMap: Record<string, number> = {};
-    const fixedRemunerationByFunctionMap: Record<string, number> = {};
-    let functionsSubtotal = 0;
-    let fixedBaseSubtotal = 0;
-    let extraBaseSubtotal = 0;
+    const activeRoleSummary = hasCustomRoleEntries
+      ? summarizeRoleList(activeRoleEntries)
+      : autoRoleSummary;
 
     const abonadaDispensesCount = safeSwaps.filter(
       (sw: any) =>
@@ -488,95 +888,28 @@ export function computeDetailedPayrollRows(input: ComputePayrollInput): any[] {
         sw?.date <= effectiveWindow.endStr
     ).length;
 
-    const evaluatedRoleEntries = activeRoleEntries.map((entry: any) => {
-      const rates = getFunctionEffectiveRates(
-        functionRatesObj,
-        allFunctionNames,
-        entry.functionName,
-        docLevel
-      );
-      let lineTotal = 0;
-      let subcomponentLabel = '';
+    const evaluatedRoleEntries = activeRoleSummary.evaluated.map((item: any) => ({
+      ...item,
+      abonadaDispensesCount
+    }));
 
-      if (entry.billingMode === 'monthly_no_schedule') {
-        const unitVal =
-          entry.customOverrideUnitValue !== undefined &&
-          entry.customOverrideUnitValue !== null &&
-          entry.customOverrideUnitValue !== ''
-            ? Number(entry.customOverrideUnitValue)
-            : rates.monthlyAdminRef;
-        lineTotal = Number(entry.units || 1) * unitVal;
-        subcomponentLabel = `${entry.functionName} (Cargo Mensal s/ Escala)`;
-      } else if (entry.billingMode === 'fixed_quota_monthly') {
-        const refQuotaHours = rates.fixedQuotaRefHours || 12;
-        const baseQuotaVal =
-          entry.customOverrideUnitValue !== undefined &&
-          entry.customOverrideUnitValue !== null &&
-          entry.customOverrideUnitValue !== ''
-            ? Number(entry.customOverrideUnitValue)
-            : rates.fixed12hRef * (Number(entry.hoursPerUnit || refQuotaHours) / refQuotaHours);
-        lineTotal = Number(entry.units || 0) * baseQuotaVal;
-        subcomponentLabel = `${entry.functionName} (${entry.units}x Cota Fixa ${entry.hoursPerUnit}h/sem)`;
-      } else if (entry.billingMode === 'periodic_included') {
-        lineTotal = 0;
-        subcomponentLabel = `${entry.functionName} (Escala Periódica Inclusa no Pacote: ${
-          entry.periodicHours || 0
-        }h)`;
-      } else {
-        const refHr = rates.hourlyRefHours || 12;
-        const wkVal = rates.extraWeekday12hRef * (Number(entry.weekdayHours || 0) / refHr);
-        const fdVal = rates.extraWeekend12hRef * (Number(entry.weekendHours || 0) / refHr);
-        lineTotal = wkVal + fdVal;
-        subcomponentLabel = `${entry.functionName} (Por CH: ${entry.weekdayHours || 0}h Sem + ${
-          entry.weekendHours || 0
-        }h FDS)`;
-      }
+    const nightLeaderShiftsCount = billableShifts.filter((s: any) =>
+      Boolean(s?.isNightLeader)
+    ).length;
 
-      lineTotal = round2(lineTotal);
-      functionsSubtotal = round2(functionsSubtotal + lineTotal);
-      remunerationByFunctionMap[entry.functionName] = round2(
-        (remunerationByFunctionMap[entry.functionName] || 0) + lineTotal
-      );
-
-      if (
-        entry.billingMode === 'fixed_quota_monthly' ||
-        entry.billingMode === 'monthly_no_schedule'
-      ) {
-        fixedBaseSubtotal = round2(fixedBaseSubtotal + lineTotal);
-        fixedRemunerationByFunctionMap[entry.functionName] = round2(
-          (fixedRemunerationByFunctionMap[entry.functionName] || 0) + lineTotal
-        );
-      } else if (entry.billingMode === 'hourly_extra') {
-        extraBaseSubtotal = round2(extraBaseSubtotal + lineTotal);
-      }
-
-      const fnAudit = auditByFunction[entry.functionName] || {
-        fixedShifts: 0,
-        fixedHours: 0,
-        extraShifts: 0,
-        extraHours: 0,
-        periodicShifts: 0,
-        periodicHours: 0,
-        totalHours: 0
-      };
-
-      return {
-        ...entry,
-        rates,
-        lineTotal,
-        subcomponentLabel,
-        fulfilledFixedShifts: fnAudit.fixedShifts,
-        fulfilledFixedHours: fnAudit.fixedHours,
-        fulfilledExtraHours: fnAudit.extraHours,
-        fulfilledPeriodicHours: fnAudit.periodicHours,
-        abonadaDispensesCount
-      };
-    });
-
-    // 3. Adicionais Acumuláveis
     const autoAdditionalCounts: Record<string, number> = {};
     allCatalogAdditionals.forEach((add: any) => {
-      if (add.incidence === 'monthly') {
+      if (isWeekendWeekendAdditionalTag(add)) {
+        autoAdditionalCounts[add.id] = isFixedScheduleDoctor ? weekendFixedQuotaCount : 0;
+      } else if (isThirteenthInstallmentTag(add)) {
+        autoAdditionalCounts[add.id] = isFixedScheduleDoctor ? 1 : 0;
+      } else if (isNightLeaderAdditionalTag(add)) {
+        const countByFlag = nightLeaderShiftsCount;
+        const countInShifts = billableShifts.filter(
+          (s: any) => Array.isArray(s?.additionals) && s.additionals.includes(add.id)
+        ).length;
+        autoAdditionalCounts[add.id] = Math.max(countByFlag, countInShifts);
+      } else if (add.incidence === 'monthly') {
         const docMonthly: string[] = Array.isArray(docObj?.monthlyAdditionals)
           ? docObj.monthlyAdditionals
           : [];
@@ -589,87 +922,45 @@ export function computeDetailedPayrollRows(input: ComputePayrollInput): any[] {
       }
     });
 
-    const customAddCounts: Record<string, number> = customDoc.additionalCounts || {};
-    let additionalsSubtotal = 0;
+    const autoAdditionalsCalc = calculateAdditionalsBreakdown({
+      allCatalogAdditionals,
+      countsMap: autoAdditionalCounts,
+      defaultFn,
+      docLevel,
+      functionRatesObj,
+      allFunctionNames,
+      fixedBaseSubtotal: autoRoleSummary.fixedBaseSubtotal,
+      fixedRemunerationByFunctionMap: autoRoleSummary.fixedRemunerationByFunctionMap,
+      remunerationByFunctionMap: autoRoleSummary.remunerationByFunctionMap,
+      functionsSubtotal: autoRoleSummary.functionsSubtotal,
+      isFixedScheduleDoctor,
+      weekendFixedQuotaCount
+    });
 
-   const evaluatedAdditionals = allCatalogAdditionals.map((add: any) => {
-      const count =
+    const customAddCounts: Record<string, number> = customDoc.additionalCounts || {};
+    const effectiveAddCounts: Record<string, number> = {};
+    allCatalogAdditionals.forEach((add: any) => {
+      effectiveAddCounts[add.id] =
         customAddCounts[add.id] !== undefined
           ? Number(customAddCounts[add.id])
           : Number(autoAdditionalCounts[add.id] || 0);
-
-      const targetFns: string[] =
-        Array.isArray(add.targetFunctionNames) && add.targetFunctionNames.length > 0
-          ? add.targetFunctionNames
-          : add.targetFunctionName
-          ? [add.targetFunctionName]
-          : [defaultFn];
-
-      let singleCompetenceValue = 0;
-      let applicationTargetLabel = 'Base Plantão';
-
-      if (add.calcMode === 'percent') {
-        const pct = Number(add.percentValue || 0);
-        if (add.applicationTarget === 'fixed_base_only') {
-          singleCompetenceValue = (fixedBaseSubtotal * pct) / 100;
-          applicationTargetLabel = 'Base Fixa';
-        } else if (add.applicationTarget === 'specific_function_fixed') {
-          const sumFixedTargetFns = targetFns.reduce(
-            (acc, fn) => acc + Number(fixedRemunerationByFunctionMap[fn] || 0),
-            0
-          );
-          singleCompetenceValue = (sumFixedTargetFns * pct) / 100;
-          applicationTargetLabel = `Base Fixa: ${targetFns.join(', ')}`;
-        } else if (add.applicationTarget === 'specific_function') {
-          const sumTargetFns = targetFns.reduce(
-            (acc, fn) => acc + Number(remunerationByFunctionMap[fn] || 0),
-            0
-          );
-          const fallbackBase =
-            sumTargetFns > 0
-              ? sumTargetFns
-              : getFunctionEffectiveRates(
-                  functionRatesObj,
-                  allFunctionNames,
-                  targetFns[0],
-                  docLevel
-                ).fixed12hRef;
-          singleCompetenceValue = (fallbackBase * pct) / 100;
-          applicationTargetLabel = `Função (Fixa+Extra): ${targetFns.join(', ')}`;
-        } else if (add.applicationTarget === 'final_payroll') {
-          singleCompetenceValue = (functionsSubtotal * pct) / 100;
-          applicationTargetLabel = 'Folha Total (Fixa+Extra)';
-        } else {
-          // Base de 1 plantão avulso: 1/4 da Cota Mensal fechada
-          const baseSingleShift =
-            getFunctionEffectiveRates(
-              functionRatesObj,
-              allFunctionNames,
-              defaultFn,
-              docLevel
-            ).fixed12hRef / 4;
-          singleCompetenceValue = (baseSingleShift * pct) / 100;
-          applicationTargetLabel = 'Base 1 Plantão';
-        }
-      } else {
-        singleCompetenceValue = Number(add.value12h || 0);
-        applicationTargetLabel = 'Valor Fixo';
-      }
-
-      const totalAmount = round2(count * singleCompetenceValue);
-      additionalsSubtotal = round2(additionalsSubtotal + totalAmount);
-
-      return {
-        ...add,
-        targetFns,
-        count,
-        singleCompetenceValue: round2(singleCompetenceValue),
-        applicationTargetLabel,
-        totalAmount
-      };
     });
 
-    // 4. Descontos e Auditoria sobre Passagens / Trocas (Titular) + Registo como Substituto
+    const activeAdditionalsCalc = calculateAdditionalsBreakdown({
+      allCatalogAdditionals,
+      countsMap: effectiveAddCounts,
+      defaultFn,
+      docLevel,
+      functionRatesObj,
+      allFunctionNames,
+      fixedBaseSubtotal: activeRoleSummary.fixedBaseSubtotal,
+      fixedRemunerationByFunctionMap: activeRoleSummary.fixedRemunerationByFunctionMap,
+      remunerationByFunctionMap: activeRoleSummary.remunerationByFunctionMap,
+      functionsSubtotal: activeRoleSummary.functionsSubtotal,
+      isFixedScheduleDoctor,
+      weekendFixedQuotaCount
+    });
+
     const doctorPassagensInWindow = safeSwaps.filter((sw: any) => {
       if (sw?.status !== 'Aprovado') return false;
       if (Number(sw?.requesterId) !== Number(docObj?.id)) return false;
@@ -714,6 +1005,27 @@ export function computeDetailedPayrollRows(input: ComputePayrollInput): any[] {
 
     const swapDiscountConfigs = customDoc.swapDiscounts || {};
     let totalPassagensDiscounts = 0;
+    let autoPassagensDiscounts = 0;
+
+    const computeDiscountByMode = (
+      mode: string,
+      fullShiftValue: number,
+      levelDiffValue: number,
+      fractionPercent: number,
+      customAmount: number
+    ) => {
+      if (mode === 'full') return round2(fullShiftValue);
+      if (mode === 'level_diff') {
+        return round2(levelDiffValue > 0 ? levelDiffValue : fullShiftValue * 0.15);
+      }
+      if (mode === 'fraction') {
+        return round2((fullShiftValue * Number(fractionPercent || 50)) / 100);
+      }
+      if (mode === 'custom') {
+        return round2(Math.max(0, Number(customAmount || 0)));
+      }
+      return 0;
+    };
 
     const evaluatedPassagensDiscounts = doctorPassagensInWindow.map((sw: any) => {
       const subDoc = resolveDoctorByIdLocal(sw.targetDoctorId);
@@ -738,7 +1050,6 @@ export function computeDetailedPayrollRows(input: ComputePayrollInput): any[] {
         subLevel
       );
 
-      // Cota Fixa Mensal é valor do mês fechado -> 1 plantão unitário equivale a (Cota Mensal ÷ 4) proporcional à CH
       const titularRefH = titularRates.fixedQuotaRefHours || 12;
       const subRefH = subRates.fixedQuotaRefHours || 12;
       const fullShiftValue = round2((titularRates.fixed12hRef / 4) * (hrs / titularRefH));
@@ -756,6 +1067,16 @@ export function computeDetailedPayrollRows(input: ComputePayrollInput): any[] {
         ? 'full'
         : sw.titularDiscountMode || 'none';
 
+      const autoDisc = computeDiscountByMode(
+        defaultMode,
+        fullShiftValue,
+        levelDiffValue,
+        sw.titularFractionPercent ?? 50,
+        sw.titularCustomDiscountAmount ??
+          (levelDiffValue > 0 ? levelDiffValue : fullShiftValue)
+      );
+      autoPassagensDiscounts = round2(autoPassagensDiscounts + autoDisc);
+
       const cfg = swapDiscountConfigs[sw.id] || {
         mode: defaultMode as 'none' | 'full' | 'level_diff' | 'fraction' | 'custom',
         fractionPercent: sw.titularFractionPercent ?? 50,
@@ -765,18 +1086,13 @@ export function computeDetailedPayrollRows(input: ComputePayrollInput): any[] {
         managerComment: sw.managerFinancialComment || ''
       };
 
-      let discountApplied = 0;
-      if (cfg.mode === 'full') {
-        discountApplied = fullShiftValue;
-      } else if (cfg.mode === 'level_diff') {
-        discountApplied = levelDiffValue > 0 ? levelDiffValue : fullShiftValue * 0.15;
-      } else if (cfg.mode === 'fraction') {
-        discountApplied = (fullShiftValue * Number(cfg.fractionPercent || 50)) / 100;
-      } else if (cfg.mode === 'custom') {
-        discountApplied = Math.max(0, Number(cfg.customAmount || 0));
-      }
-
-      discountApplied = round2(discountApplied);
+      const discountApplied = computeDiscountByMode(
+        cfg.mode,
+        fullShiftValue,
+        levelDiffValue,
+        cfg.fractionPercent ?? 50,
+        cfg.customAmount ?? 0
+      );
       totalPassagensDiscounts = round2(totalPassagensDiscounts + discountApplied);
 
       const modeDescriptionLabel =
@@ -819,11 +1135,57 @@ export function computeDetailedPayrollRows(input: ComputePayrollInput): any[] {
             ? cfg.managerComment
             : sw.managerFinancialComment || '',
         reason: sw.reason || '',
-        discountApplied
+        discountApplied,
+        autoDiscountApplied: autoDisc
       };
     });
 
-    // 5. Ajustes Manuais (+/-)
+    const approvedVacationsInWindow = safeVacations.filter(
+      (v: any) =>
+        v?.status === 'Aprovado' &&
+        Number(v?.doctorId) === Number(docObj?.id) &&
+        String(v?.startDate || '') <= effectiveWindow.endStr &&
+        String(v?.endDate || '') >= effectiveWindow.startStr &&
+        (v?.titularPayMode === 'fraction' || v?.titularPayMode === 'none')
+    );
+
+    let vacationFractionDiscount = 0;
+    if (approvedVacationsInWindow.length > 0 && activeRoleSummary.functionsSubtotal > 0) {
+      approvedVacationsInWindow.forEach((v: any) => {
+        const payPct =
+          v?.titularPayMode === 'none'
+            ? 0
+            : Math.max(0, Math.min(100, Number(v?.titularFractionPercent ?? 50)));
+        const nonPaidPct = 100 - payPct;
+        const vacStart =
+          String(v.startDate) > effectiveWindow.startStr
+            ? String(v.startDate)
+            : effectiveWindow.startStr;
+        const vacEnd =
+          String(v.endDate) < effectiveWindow.endStr
+            ? String(v.endDate)
+            : effectiveWindow.endStr;
+        const d1 = new Date(`${vacStart}T12:00:00`).getTime();
+        const d2 = new Date(`${vacEnd}T12:00:00`).getTime();
+        const daysInVac =
+          !isNaN(d1) && !isNaN(d2) && d2 >= d1
+            ? Math.floor((d2 - d1) / (1000 * 60 * 60 * 24)) + 1
+            : 7;
+        const ratioOfMonth = Math.min(1, daysInVac / 30);
+        const disc = round2(
+          (activeRoleSummary.functionsSubtotal * ratioOfMonth * nonPaidPct) / 100
+        );
+        vacationFractionDiscount = round2(vacationFractionDiscount + disc);
+      });
+    }
+
+    const totalDiscountsWithVacation = round2(
+      totalPassagensDiscounts + vacationFractionDiscount
+    );
+    const autoDiscountsWithVacation = round2(
+      autoPassagensDiscounts + vacationFractionDiscount
+    );
+
     const manualAdjustmentsList: {
       id: string;
       type: 'add' | 'subtract';
@@ -840,15 +1202,20 @@ export function computeDetailedPayrollRows(input: ComputePayrollInput): any[] {
     );
 
     const netTotalCalculated = round2(
-      functionsSubtotal +
-        additionalsSubtotal +
+      activeRoleSummary.functionsSubtotal +
+        activeAdditionalsCalc.additionalsSubtotal +
         manualAdjustmentsNet -
-        totalPassagensDiscounts
+        totalDiscountsWithVacation
     );
 
-    const totalFulfilledHours = entityWindowShifts.reduce(
-      (acc: number, s: any) => acc + getShiftHours(s),
-      0
+    const autoNetTotal = round2(
+      autoRoleSummary.functionsSubtotal +
+        autoAdditionalsCalc.additionalsSubtotal -
+        autoDiscountsWithVacation
+    );
+
+    const totalFulfilledHours = round2(
+      entityWindowShifts.reduce((acc: number, s: any) => acc + getShiftHours(s), 0)
     );
 
     const confKey = `${competenceMonth}__${docObj?.id}`;
@@ -858,9 +1225,17 @@ export function computeDetailedPayrollRows(input: ComputePayrollInput): any[] {
       errorNote: ''
     };
 
+    const hasAdditionalOverride = Object.keys(customAddCounts).length > 0;
+    const hasDiscountOverride = Object.keys(swapDiscountConfigs).length > 0;
+    const hasManualAdjustments = manualAdjustmentsList.length > 0;
+
     return {
       entityKey,
       isManualEntry,
+      isFixedScheduleDoctor,
+      weekendFixedQuotaCount,
+      nightLeaderShiftsCount,
+      vacationFractionDiscount,
       doctor: docObj,
       docLevel,
       shiftsCount: entityWindowShifts.length,
@@ -868,27 +1243,41 @@ export function computeDetailedPayrollRows(input: ComputePayrollInput): any[] {
       totalFixedHoursAllFns,
       totalExtraHoursAllFns,
       totalPeriodicHoursAllFns,
+      totalWeekendHoursAllShifts,
       dailyWorkedScheduleList,
       evaluatedRoleEntries,
       activeRoleEntries,
-      functionsSubtotal,
-      fixedBaseSubtotal,
-      extraBaseSubtotal,
-      evaluatedAdditionals,
-      additionalsSubtotal,
+      functionsSubtotal: activeRoleSummary.functionsSubtotal,
+      fixedBaseSubtotal: activeRoleSummary.fixedBaseSubtotal,
+      extraBaseSubtotal: activeRoleSummary.extraBaseSubtotal,
+      evaluatedAdditionals: activeAdditionalsCalc.items,
+      additionalsSubtotal: activeAdditionalsCalc.additionalsSubtotal,
       evaluatedPassagensDiscounts,
       doctorSubstitutionsReceivedInWindow,
-      totalPassagensDiscounts,
+      totalPassagensDiscounts: totalDiscountsWithVacation,
       manualAdjustmentsList,
       manualAdjustmentsNet,
       netTotal: netTotalCalculated,
       auditByFunction,
       conferenceStatus,
+      audit: {
+        autoFunctionsSubtotal: autoRoleSummary.functionsSubtotal,
+        autoFixedBaseSubtotal: autoRoleSummary.fixedBaseSubtotal,
+        autoExtraBaseSubtotal: autoRoleSummary.extraBaseSubtotal,
+        autoAdditionalsSubtotal: autoAdditionalsCalc.additionalsSubtotal,
+        autoDiscountsTotal: autoDiscountsWithVacation,
+        autoNetTotal,
+        manualDeltaNet: round2(netTotalCalculated - autoNetTotal),
+        hasRoleOverride: hasCustomRoleEntries,
+        hasAdditionalOverride,
+        hasDiscountOverride,
+        hasManualAdjustments
+      },
       isCustomized:
         hasCustomRoleEntries ||
-        Object.keys(customAddCounts).length > 0 ||
-        Object.keys(swapDiscountConfigs).length > 0 ||
-        manualAdjustmentsList.length > 0
+        hasAdditionalOverride ||
+        hasDiscountOverride ||
+        hasManualAdjustments
     };
   };
 
@@ -907,8 +1296,9 @@ export function computeDetailedPayrollRows(input: ComputePayrollInput): any[] {
   windowShifts
     .filter((s: any) => Boolean(s?.isManualUnregisteredDoctor && s?.manualDoctorName))
     .forEach((s: any) => {
-      const cleanName = String(s.manualDoctorName).trim();
-      const key = `manual__${cleanName.toLowerCase()}`;
+      const cleanName = String(s.manualDoctorName).replace(/\s+/g, ' ').trim();
+      const normKey = normalizePersonKeyName(cleanName);
+      const key = `manual__${normKey || cleanName.toLowerCase()}`;
       if (!manualGroupsMap[key]) {
         manualGroupsMap[key] = {
           manualName: cleanName,

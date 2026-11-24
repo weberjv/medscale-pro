@@ -312,7 +312,7 @@ export default function StaffAndFinanceViews(props: any) {
     requiresSchedule: true
   });
 
- // Estado para o Catálogo Avançado de Adicionais & Bonificações
+  // Estado para o Catálogo Avançado de Adicionais & Bonificações
   const [newAdditionalForm, setNewAdditionalForm] = useState({
     name: '',
     incidence: 'shift' as 'shift' | 'monthly',
@@ -322,7 +322,10 @@ export default function StaffAndFinanceViews(props: any) {
       | 'fixed_base_only'
       | 'specific_function'
       | 'specific_function_fixed'
-      | 'shift_base',
+      | 'shift_base'
+      | 'weekend_fixed_quota'
+      | 'thirteenth_1_12_fixed'
+      | 'night_leader_shift',
     targetFunctionNames: [allFunctionNames[0] || 'Plantonista'] as string[],
     value12h: 250,
     percentValue: 10
@@ -591,7 +594,6 @@ export default function StaffAndFinanceViews(props: any) {
   };
 
   const handleDownloadIndividualDoctorDossier = (doc: any) => {
-    // Enriquece o objeto do médico com o histórico de trocas processado antes de chamar o gerador
     const docWithSwaps = {
       ...doc,
       swapsAudit: getDoctorSwapsAuditList(Number(doc.id))
@@ -1760,7 +1762,7 @@ export default function StaffAndFinanceViews(props: any) {
                 Atualizar Meus Dados Pessoais, Contactos e Empresa PJ
               </h3>
               <span className="text-[11px] text-slate-500">
-                * O CRM, Especialidade e Nível são geridos pela coordenação.
+                O CRM, Especialidade e Nível são geridos pela coordenação.
               </span>
             </div>
 
@@ -2023,7 +2025,6 @@ export default function StaffAndFinanceViews(props: any) {
     safeRecordAction(`Especialidade removida: ${specName}`);
   };
 
-  // Abrir edição de uma função já criada
   const handleStartEditFunction = (fnName: string, fnObj: any, idx: number) => {
     if (!isAdmin) return;
     const cInfo = getFunctionColorInfo(fnName, idx);
@@ -2036,7 +2037,6 @@ export default function StaffAndFinanceViews(props: any) {
     });
   };
 
-  // Guardar alterações da função (incluindo mudança de nome com migração automática em todo o app)
   const handleSaveEditedFunction = (oldName: string) => {
     if (!isAdmin) return;
     const cleanNewName = editFunctionDraft.newName.trim();
@@ -2073,7 +2073,6 @@ export default function StaffAndFinanceViews(props: any) {
         }
       });
 
-      // Atualiza também os adicionais que apontavam para o nome antigo
       const nextAdditionals = (Array.isArray(prev?.shiftAdditionals)
         ? prev.shiftAdditionals
         : []
@@ -2101,7 +2100,6 @@ export default function StaffAndFinanceViews(props: any) {
       };
     });
 
-    // Se houve mudança no nome da função, migra médicos, plantões e trocas
     if (isRenamed) {
       safeSetDoctors((prev: any[]) =>
         (Array.isArray(prev) ? prev : []).map((d: any) => ({
@@ -2368,12 +2366,19 @@ export default function StaffAndFinanceViews(props: any) {
   const handleAddAdditional = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newAdditionalForm.name.trim()) return;
+    const isWeekendFixed = newAdditionalForm.applicationTarget === 'weekend_fixed_quota';
+    const isThirteenth = newAdditionalForm.applicationTarget === 'thirteenth_1_12_fixed';
+    const isNightLeaderAdd = newAdditionalForm.applicationTarget === 'night_leader_shift';
+
     const created = {
       id: `add_${Date.now()}`,
       name: newAdditionalForm.name.trim(),
-      incidence: newAdditionalForm.incidence,
-      calcMode: newAdditionalForm.calcMode,
+      incidence: isThirteenth ? 'monthly' : newAdditionalForm.incidence,
+      calcMode: isThirteenth ? 'percent' : newAdditionalForm.calcMode,
       applicationTarget: newAdditionalForm.applicationTarget,
+      isWeekendFixedQuotaAdditional: isWeekendFixed,
+      isThirteenthInstallment: isThirteenth,
+      isNightLeaderAdditional: isNightLeaderAdd,
       targetFunctionNames:
         newAdditionalForm.applicationTarget === 'specific_function' ||
         newAdditionalForm.applicationTarget === 'specific_function_fixed'
@@ -2385,7 +2390,8 @@ export default function StaffAndFinanceViews(props: any) {
           ? newAdditionalForm.targetFunctionNames[0] || ''
           : '',
       value12h: Number(newAdditionalForm.value12h || 0),
-      percentValue: Number(newAdditionalForm.percentValue || 0)
+      weekendQuotaValue: isWeekendFixed ? Number(newAdditionalForm.value12h || 0) : undefined,
+      percentValue: isThirteenth ? 8.33 : Number(newAdditionalForm.percentValue || 0)
     };
     safeSetConfig((prev: any) => ({
       ...prev,
@@ -2407,9 +2413,19 @@ export default function StaffAndFinanceViews(props: any) {
     if (!isAdmin) return;
     safeSetConfig((prev: any) => ({
       ...prev,
-      shiftAdditionals: shiftAdditionalsList.map((item: any) =>
-        item.id === addId ? { ...item, [field]: value } : item
-      )
+      shiftAdditionals: shiftAdditionalsList.map((item: any) => {
+        if (item.id !== addId) return item;
+        const nextItem = { ...item, [field]: value };
+        if (field === 'applicationTarget') {
+          nextItem.isWeekendFixedQuotaAdditional = value === 'weekend_fixed_quota';
+          nextItem.isThirteenthInstallment = value === 'thirteenth_1_12_fixed';
+          nextItem.isNightLeaderAdditional = value === 'night_leader_shift';
+        }
+        if (field === 'value12h' && nextItem.applicationTarget === 'weekend_fixed_quota') {
+          nextItem.weekendQuotaValue = Number(value || 0);
+        }
+        return nextItem;
+      })
     }));
   };
 
@@ -3466,7 +3482,7 @@ export default function StaffAndFinanceViews(props: any) {
             Catálogo de Adicionais & Bonificações (Acumuláveis por Competência + Múltiplas Funções de Incidência)
           </h3>
           <p className="text-slate-500 mt-0.5">
-            O médico pode acumular múltiplas competências do mesmo adicional (ex: 2x Liderança, 3x Fim de Semana). Se o adicional incidir sobre funções específicas, marque abaixo uma ou várias funções!
+            Inclui regras automáticas para <strong>Adicional de Fim de Semana (Fixos — Cotas de 12h/24h/36h)</strong>, <strong>13º Fracionado (1/12 Base Fixa)</strong>, <strong>Chefia / Líder Noturno</strong> e liberdade para criar novos adicionais no futuro.
           </p>
         </div>
 
@@ -3480,7 +3496,13 @@ export default function StaffAndFinanceViews(props: any) {
                 : [allFunctionNames[0] || 'Plantonista'];
 
             const targetLabel =
-              add.applicationTarget === 'fixed_base_only'
+              add.applicationTarget === 'weekend_fixed_quota'
+                ? 'Cota Fim de Semana (Apenas Fixos: 12h/24h/36h)'
+                : add.applicationTarget === 'thirteenth_1_12_fixed'
+                ? '13º Fracionado (Exato 1/12 da Base Fixa)'
+                : add.applicationTarget === 'night_leader_shift'
+                ? 'Líder de Plantão Noturno (Chefia)'
+                : add.applicationTarget === 'fixed_base_only'
                 ? 'Apenas Base Fixa Contratual (s/ Extras)'
                 : add.applicationTarget === 'specific_function_fixed'
                 ? `Apenas Base Fixa: ${targetFns.join(', ')}`
@@ -3504,10 +3526,12 @@ export default function StaffAndFinanceViews(props: any) {
                       <span className="px-2 py-0.5 rounded bg-blue-100 text-blue-900 font-bold text-[10px]">
                         {add.incidence === 'monthly'
                           ? 'Bonificação Mensal'
-                          : 'Por Plantão (Acumulável 1x, 2x...)'}
+                          : 'Por Plantão / Cota (Acumulável)'}
                       </span>
                       <span className="px-2 py-0.5 rounded bg-amber-100 text-amber-950 font-black text-[10px]">
-                        {add.calcMode === 'percent'
+                        {add.applicationTarget === 'thirteenth_1_12_fixed'
+                          ? '1/12 da Base Fixa'
+                          : add.calcMode === 'percent'
                           ? `Percentual: ${add.percentValue || 0}%`
                           : `Fixo: R$ ${Number(add.value12h || 0).toLocaleString('pt-BR')}`}
                       </span>
@@ -3591,6 +3615,15 @@ export default function StaffAndFinanceViews(props: any) {
                           }
                           className="w-full border rounded-lg px-2 py-1 bg-white font-bold"
                         >
+                          <option value="weekend_fixed_quota">
+                            Cota Fim de Semana (Fixos: 12h/24h/36h)
+                          </option>
+                          <option value="thirteenth_1_12_fixed">
+                            13º Fracionado (1/12 da Base Fixa)
+                          </option>
+                          <option value="night_leader_shift">
+                            Líder de Plantão Noturno (Chefia)
+                          </option>
                           <option value="fixed_base_only">
                             Apenas Base Fixa Contratual (s/ Extras)
                           </option>
@@ -3610,7 +3643,7 @@ export default function StaffAndFinanceViews(props: any) {
                       </div>
                     </div>
 
-                   {(add.applicationTarget === 'specific_function' ||
+                    {(add.applicationTarget === 'specific_function' ||
                       add.applicationTarget === 'specific_function_fixed') && (
                       <div className="p-2.5 rounded-xl bg-white border border-indigo-200 space-y-1.5">
                         <span className="block text-[10px] font-extrabold text-indigo-900 uppercase">
@@ -3689,7 +3722,7 @@ export default function StaffAndFinanceViews(props: any) {
                   }
                   className="w-full border rounded-xl px-3 py-2 bg-white font-bold"
                 >
-                  <option value="shift">Por Plantão (Acumulável)</option>
+                  <option value="shift">Por Plantão / Cota (Acumulável)</option>
                   <option value="monthly">Na Folha Mensal</option>
                 </select>
               </div>
@@ -3748,16 +3781,20 @@ export default function StaffAndFinanceViews(props: any) {
                   onChange={e =>
                     setNewAdditionalForm({
                       ...newAdditionalForm,
-                      applicationTarget: e.target.value as
-                        | 'final_payroll'
-                        | 'fixed_base_only'
-                        | 'specific_function'
-                        | 'specific_function_fixed'
-                        | 'shift_base'
+                      applicationTarget: e.target.value as any
                     })
                   }
                   className="w-full border rounded-xl px-3 py-2 bg-white font-extrabold text-indigo-950"
                 >
+                  <option value="weekend_fixed_quota">
+                    Cota Fim de Semana (Apenas Fixos: até 12h=1, 12-24h=2, 24-36h=3)
+                  </option>
+                  <option value="thirteenth_1_12_fixed">
+                    13º Fracionado (Exato 1/12 da Base Fixa Mensal)
+                  </option>
+                  <option value="night_leader_shift">
+                    Líder de Plantão Noturno (Chefia)
+                  </option>
                   <option value="fixed_base_only">
                     Apenas sobre a Base Fixa Contratual (Ignora Extras por CH)
                   </option>

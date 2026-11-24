@@ -252,6 +252,142 @@ export function restoreTitularDoctorToShiftHelper(
 }
 
 // ============================================================================
+// MOTOR COMPARTILHADO DE APLICAÇÃO AUTOMÁTICA DE FÉRIAS / LICENÇAS NA ESCALA
+// ============================================================================
+function matchSubstitutionEntryToShift(sub: any, shift: any): boolean {
+  const info = String(sub?.dateInfo || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+  if (!info) return true;
+
+  const sDate = String(shift?.date || '');
+  const parts = sDate.split('-');
+  if (parts.length === 3) {
+    const ddmm = `${parts[2]}/${parts[1]}`;
+    const ddmmyyyy = `${parts[2]}/${parts[1]}/${parts[0]}`;
+    if (info.includes(ddmmyyyy) || info.includes(ddmm)) return true;
+  }
+
+  const dObj = new Date(`${sDate}T12:00:00`);
+  if (!isNaN(dObj.getTime())) {
+    const dayIdx = dObj.getDay();
+    const weekdayTokens: Record<number, string[]> = {
+      0: ['domingo', 'dom'],
+      1: ['segunda', 'seg'],
+      2: ['terca', 'ter'],
+      3: ['quarta', 'qua'],
+      4: ['quinta', 'qui'],
+      5: ['sexta', 'sex'],
+      6: ['sabado', 'sab']
+    };
+    const tokens = weekdayTokens[dayIdx] || [];
+    const mentionsAnyWeekday = Object.values(weekdayTokens)
+      .flat()
+      .some(tok => new RegExp(`\\b${tok}`, 'i').test(info));
+    if (mentionsAnyWeekday) {
+      return tokens.some(tok => new RegExp(`\\b${tok}`, 'i').test(info));
+    }
+  }
+
+  // Se menciona datas específicas no formato dd/mm e nenhuma delas bateu com sDate, não aplica neste dia
+  const hasExplicitDates = /\b\d{1,2}\/\d{1,2}\b/.test(info);
+  if (hasExplicitDates) return false;
+
+  return true;
+}
+
+export function applyVacationSubstitutionsOnShiftsHelper(
+  vacItem: any,
+  safeShifts: any[],
+  safeSetShifts: (updater: any) => void
+) {
+  if (!vacItem || typeof safeSetShifts !== 'function') return { affectedCount: 0, snapshots: [] };
+  const titularId = Number(vacItem.doctorId || 0);
+  const startDate = String(vacItem.startDate || '');
+  const endDate = String(vacItem.endDate || '');
+  const subsList: any[] = Array.isArray(vacItem.substitutions) ? vacItem.substitutions : [];
+
+  if (!titularId || !startDate || !endDate || subsList.length === 0) {
+    return { affectedCount: 0, snapshots: [] };
+  }
+
+  const snapshots: any[] = [];
+  let affectedCount = 0;
+
+  safeSetShifts((prev: any[]) =>
+    (Array.isArray(prev) ? prev : []).map((s: any) => {
+      const sDate = String(s?.date || '');
+      const belongsToTitular =
+        Number(s?.doctorId) === titularId ||
+        (String(s?.vacationId || '') === String(vacItem.id) &&
+          Number(s?.vacationOriginalDoctorId) === titularId);
+
+      if (!belongsToTitular || sDate < startDate || sDate > endDate) {
+        return s;
+      }
+
+      const matchedSub =
+        subsList.find(sub => sub?.substituteDoctorId && matchSubstitutionEntryToShift(sub, s)) ||
+        (subsList.length === 1 && subsList[0]?.substituteDoctorId ? subsList[0] : null);
+
+      if (!matchedSub || !matchedSub.substituteDoctorId) {
+        return s;
+      }
+
+      snapshots.push({ ...s });
+      affectedCount += 1;
+
+      const subBillingMode =
+        matchedSub.substituteBillingMode ||
+        vacItem.substituteBillingMode ||
+        'payroll_extra';
+
+      return {
+        ...s,
+        doctorId: Number(matchedSub.substituteDoctorId),
+        isManualUnregisteredDoctor: false,
+        manualDoctorName: '',
+        isFromSwap: true,
+        isFromVacation: true,
+        vacationId: vacItem.id,
+        vacationOriginalDoctorId: titularId,
+        substituteBillingMode: subBillingMode
+      };
+    })
+  );
+
+  return { affectedCount, snapshots };
+}
+
+export function revertVacationSubstitutionsOnShiftsHelper(
+  vacItem: any,
+  safeSetShifts: (updater: any) => void
+) {
+  if (!vacItem || typeof safeSetShifts !== 'function') return;
+  const vacId = String(vacItem.id);
+  const titularId = Number(vacItem.doctorId || 0);
+
+  safeSetShifts((prev: any[]) =>
+    (Array.isArray(prev) ? prev : []).map((s: any) => {
+      if (String(s?.vacationId || '') === vacId && titularId) {
+        return {
+          ...s,
+          doctorId: titularId,
+          isFromSwap: false,
+          isFromVacation: false,
+          vacationId: undefined,
+          vacationOriginalDoctorId: undefined,
+          substituteBillingMode: undefined
+        };
+      }
+      return s;
+    })
+  );
+}
+
+// ============================================================================
 // COMPONENTE DA ABA DE TROCAS, PERMUTAS, PASSAGENS & DISPENSAS GERENCIAIS
 // ============================================================================
 export default function SwapsManagementView(props: any) {
@@ -1230,7 +1366,7 @@ export default function SwapsManagementView(props: any) {
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
             <label className="block font-bold text-slate-700 mb-1">
-              1. Selecione o Plantão Titular na Escala *
+1. Selecione o Plantão Titular na Escala *
             </label>
             <select
               value={swapForm.shiftId || myEligibleShifts[0]?.id || ''}
@@ -1279,7 +1415,7 @@ export default function SwapsManagementView(props: any) {
 
           <div>
             <label className="block font-bold text-slate-700 mb-1">
-              2. Tipo de Movimentação *
+2. Tipo de Movimentação *
             </label>
             <select
               value={swapForm.type}
@@ -1318,7 +1454,7 @@ export default function SwapsManagementView(props: any) {
           {swapForm.type !== 'Liberação / Dispensa Gerencial' ? (
             <div>
               <label className="block font-bold text-slate-700 mb-1">
-                3. Médico Substituto / Permutante (A-Z) *
+3. Médico Substituto / Permutante (A-Z) *
               </label>
               <select
                 disabled={swapForm.isPartialByTimeRange}
@@ -1347,7 +1483,7 @@ export default function SwapsManagementView(props: any) {
           ) : (
             <div>
               <label className="block font-extrabold text-purple-900 mb-1">
-                3. Como fica a vaga na Escala após a Dispensa?
+3. Como fica a vaga na Escala após a Dispensa?
               </label>
               <select
                 value={swapForm.dispenseMode}
@@ -1911,7 +2047,7 @@ export default function SwapsManagementView(props: any) {
                       </div>
                       {isManagerRequestedReview && (
                         <span className="block text-[10px] mt-1 font-extrabold uppercase">
-                          * O plantonista titular ({reqDoc?.name}) retornou ao plantão na escala até que o ajuste abaixo seja concluído e reenviado.
+- O plantonista titular ({reqDoc?.name}) retornou ao plantão na escala até que o ajuste abaixo seja concluído e reenviado.
                         </span>
                       )}
                     </div>

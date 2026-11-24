@@ -13,6 +13,7 @@ import {
   formatBrDate,
   formatCurrencyBR
 } from '@/lib/finance/payroll-engine';
+import { exportRepasseMonthlyXlsx } from '@/lib/reports/repasse-xlsx-exporter';
 
 export default function PayrollAndAuditView(props: any) {
   const {
@@ -164,7 +165,7 @@ export default function PayrollAndAuditView(props: any) {
     };
   }, [periodMode, customStartDate, customEndDate, competenceWindow, competenceMonth]);
 
- const allActivePayrollRows = useMemo(() => {
+  const allActivePayrollRows = useMemo(() => {
     return computeDetailedPayrollRows({
       config,
       doctors: safeDoctors,
@@ -237,9 +238,26 @@ export default function PayrollAndAuditView(props: any) {
     0
   );
 
+  // Exportação oficial em .XLSX no padrão Segmentação (31 blocos de datas condicionais até $I$4)
+  const handleExportRepasseXlsx = () => {
+    if (typeof window === 'undefined') return;
+    exportRepasseMonthlyXlsx({
+      config,
+      payrollRows: detailedPayrollRows,
+      competenceMonth,
+      effectiveWindow: {
+        startStr: effectiveWindow.startStr,
+        endStr: effectiveWindow.endStr
+      },
+      holidayDates: Array.isArray(config?.holidayDates) ? config.holidayDates : []
+    });
+    safeRecordAction(
+      `Planilha de repasse (.XLSX) exportada para a competência ${competenceMonth} (${effectiveWindow.label})`
+    );
+  };
+
   // ============================================================================
   // GERADOR PDF: DOCUMENTO ANALÍTICO DE AUDITORIA DE CARGA HORÁRIA + EXTRATO BANCÁRIO DETALHADO
-  // (COM SUBCOMPONENTES DE FUNÇÕES, ADICIONAIS, DESCONTOS, AJUSTES + TROCAS E COMENTÁRIOS)
   // ============================================================================
   const handleDownloadAnalyticalWorkloadAuditPDF = (singleDoctorRow?: any) => {
     if (typeof window === 'undefined') return;
@@ -249,7 +267,6 @@ export default function PayrollAndAuditView(props: any) {
       .map(row => {
         const d = row.doctor || {};
 
-        // 1. Tabela de Carga Horária Acumulada por Função
         const fnSummaryRowsHtml = allFunctionNames
           .map(fn => {
             const aud = row.auditByFunction[fn];
@@ -275,7 +292,6 @@ export default function PayrollAndAuditView(props: any) {
           .filter(Boolean)
           .join('');
 
-        // 2. Discriminação Cronológica de Plantões Cumpridos
         const dailyRowsHtml =
           row.dailyWorkedScheduleList.length === 0
             ? `<tr><td colspan="5" style="padding:6px;text-align:center;color:#64748b;">Nenhum plantão registado na escala neste período.</td></tr>`
@@ -309,7 +325,6 @@ export default function PayrollAndAuditView(props: any) {
                 )
                 .join('');
 
-        // 3. Trocas, Permutas e Passagens Realizadas no Período (Titular + Substituto) com Comentários do Gestor
         const titularSwapsRowsHtml = row.evaluatedPassagensDiscounts.map(
           (pd: any) => `
             <tr>
@@ -375,7 +390,6 @@ export default function PayrollAndAuditView(props: any) {
 
         const allSwapsAuditHtml = [...titularSwapsRowsHtml, ...subSwapsRowsHtml].join('');
 
-        // 4. Extrato Bancário Detalhado (Composição PJ com Subcomponentes)
         const functionsSubItemsHtml =
           row.evaluatedRoleEntries.length === 0
             ? `<div style="padding:2px 0 2px 14px;color:#64748b;">• Nenhuma função remunerada lançada no período (R$ 0,00)</div>`
@@ -474,7 +488,7 @@ export default function PayrollAndAuditView(props: any) {
 
             <div style="margin-bottom:8px;">
               <strong style="font-size:9.5px;text-transform:uppercase;color:#0f172a;display:block;margin-bottom:3px;">
-                1. Resumo de Carga Horária Acumulada por Função e Modalidade:
+1. Resumo de Carga Horária Acumulada por Função e Modalidade:
               </strong>
               <table style="width:100%;border-collapse:collapse;font-size:9.5px;">
                 <thead>
@@ -497,7 +511,7 @@ export default function PayrollAndAuditView(props: any) {
 
             <div style="margin-bottom:8px;">
               <strong style="font-size:9.5px;text-transform:uppercase;color:#0f172a;display:block;margin-bottom:3px;">
-                2. Discriminação Cronológica por Dia e Horário Exercidos:
+2. Discriminação Cronológica por Dia e Horário Exercidos:
               </strong>
               <table style="width:100%;border-collapse:collapse;font-size:9.5px;">
                 <thead>
@@ -517,7 +531,7 @@ export default function PayrollAndAuditView(props: any) {
 
             <div style="margin-bottom:8px;">
               <strong style="font-size:9.5px;text-transform:uppercase;color:#0f172a;display:block;margin-bottom:3px;">
-                3. Histórico de Trocas, Permutas e Passagens no Período (Com Comentários de Auditoria do Gestor):
+3. Histórico de Trocas, Permutas e Passagens no Período (Com Comentários de Auditoria do Gestor):
               </strong>
               <table style="width:100%;border-collapse:collapse;font-size:9.5px;">
                 <thead>
@@ -537,13 +551,11 @@ export default function PayrollAndAuditView(props: any) {
               </table>
             </div>
 
-            <!-- 4. EXTRATO BANCÁRIO DETALHADO (COMPOSIÇÃO PJ COM SUBCOMPONENTES) -->
             <div style="margin-top:8px;padding:10px;background:#f8fafc;border:1.5px solid #0f172a;border-radius:6px;font-size:9.5px;">
               <div style="font-weight:900;font-size:10.5px;text-transform:uppercase;color:#0f172a;border-bottom:1.5px solid #cbd5e1;padding-bottom:4px;margin-bottom:6px;">
-                4. Extrato Detalhado de Composição Financeira PJ (Componentes e Subcomponentes)
+4. Extrato Detalhado de Composição Financeira PJ (Componentes e Subcomponentes)
               </div>
 
-              <!-- A. Funções -->
               <div style="margin-bottom:6px;">
                 <div style="display:flex;justify-content:space-between;background:#e2e8f0;padding:3px 6px;border-radius:4px;font-weight:bold;">
                   <span>A) SUBTOTAL FUNÇÕES EXERCIDAS</span>
@@ -552,7 +564,6 @@ export default function PayrollAndAuditView(props: any) {
                 ${functionsSubItemsHtml}
               </div>
 
-              <!-- B. Adicionais -->
               <div style="margin-bottom:6px;">
                 <div style="display:flex;justify-content:space-between;background:#fef3c7;padding:3px 6px;border-radius:4px;font-weight:bold;color:#92400e;">
                   <span>B) SUBTOTAL ADICIONAIS E BONIFICAÇÕES</span>
@@ -561,7 +572,6 @@ export default function PayrollAndAuditView(props: any) {
                 ${additionalsSubItemsHtml}
               </div>
 
-              <!-- C. Descontos de Passagens -->
               <div style="margin-bottom:6px;">
                 <div style="display:flex;justify-content:space-between;background:#ffe4e6;padding:3px 6px;border-radius:4px;font-weight:bold;color:#9f1239;">
                   <span>C) DESCONTOS DE PASSAGENS / TROCAS DE PLANTÃO</span>
@@ -570,7 +580,6 @@ export default function PayrollAndAuditView(props: any) {
                 ${discountsSubItemsHtml}
               </div>
 
-              <!-- D. Ajustes Manuais -->
               <div style="margin-bottom:8px;">
                 <div style="display:flex;justify-content:space-between;background:#f1f5f9;padding:3px 6px;border-radius:4px;font-weight:bold;">
                   <span>D) AJUSTES MANUAIS (+/-)</span>
@@ -579,7 +588,6 @@ export default function PayrollAndAuditView(props: any) {
                 ${adjustmentsSubItemsHtml}
               </div>
 
-              <!-- VALOR LÍQUIDO FINAL -->
               <div style="display:flex;justify-content:space-between;align-items:center;background:#064e3b;color:#ffffff;padding:6px 10px;border-radius:5px;font-size:11px;font-weight:900;">
                 <span>VALOR LÍQUIDO FINAL PJ A RECEBER (${effectiveWindow.label})</span>
                 <span style="font-size:12.5px;">R$ ${formatCurrencyBR(row.netTotal)}</span>
@@ -598,7 +606,7 @@ export default function PayrollAndAuditView(props: any) {
         <title>Auditoria de Carga Horaria e Extrato PJ - ${effectiveWindow.label}</title>
         <style>
           @page { size: A4 portrait; margin: 10mm; }
-          * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; box-sizing: border-box; }
+* { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; box-sizing: border-box; }
           body { font-family: Arial, Helvetica, sans-serif; color: #0f172a; margin: 0; padding: 0; font-size: 10px; }
         </style>
       </head>
@@ -722,7 +730,6 @@ export default function PayrollAndAuditView(props: any) {
     }));
   };
 
-  // Atualiza tanto a configuração na Folha PJ quanto o registo original da troca em `swaps`
   const handleUpdateSwapDiscountOnRow = (
     docRow: any,
     swapId: any,
@@ -754,7 +761,6 @@ export default function PayrollAndAuditView(props: any) {
       };
     });
 
-    // Sincroniza também com o array global `swaps` para manter Trocas & Passagens e Folha PJ 100% espelhados
     safeSetSwaps((prev: any[]) =>
       (Array.isArray(prev) ? prev : []).map((sw: any) => {
         if (String(sw?.id) !== String(swapId)) return sw;
@@ -868,7 +874,6 @@ export default function PayrollAndAuditView(props: any) {
     );
   };
 
-  // Exportação CSV/Excel Completa
   const handleExportPayrollAndAuditCSV = () => {
     if (typeof window === 'undefined') return;
 
@@ -1047,13 +1052,22 @@ export default function PayrollAndAuditView(props: any) {
             </button>
 
             {isAdmin && (
-              <button
-                type="button"
-                onClick={handleExportPayrollAndAuditCSV}
-                className="bg-emerald-600 hover:bg-emerald-700 text-white px-4 py-2.5 rounded-xl font-bold flex items-center gap-1.5 shadow-sm"
-              >
-                <FileSpreadsheet size={15} /> Exportar Planilha Completa (CSV/Excel)
-              </button>
+              <>
+                <button
+                  type="button"
+                  onClick={handleExportRepasseXlsx}
+                  className="bg-emerald-700 hover:bg-emerald-800 text-white px-4 py-2.5 rounded-xl font-bold flex items-center gap-1.5 shadow-sm"
+                >
+                  <FileSpreadsheet size={15} /> Exportar Planilha Repasse (.XLSX)
+                </button>
+                <button
+                  type="button"
+                  onClick={handleExportPayrollAndAuditCSV}
+                  className="bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2.5 rounded-xl font-bold flex items-center gap-1.5 shadow-sm"
+                >
+                  <FileSpreadsheet size={15} /> CSV
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -1190,7 +1204,7 @@ export default function PayrollAndAuditView(props: any) {
                 <option value="Todas">Todas as Especialidades</option>
                 {registeredSpecialtiesList.map((sp, idx) => (
                   <option key={sp?.id || sp?.name || idx} value={sp?.name || String(sp)}>
-                   {sp?.name || String(sp)}
+                    {sp?.name || String(sp)}
                   </option>
                 ))}
               </select>
@@ -1230,7 +1244,7 @@ export default function PayrollAndAuditView(props: any) {
         <div className="text-xs text-emerald-200 flex items-center gap-2 max-w-md">
           <ShieldCheck size={20} className="shrink-0" />
           <span>
-            Auditoria integrada: subcomponentes detalhados no estilo extrato bancário, reavaliação de descontos de trocas e comentários da gestão sincronizados no PDF.
+            Auditoria integrada: subcomponentes detalhados no estilo extrato bancário, reavaliação de descontos de trocas e comentários da gestão sincronizados no PDF e XLSX.
           </span>
         </div>
       </div>
@@ -1339,7 +1353,6 @@ export default function PayrollAndAuditView(props: any) {
                     row.isManualEntry ? 'bg-amber-50/30' : ''
                   }`}
                 >
-                  {/* COLUNA 1: MÉDICO + RESUMO DAS 3 CARGAS HORÁRIAS */}
                   <td className="py-4 px-4 space-y-1.5 min-w-[220px]">
                     <div className="flex items-center gap-1.5 flex-wrap">
                       <strong className="text-slate-900 text-sm font-black">
@@ -1401,7 +1414,6 @@ export default function PayrollAndAuditView(props: any) {
                     )}
                   </td>
 
-                  {/* COLUNA 2: FUNÇÕES EXERCIDAS */}
                   <td className="py-4 px-3 min-w-[360px] space-y-2">
                     {row.evaluatedRoleEntries.length === 0 ? (
                       <div className="text-slate-400 italic text-[11px]">
@@ -1660,7 +1672,6 @@ export default function PayrollAndAuditView(props: any) {
                     </div>
                   </td>
 
-                  {/* COLUNA 3: ADICIONAIS ACUMULÁVEIS */}
                   <td className="py-4 px-3 min-w-[260px] space-y-2">
                     <div className="space-y-1.5">
                       {row.evaluatedAdditionals.map((add: any) => {
@@ -1726,7 +1737,6 @@ export default function PayrollAndAuditView(props: any) {
                     </div>
                   </td>
 
-                  {/* COLUNA 4: AUDITORIA DE TROCAS / PASSAGENS & AJUSTES MANUAIS */}
                   <td className="py-4 px-3 min-w-[330px] space-y-3">
                     <div className="space-y-1.5">
                       <span className="block text-[10px] font-extrabold uppercase text-slate-600 flex items-center gap-1">
@@ -1965,7 +1975,6 @@ export default function PayrollAndAuditView(props: any) {
                     </div>
                   </td>
 
-                  {/* COLUNA 5: EXTRATO BANCÁRIO DETALHADO (COMPONENTES, SUBCOMPONENTES E LÍQUIDO FINAL) */}
                   <td className="py-4 px-4 min-w-[300px]">
                     <div className="p-3 rounded-2xl bg-slate-50 border border-slate-300 space-y-2 text-[10px]">
                       <div className="flex items-center justify-between border-b border-slate-200 pb-1.5">
@@ -1978,7 +1987,6 @@ export default function PayrollAndAuditView(props: any) {
                         </span>
                       </div>
 
-                      {/* 1. Funções e Subcomponentes */}
                       <div className="space-y-0.5">
                         <div className="flex justify-between font-black text-slate-900">
                           <span>1. Funções:</span>
@@ -1997,7 +2005,6 @@ export default function PayrollAndAuditView(props: any) {
                         ))}
                       </div>
 
-                      {/* 2. Adicionais e Subcomponentes */}
                       <div className="space-y-0.5 pt-1 border-t border-slate-200/70">
                         <div className="flex justify-between font-black text-amber-900">
                           <span>2. Adicionais:</span>
@@ -2022,7 +2029,6 @@ export default function PayrollAndAuditView(props: any) {
                         )}
                       </div>
 
-                      {/* 3. Descontos de Passagens e Subcomponentes */}
                       <div className="space-y-0.5 pt-1 border-t border-slate-200/70">
                         <div className="flex justify-between font-black text-rose-800">
                           <span>3. Descontos Trocas:</span>
@@ -2045,7 +2051,6 @@ export default function PayrollAndAuditView(props: any) {
                           ))}
                       </div>
 
-                      {/* 4. Ajustes Manuais e Subcomponentes */}
                       {row.manualAdjustmentsList.length > 0 && (
                         <div className="space-y-0.5 pt-1 border-t border-slate-200/70">
                           <div className="flex justify-between font-black text-slate-800">
@@ -2070,7 +2075,6 @@ export default function PayrollAndAuditView(props: any) {
                         </div>
                       )}
 
-                      {/* Líquido Final */}
                       <div className="pt-2 border-t-2 border-slate-900 flex items-center justify-between">
                         <span className="font-black uppercase text-slate-900 text-[10px]">
                           Líquido Final PJ:
@@ -2236,7 +2240,6 @@ export default function PayrollAndAuditView(props: any) {
                     })}
                   </tr>
 
-                  {/* LINHA EXPANSÍVEL: DISCRIMINAÇÃO POR DIA/HORÁRIO + AUDITORIA DE TROCAS E PASSAGENS */}
                   {isExpanded && (
                     <tr className="bg-slate-50/90">
                       <td
@@ -2304,7 +2307,6 @@ export default function PayrollAndAuditView(props: any) {
                             </div>
                           )}
 
-                          {/* SECÇÃO DE TROCAS E PASSAGENS NA AUDITORIA DE CARGA HORÁRIA */}
                           <div className="pt-3 border-t border-slate-200 space-y-2">
                             <strong className="text-[11px] font-black text-emerald-950 uppercase flex items-center gap-1.5">
                               <ArrowLeftRight size={13} className="text-emerald-600" />
